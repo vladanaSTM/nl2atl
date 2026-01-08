@@ -113,7 +113,7 @@ def load_model(
     # Load model
     model_kwargs = {
         "trust_remote_code": True,
-        "dtype": torch.float32,
+        "dtype": torch.bfloat16,
     }
     
     # Only use device_map if not using quantization
@@ -125,26 +125,20 @@ def load_model(
         model_kwargs["quantization_config"] = bnb_config
         model_kwargs["device_map"] = "auto"
     
-    # Try to load with SDPA first, fall back to eager if not supported
-    model_kwargs["attn_implementation"] = "sdpa"
-    
-    try:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_config.name,
-            **model_kwargs
-        )
-    except (ValueError, NotImplementedError) as e:
-        # Some models don't support SDPA, fall back to eager
-        error_msg = str(e).lower()
-        if "attention" in error_msg or "sdpa" in error_msg or "scaled_dot_product" in error_msg:
-            print(f"SDPA not supported, falling back to eager attention implementation")
-            model_kwargs["attn_implementation"] = "eager"
+    # Prefer FlashAttention2, fall back to SDPA, then eager
+    for attn_impl in ["flash_attention_2", "sdpa", "eager"]:
+        model_kwargs["attn_implementation"] = attn_impl
+        try:
             model = AutoModelForCausalLM.from_pretrained(
                 model_config.name,
                 **model_kwargs
             )
-        else:
-            raise
+            break
+        except (ValueError, NotImplementedError) as e:
+            error_msg = str(e).lower()
+            if attn_impl == "eager" or "attention" not in error_msg:
+                raise
+            print(f"{attn_impl} not supported, trying next attention implementation")
     
     # Load adapter if specified
     if load_adapter:
