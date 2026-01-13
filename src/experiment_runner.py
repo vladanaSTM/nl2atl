@@ -5,7 +5,7 @@ import os
 import json
 import wandb
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List
 from pathlib import Path
 
 from transformers import TrainingArguments
@@ -108,10 +108,12 @@ class ExperimentRunner:
             "eval/logical_f1": metrics['logical_f1'],
             "eval/syntax_valid": metrics['syntax_valid'],
             "eval/overall_score": metrics['overall_score'],
-        })
-        
-        # Log detailed predictions as a table
-        predictions_table = wandb.Table(columns=[
+        }, commit=False)
+
+        # Log detailed predictions as a table (Table constructor with columns + data per wandb guidance)
+        wandb.run.summary["num_predictions"] = len(self.evaluator.results)
+
+        table_columns = [
             "Example_ID",
             "Input",
             "Expected_Output",
@@ -122,23 +124,38 @@ class ExperimentRunner:
             "Logical_F1",
             "Syntax_Valid",
             "Overall_Score"
-        ])
-        
-        for idx, result in enumerate(self.evaluator.results):
-            predictions_table.add_data(
-                idx + 1,
-                result['input'],
-                result['expected'],
-                result['generated'],
-                result['scores']['exact_match'],
-                result['scores']['agent_f1'],
-                result['scores']['temporal_f1'],
-                result['scores']['logical_f1'],
-                result['scores']['syntax_valid'],
-                result['scores']['overall_score']
-            )
-        
-        wandb.log({"predictions_table": predictions_table})
+        ]
+
+        table_rows = []
+        if not self.evaluator.results:
+            print("No predictions generated; logging empty predictions table to wandb.")
+        else:
+            for idx, result in enumerate(self.evaluator.results):
+                table_rows.append([
+                    idx + 1,
+                    result['input'],
+                    result['expected'],
+                    result['generated'],
+                    result['scores']['exact_match'],
+                    result['scores']['agent_f1'],
+                    result['scores']['temporal_f1'],
+                    result['scores']['logical_f1'],
+                    result['scores']['syntax_valid'],
+                    result['scores']['overall_score']
+                ])
+
+        predictions_table = wandb.Table(columns=table_columns, data=table_rows)
+        wandb.log({"predictions_table": predictions_table}, commit=True)
+
+        predictions_artifact = wandb.Artifact(
+            name=f"{run_name}-predictions",
+            type="predictions"
+        )
+        predictions_artifact.add(predictions_table, "predictions")
+        wandb.log_artifact(predictions_artifact)
+
+        wandb.run.summary["predictions_table_rows"] = len(table_rows)
+        wandb.run.summary["predictions_table_artifact"] = predictions_artifact.name
         
         # Print summary
         print(f"\nResults for {run_name}:")
@@ -183,6 +200,16 @@ class ExperimentRunner:
         
         # Load model for training
         model, tokenizer = load_model(model_config, for_training=True)
+
+        # Optional short-run probe to test throughput/memory without full epochs
+        max_steps_env = os.getenv("TRAIN_MAX_STEPS")
+        max_steps = -1  # HF/TRL expect -1 for full training, not None
+        if max_steps_env:
+            try:
+                parsed = int(max_steps_env)
+                max_steps = parsed if parsed > 0 else -1
+            except ValueError:
+                print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={max_steps_env}")
         
         # Prepare dataset
         train_dataset = Dataset.from_dict({
@@ -231,6 +258,9 @@ class ExperimentRunner:
             ddp_find_unused_parameters=False,
             gradient_checkpointing=True,
             gradient_checkpointing_kwargs={"use_reentrant": False},
+            max_steps=max_steps,
+            dataloader_num_workers=4,
+            group_by_length=True,
         )
         
         # Trainer

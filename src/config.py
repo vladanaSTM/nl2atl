@@ -4,7 +4,6 @@ Configuration management for experiments.
 import yaml
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-from pathlib import Path
 
 
 def load_yaml(path: str) -> dict:

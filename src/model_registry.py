@@ -53,15 +53,16 @@ def load_model(
     
     print(f"Loading model: {model_config.name}")
     
-    # Quantization config
-    bnb_config = None
-    if model_config.load_in_4bit:
-        bnb_config = BitsAndBytesConfig(
+    def build_bnb_config() -> BitsAndBytesConfig:
+        return BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
         )
+
+    use_4bit = model_config.load_in_4bit
+    bnb_config = build_bnb_config() if use_4bit else None
     
     # Load tokenizer
     try:
@@ -110,35 +111,54 @@ def load_model(
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
     
-    # Load model
-    model_kwargs = {
-        "trust_remote_code": True,
-        "dtype": torch.bfloat16,
-    }
-    
-    # Only use device_map if not using quantization
-    # Quantized models handle device placement internally
-    if not bnb_config:
-        model_kwargs["device_map"] = "auto"
-    
-    if bnb_config:
-        model_kwargs["quantization_config"] = bnb_config
-        model_kwargs["device_map"] = "auto"
-    
-    # Prefer FlashAttention2, fall back to SDPA, then eager
-    for attn_impl in ["flash_attention_2", "sdpa", "eager"]:
-        model_kwargs["attn_implementation"] = attn_impl
-        try:
-            model = AutoModelForCausalLM.from_pretrained(
-                model_config.name,
-                **model_kwargs
-            )
-            break
-        except (ValueError, NotImplementedError) as e:
-            error_msg = str(e).lower()
-            if attn_impl == "eager" or "attention" not in error_msg:
+    load_attempted_4bit = use_4bit
+    last_error = None
+    while True:
+        model_kwargs = {
+            "trust_remote_code": True,
+            "dtype": torch.bfloat16,
+            "device_map": "auto",
+        }
+
+        if use_4bit:
+            model_kwargs["quantization_config"] = bnb_config
+
+        # Avoid flash attention per user request: prefer SDPA, then eager
+        attn_impls = ["sdpa", "eager"]
+
+        for attn_impl in attn_impls:
+            model_kwargs["attn_implementation"] = attn_impl
+            try:
+                model = AutoModelForCausalLM.from_pretrained(
+                    model_config.name,
+                    **model_kwargs
+                )
+                last_error = None
+                break
+            except (ValueError, NotImplementedError, ImportError, RuntimeError) as e:
+                last_error = e
+                error_msg = str(e).lower()
+                # If the failure is OOM and we have not tried 4-bit yet, retry with 4-bit
+                if "out of memory" in error_msg and not load_attempted_4bit:
+                    print("OOM loading model in full precision; retrying with 4-bit quantization.")
+                    use_4bit = True
+                    bnb_config = build_bnb_config()
+                    load_attempted_4bit = True
+                    clear_gpu_memory()
+                    break
+                # If attention implementation unsupported, try next option
+                if attn_impl != attn_impls[-1] and "attention" in error_msg:
+                    print(f"{attn_impl} not supported ({e}); trying next attention implementation")
+                    continue
                 raise
-            print(f"{attn_impl} not supported, trying next attention implementation")
+        else:
+            # No break occurred; if we exited due to OOM retry we loop again
+            if load_attempted_4bit and last_error:
+                raise last_error
+            continue
+        # Break outer while when model successfully loaded
+        if last_error is None:
+            break
     
     # Load adapter if specified
     if load_adapter:
@@ -175,6 +195,10 @@ def generate(
 ) -> str:
     """Generate output from model."""
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+    # Newer Phi-3 builds sometimes return DynamicCache without seen_tokens; disable cache to avoid it
+    model_type = getattr(getattr(model, "config", None), "model_type", "")
+    use_cache = False if model_type == "phi3" else True
     
     with torch.no_grad():
         outputs = model.generate(
@@ -184,6 +208,7 @@ def generate(
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            use_cache=use_cache,
         )
     
     response = tokenizer.decode(outputs[0], skip_special_tokens=False)

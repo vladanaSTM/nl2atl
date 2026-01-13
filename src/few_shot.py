@@ -2,7 +2,7 @@
 Few-shot prompt management.
 """
 import random
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # Few-shot examples (carefully curated, diverse patterns)
 FEW_SHOT_EXAMPLES = [
@@ -79,23 +79,42 @@ ATL Syntax Rules:
 """
 
 
-def get_system_prompt(few_shot: bool = False, num_examples: int = 5, seed: int = 42) -> str:
-    """Get system prompt, optionally with few-shot examples."""
+def get_system_prompt(
+    few_shot: bool = False,
+    num_examples: int = 5,
+    seed: int = 42,
+    exclude_inputs: Optional[List[str]] = None,
+) -> str:
+    """Get system prompt, optionally with few-shot examples filtered from exclusions."""
     prompt = SYSTEM_PROMPT_BASE
     
     if few_shot:
-        examples = get_few_shot_examples(n=num_examples, seed=seed)
+        examples = get_few_shot_examples(
+            n=num_examples,
+            seed=seed,
+            exclude_inputs=exclude_inputs,
+        )
         prompt += "\n" + format_few_shot_prompt(examples)
     
     return prompt
 
 
-def format_prompt(input_text: str, output_text: str = None, few_shot: bool = False, 
-                  num_examples: int = 5, model_type: str = "qwen") -> str:
+def format_prompt(
+    input_text: str,
+    output_text: str = None,
+    few_shot: bool = False,
+    num_examples: int = 5,
+    model_type: str = "qwen",
+    exclude_inputs: Optional[List[str]] = None,
+) -> str:
     """
     Format input for different model types.
     """
-    system_prompt = get_system_prompt(few_shot=few_shot, num_examples=num_examples)
+    system_prompt = get_system_prompt(
+        few_shot=few_shot,
+        num_examples=num_examples,
+        exclude_inputs=exclude_inputs,
+    )
     
     if model_type in ["qwen", "mistral"]:
         # ChatML format

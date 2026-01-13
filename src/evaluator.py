@@ -4,9 +4,8 @@ Evaluation metrics and framework.
 import re
 import numpy as np
 from typing import Dict, List, Any
-from collections import defaultdict
 
-from .model_registry import generate, get_model_type
+from .model_registry import generate
 from .few_shot import format_prompt
 
 
@@ -136,6 +135,8 @@ class ATLEvaluator:
         if verbose:
             print(f"\nEvaluating {len(test_data)} examples...")
             print(f"Few-shot: {few_shot}, Model type: {model_type}")
+
+        excluded_inputs = [item['input'] for item in test_data] if few_shot else None
         
         for i, item in enumerate(test_data):
             # Format prompt
@@ -143,7 +144,8 @@ class ATLEvaluator:
                 input_text=item['input'],
                 few_shot=few_shot,
                 num_examples=num_few_shot,
-                model_type=model_type
+                model_type=model_type,
+                exclude_inputs=excluded_inputs,
             )
             
             # Generate
