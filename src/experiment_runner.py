@@ -101,6 +101,10 @@ class ExperimentRunner:
 
         # Train if needed
         if condition.finetuned:
+            if model_config.provider.lower() == "elysium":
+                raise ValueError(
+                    "Fine-tuning is not supported for Elysium/Azure-hosted models; set finetuned=False."
+                )
             adapter_path = self._train_model(model_config, model_type, run_name)
 
         cache_key = (model_config.name, adapter_path or "base")
@@ -218,16 +222,6 @@ class ExperimentRunner:
         with open(result_path, "w") as f:
             json.dump(result, f, indent=2, default=str)
 
-        # Also save raw responses for easier inspection
-        raw_path = Path(self.config.output_dir) / "raw_responses" / f"{run_name}.txt"
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(raw_path, "w") as f:
-            for idx, item in enumerate(self.evaluator.results, 1):
-                f.write(f"Example {idx}\n")
-                f.write(f"Input: {item['input']}\n")
-                f.write("Raw response:\n")
-                f.write(item.get("raw_response", "<none>") + "\n\n")
-
         # Clean up if not caching this model
         if not (self.reuse_models and not condition.finetuned):
             del model, tokenizer
@@ -241,6 +235,9 @@ class ExperimentRunner:
         self, model_config: ModelConfig, model_type: str, run_name: str
     ) -> str:
         """Train a model and return the adapter path."""
+
+        if model_config.provider.lower() == "elysium":
+            raise ValueError("Training is disabled for Elysium/Azure models.")
 
         print(f"\nTraining {model_config.short_name}...")
 
@@ -376,6 +373,12 @@ class ExperimentRunner:
 
                 try:
                     resolved_key = self._resolve_model_key(model_key)
+                    model_cfg = self.config.models[resolved_key]
+                    if model_cfg.provider.lower() == "elysium" and condition.finetuned:
+                        print(
+                            f"Skipping {condition.name} for {model_cfg.short_name}: fine-tuning not supported for Elysium/Azure models."
+                        )
+                        continue
                     self.run_single_experiment(resolved_key, condition)
                 except Exception as e:
                     print(f"ERROR: {e}")
@@ -385,9 +388,6 @@ class ExperimentRunner:
         # Release any cached models
         self._release_model_cache()
 
-        # Save all results
-        self._save_summary()
-
     def _release_model_cache(self):
         """Free any cached models to release GPU/CPU memory."""
         if not self.model_cache:
@@ -396,30 +396,3 @@ class ExperimentRunner:
             del model, tokenizer
         self.model_cache.clear()
         clear_gpu_memory()
-
-    def _save_summary(self):
-        """Save summary of all experiments."""
-        summary_path = Path(self.config.output_dir) / "results" / "summary.json"
-
-        summary = {
-            "timestamp": datetime.now().isoformat(),
-            "num_experiments": len(self.all_results),
-            "results": [],
-        }
-
-        for result in self.all_results:
-            summary["results"].append(
-                {
-                    "run_name": result["run_name"],
-                    "model": result["model"],
-                    "finetuned": result["finetuned"],
-                    "few_shot": result["few_shot"],
-                    "exact_match": result["metrics"]["exact_match"],
-                    "overall_score": result["metrics"]["overall_score"],
-                }
-            )
-
-        with open(summary_path, "w") as f:
-            json.dump(summary, f, indent=2)
-
-        print(f"\nSummary saved to: {summary_path}")

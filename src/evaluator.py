@@ -21,6 +21,7 @@ class ATLEvaluator:
 
     def clean_output(self, response: str, model_type: str) -> str:
         """Extract generated formula from model response."""
+
         def has_temporal(text: str) -> bool:
             return any(
                 re.search(rf"(?<![a-zA-Z_]){op}(?![a-zA-Z_])", text)
@@ -63,7 +64,8 @@ class ATLEvaluator:
             response = re.split(r"</think>", response, flags=re.IGNORECASE)[-1]
         else:
             response = re.sub(
-                r"<think>.*?</think>", "",
+                r"<think>.*?</think>",
+                "",
                 response,
                 flags=re.DOTALL | re.IGNORECASE,
             )
@@ -238,7 +240,6 @@ class ATLEvaluator:
                 "input": item["input"],
                 "expected": item["output"],
                 "generated": generated,
-                "raw_response": response,
                 "scores": scores,
             }
             self.results.append(result)
