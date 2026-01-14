@@ -3,13 +3,132 @@ Model loading and management.
 """
 
 import os
-import torch
 import gc
+import json
+import time
+import requests
+import torch
 from typing import Tuple, Optional
+from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from urllib3.exceptions import InsecureRequestWarning
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 from .config import ModelConfig
+
+# Ensure environment variables from .env are loaded for Elysium/Azure access.
+load_dotenv()
+
+# Silence noisy warnings when verify_ssl is intentionally disabled.
+requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+
+class ElysiumClient:
+    """Simple client for the Elysium Azure OpenAI proxy."""
+
+    provider = "elysium"
+
+    def __init__(
+        self,
+        endpoint: str,
+        api_key: str,
+        model: str,
+        use_cache: bool = True,
+        api_version: Optional[str] = None,
+        verify_ssl: Optional[bool] = None,
+    ):
+        self.endpoint = endpoint.rstrip("/")
+        self.api_key = api_key
+        self.model = model
+        self.use_cache = use_cache
+        self.api_version = api_version
+        self.verify_ssl = verify_ssl if verify_ssl is not None else False
+
+        # Session with retries to survive transient disconnects from proxy.
+        retry = Retry(
+            total=3,
+            backoff_factor=1.5,
+            status_forcelist=[502, 503, 504],
+            allowed_methods=["POST"],
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.session = requests.Session()
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
+    def _build_headers(self) -> dict:
+        headers = {
+            # Elysium expects Azure-style api-key header, not Authorization bearer.
+            "api-key": self.api_key,
+            "Content-Type": "application/json",
+            "Connection": "close",  # avoid keep-alive issues with the proxy
+        }
+        return headers
+
+    def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
+        # If caller provides the fully qualified chat/completions URL, use it.
+        if self.endpoint.endswith("/chat/completions"):
+            url = self.endpoint
+        else:
+            # Default Azure-compatible path; append api-version as query
+            url = f"{self.endpoint}/openai/deployments/{self.model}/chat/completions"
+            api_ver = self.api_version or "2024-08-01-preview"
+            url = f"{url}?api-version={api_ver}"
+
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_new_tokens,
+            "temperature": 0,
+            "stream": False,
+        }
+
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = self.session.post(
+                    url,
+                    headers=self._build_headers(),
+                    json=payload,
+                    timeout=(10, 120),
+                    verify=self.verify_ssl,
+                )
+                if response.status_code >= 400:
+                    # Include body for easier troubleshooting
+                    body = response.text[:500]
+                    raise RuntimeError(f"HTTP {response.status_code}: {body}")
+                response.raise_for_status()
+                break
+            except Exception as e:
+                last_error = e
+                if attempt == 2:
+                    raise RuntimeError(
+                        f"Elysium request failed after retries: {e}"
+                    ) from e
+                time.sleep(1.5 * (attempt + 1))
+
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            return response.text
+
+        # OpenAI-style response parsing
+        choices = data.get("choices")
+        if choices:
+            first = choices[0]
+            # Prefer chat-style content
+            message = first.get("message") or {}
+            content = message.get("content")
+            if content:
+                return content
+            # Fallback to completion-style text
+            if "text" in first and first["text"]:
+                return first["text"]
+
+        # If schema differs, return best-effort string
+        return json.dumps(data)
 
 
 def clear_gpu_memory():
@@ -25,6 +144,8 @@ def clear_gpu_memory():
 def get_model_type(model_name: str) -> str:
     """Determine model type from name for prompt formatting."""
     model_lower = model_name.lower()
+    if "azure" in model_lower or model_lower.startswith("gpt-"):
+        return "generic"
     if "qwen" in model_lower:
         return "qwen"
     elif "phi" in model_lower:
@@ -65,6 +186,41 @@ def load_model(
         for_training: Whether to prepare for training (apply LoRA)
         load_adapter: Path to load fine-tuned adapter from
     """
+    # Route to Elysium/Azure backend when requested; no GPU allocations.
+    if model_config.provider.lower() == "elysium":
+        api_key = os.getenv("ELYSIUM_API_KEY")
+        endpoint = os.getenv("ELYSIUM_INFER_ENDPOINT")
+        api_version = os.getenv("ELYSIUM_API_VERSION")
+        use_cache = os.getenv("ELYSIUM_USE_CACHE", "true").lower() == "true"
+        verify_ssl_env = os.getenv("ELYSIUM_VERIFY_SSL", "false").lower()
+        verify_ssl = verify_ssl_env in ["1", "true", "yes"]
+        api_model = (
+            model_config.api_model
+            or os.getenv("ELYSIUM_INFER_MODEL")
+            or model_config.name
+        )
+
+        if not api_key:
+            raise ValueError(
+                "ELYSIUM_API_KEY is not set; populate .env or environment variables."
+            )
+        if not endpoint:
+            raise ValueError(
+                "ELYSIUM_INFER_ENDPOINT is not set; populate .env or environment variables."
+            )
+
+        client = ElysiumClient(
+            endpoint=endpoint,
+            api_key=api_key,
+            model=api_model,
+            use_cache=use_cache,
+            api_version=api_version,
+            verify_ssl=verify_ssl,
+        )
+
+        # Tokenizer is not required for remote inference.
+        return client, None
+
     clear_gpu_memory()
 
     print(f"Loading model: {model_config.name}")
@@ -138,15 +294,18 @@ def load_model(
             "device_map": "auto",
         }
 
-        if torch.cuda.is_available() and is_large_model(model_config.name, cutoff_billion=60):
+        if torch.cuda.is_available() and is_large_model(
+            model_config.name, cutoff_billion=60
+        ):
             # Avoid CPU/disk offload heuristics for 60B+ models; keep them on cuda:0.
-            max_gpu_mem_gb = int(torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2)
+            max_gpu_mem_gb = int(
+                torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
+            )
             model_kwargs["device_map"] = {"": "cuda:0"}
             model_kwargs["max_memory"] = {"cuda:0": f"{max_gpu_mem_gb}GiB"}
 
         if use_4bit:
             model_kwargs["quantization_config"] = bnb_config
-
 
         # Avoid flash attention per user request: prefer SDPA, then eager
         attn_impls = ["sdpa", "eager"]
@@ -217,6 +376,10 @@ def load_model(
 
 def generate(model, tokenizer, prompt: str, max_new_tokens: int = 256) -> str:
     """Generate output from model."""
+    # Remote Elysium/Azure models expose a simple generate() API.
+    if hasattr(model, "provider") and getattr(model, "provider") == "elysium":
+        return model.generate(prompt, max_new_tokens=max_new_tokens)
+
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
     # Newer Phi-3 builds sometimes return DynamicCache without seen_tokens; disable cache to avoid it

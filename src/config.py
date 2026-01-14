@@ -16,6 +16,8 @@ def load_yaml(path: str) -> dict:
 class ModelConfig:
     name: str
     short_name: str
+    provider: str = "huggingface"  # huggingface or elysium
+    api_model: Optional[str] = None  # Optional override for remote model id
     max_seq_length: int = 512
     load_in_4bit: bool = True
     lora_r: int = 64
