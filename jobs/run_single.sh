@@ -19,6 +19,13 @@ echo "Running: $MODEL $EXTRA_ARGS"
 source ~/miniconda/etc/profile.d/conda.sh
 conda activate atl_project
 
+# Use shared storage for model and wandb caches to avoid home quota issues
+export HF_HOME=/home/infres/vperlic/hf
+export HF_HUB_CACHE=/home/infres/vperlic/hf/hub
+export TRANSFORMERS_CACHE=/home/infres/vperlic/hf/transformers
+export WANDB_DIR=/home/infres/vperlic/wandb
+mkdir -p "$HF_HUB_CACHE" "$TRANSFORMERS_CACHE" "$WANDB_DIR"
+
 cd ~/projects/atl-comparison
 
 python run_single_experiment.py --model $MODEL $EXTRA_ARGS
