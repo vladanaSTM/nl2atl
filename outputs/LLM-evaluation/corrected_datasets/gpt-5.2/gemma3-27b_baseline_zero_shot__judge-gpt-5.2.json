@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<robot>> G (running -> ((!stop) U running))",
+    "correct": "no",
+    "reasoning": "The gold says the cobot can enforce (cycle_running U stop_requested): it keeps running until a stop is requested, and the stop must eventually occur. The prediction changes both structure and meaning: it adds an outer G and an implication from running, and its until formula ((!stop) U running) requires running to occur (again) while stop is false, not that running holds continuously until stop_requested. It also does not ensure stop is ever requested. Coalition name also differs (<<robot>> vs <<Cobot>>).",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<robotic_arm>> (fragile -> G ! exceeds_max_force)",
+    "correct": "no",
+    "reasoning": "Gold requires a global condition: at all times, if the object is fragile then from that point on it is always not over the force limit (<<Arm>>G (fragile_object -> G !force_over_limit)). The prediction lacks the outer G, so it only states a one-time implication at the initial state rather than enforcing it at every time point. Coalition naming is acceptable, but the missing temporal scope changes the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<S>> (soil_dry -> X irrigation_enabled)",
+    "correct": "no",
+    "reasoning": "Prediction changes the coalition (<<S>> vs <<AgriSystem>>) and omits the global G modality, so it states a one-time implication rather than an invariant guarantee. Also the irrigation predicate differs (irrigation_enabled vs irrigation_on) without clear aliasing.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<drone>> G (holding_altitude U receive_descend_command)",
+    "correct": "no",
+    "reasoning": "Gold requires the drone to hold altitude until the descend command occurs (U without an outer G). The prediction adds an outer G, strengthening the property to require this on all paths at all times, and also changes the proposition from 'descend_command' to 'receive_descend_command', which is not guaranteed to be the same.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<security_system>> G (monitoring -> (threat_removed U monitoring))",
+    "correct": "no",
+    "reasoning": "Gold states the security system can ensure monitoring holds continuously until threat_removed occurs (monitoring U threat_removed). Prediction instead is a global implication with an until in the opposite direction (threat_removed U monitoring) and adds an outer G, which changes the temporal meaning and does not enforce monitoring until removal.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<Agent>>F(delivery_completed)",
+    "correct": "no",
+    "reasoning": "Coalition/agent is wrong: gold attributes the ability to <<LogisticsSystem>> but prediction uses <<Agent>>. Predicate name differs too (delivery_done vs delivery_completed), and without an explicit alias it cannot be assumed equivalent.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<System>> (Congested -> X Retime)",
+    "correct": "no",
+    "reasoning": "Prediction changes the coalition name (<<CitySystem>> vs <<System>>) and omits the global G operator, so it no longer states the guarantee holds at all times. Predicate renamings alone could be acceptable, but these structural differences change the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<robot>> (safety_barrier_on -> G stopped)",
+    "correct": "no",
+    "reasoning": "Gold requires <<Cobot>>G(...) meaning the cobot can ensure the implication holds at all times. Prediction lacks the outer G and thus only enforces the implication at the initial state, weakening the property; also coalition name differs.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<S>> (intruder_detected -> X alarm_sent)",
+    "correct": "no",
+    "reasoning": "Gold requires the guarantee to hold globally (G): whenever an intruder is detected, then next step an alarm is sent. The prediction omits the G, so it only enforces the implication at the initial state, not at all times; also the coalition label differs (System vs S) without clear aliasing.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<robot>> (stop_requested -> X stopped_moving)",
+    "correct": "no",
+    "reasoning": "Gold requires the cobot can guarantee this implication holds globally (G) at all times. Prediction omits the G, so it only states a one-time implication. Also coalition name differs (<<Cobot>> vs <<robot>>), and predicate differs (stopped vs stopped_moving), which may change meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<robot>> (gripper_closed -> F lifted)",
+    "correct": "no",
+    "reasoning": "Prediction changes the formula structure: it omits the global G modality, so it no longer states the implication holds at all times. It also changes the coalition from <<Arm>> to <<robot>> and uses different atomic propositions (object_lifted vs lifted) without clear equivalence.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<Mars rover>> F reaches(sampling_site)",
+    "correct": "yes",
+    "reasoning": "Same coalition (Mars rover/Rover) and same eventuality operator F; predicate denotes reaching/being at the sampling site, matching the natural-language intent.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<S>> G (observation_window -> X(monitoring))",
+    "correct": "no",
+    "reasoning": "Gold states an until property: System can ensure monitoring holds continuously up to the point when window_closed occurs (and window_closed eventually occurs). Prediction instead is a global next-step rule (G(observation_window -> X monitoring)) and does not express monitoring-until-window_closed nor require window_closed to occur; also uses different propositions.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<machine>> G (safe U cancellation_requested)",
+    "correct": "no",
+    "reasoning": "Gold states <<Machine>>(safe U cancel) without an outer G, meaning the machine can ensure safety holds until cancellation is requested on the resulting path. Prediction adds a global operator G, requiring (safe U cancellation_requested) to hold at every state, which is strictly stronger and changes the temporal meaning. Also the cancel proposition name differs (cancel vs cancellation_requested) and is not clearly an alias.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<S>>F production_completed",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs: gold attributes the ability to <<IndustrySystem>> while prediction uses <<S>>. Even if the proposition name is an alias, the agent mismatch changes the ATL meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<system,teacher>> F certified",
+    "correct": "yes",
+    "reasoning": "Same coalition (system and teacher) and same temporal operator F expressing eventual certification; only capitalization differs.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<S> (machine_overheats -> X machine_shutdown)",
+    "correct": "no",
+    "reasoning": "Coalition/agent is wrong (<<S>> instead of <<IndustrySystem>>), and the prediction lacks the required global scope G; it states a one-time implication rather than holding always.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<robot,human>> (human_enters -> X robot_reduces_speed)",
+    "correct": "no",
+    "reasoning": "Coalition is wrong: the gold attributes the guarantee to the cobot alone, while the prediction uses a coalition {robot,human}. The prediction also omits the global G modality, so it does not state the implication holds at all times. Predicate names are acceptable aliases, but the coalition and missing G change the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<S>> F (shift_ends -> archive_logs)",
+    "correct": "no",
+    "reasoning": "Gold says the System can ensure that eventually logs_archived holds (unconditional eventuality). Prediction instead says eventually (shift_ends -> archive_logs), which is much weaker and can be satisfied even if shift never ends or logs are never archived (implication true when shift_ends is false). Also predicates/agent differ.",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<S> intruder -> F <S> detected",
+    "correct": "no",
+    "reasoning": "The prediction is not a well-formed ATL formula and does not match the gold semantics. It omits the required coalition modality <<System>> and the global operator G, and it changes the structure into something like 'intruder -> F ...' with an extra '<S>' before detected, which is not equivalent to <<System>>G(intruder_entered -> F intruder_detected).",
+    "judge_model": "gpt-5.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

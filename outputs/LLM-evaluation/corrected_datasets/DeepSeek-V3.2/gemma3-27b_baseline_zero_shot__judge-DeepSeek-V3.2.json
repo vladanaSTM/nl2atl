@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<robot>> G (running -> ((!stop) U running))",
+    "correct": "no",
+    "reasoning": "The prediction changes the meaning. The gold expresses that the robot can keep the cycle running until a stop is requested, after which the cycle may stop. The prediction uses G (globally) and a nested until that essentially says 'running is always true, and as long as stop is false, running continues', which is not equivalent to the original until structure. It also introduces an implication and a condition on 'running' that alters the temporal guarantee and the stopping condition.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<robotic_arm>> (fragile -> G ! exceeds_max_force)",
+    "correct": "yes",
+    "reasoning": "Same coalition (robotic arm), same temporal structure (G (antecedent -> G !consequent)), and the predicates are clear aliases: 'fragile_object' vs 'fragile', and 'force_over_limit' vs 'exceeds_max_force'. The meaning of guaranteeing that a fragile object leads to always not exceeding the force limit is preserved.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<S>> (soil_dry -> X irrigation_enabled)",
+    "correct": "no",
+    "reasoning": "The coalition is incorrectly specified as 'S' instead of 'AgriSystem', and the temporal operator 'G' (globally) is missing, which changes the meaning from a persistent guarantee to a one-time guarantee.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<drone>> G (holding_altitude U receive_descend_command)",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: the gold formula uses <<Drone>>(holding_altitude U descend_command), meaning the drone can keep holding altitude *until* a descend command occurs. The prediction wraps the U formula inside a G, i.e., <<drone>> G (holding_altitude U receive_descend_command), which would mean the drone can guarantee that *globally* (always) it holds altitude until a descend command, which is not equivalent. The outer G forces the until condition to hold at every moment, altering the intended meaning. Additionally, coalition name case differs (drone vs Drone), but the main error is the extra G operator.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<security_system>> G (monitoring -> (threat_removed U monitoring))",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the security system can guarantee monitoring continues until threat_removed holds, after which monitoring may stop. The prediction uses G (monitoring -> (threat_removed U monitoring)), which is semantically different: it says that whenever monitoring holds, threat_removed must hold until monitoring holds again, which is a cyclic dependency and does not capture the intended 'monitoring until threat_removed'. The temporal operator and structure are incorrect, and the meaning is not preserved.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<Agent>>F(delivery_completed)",
+    "correct": "no",
+    "reasoning": "Coalition changed from 'LogisticsSystem' to 'Agent', which alters the specified agent/coalition set. The predicate 'delivery_completed' is an acceptable synonym for 'delivery_done', but the agent mismatch violates the strict requirement that the coalition must match the expressed property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<System>> (Congested -> X Retime)",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition from 'CitySystem' to 'System', which is a different agent set. It also changes the temporal operator: the gold formula uses G (globally) to express that the guarantee holds at all times, while the prediction omits G entirely, changing the meaning from a persistent guarantee to a one-time guarantee. Additionally, the predicate names are altered, but that alone would not make it incorrect if the meaning were preserved; however, the missing G and changed coalition are critical semantic errors.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<robot>> (safety_barrier_on -> G stopped)",
+    "correct": "no",
+    "reasoning": "The coalition in the prediction is <<robot>>, while the gold coalition is <<Cobot>>. The input specifies 'collaborative robot', which is correctly mapped to 'Cobot' in the gold formula. Changing the coalition name to a generic 'robot' alters the intended agent set, making the prediction semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<S>> (intruder_detected -> X alarm_sent)",
+    "correct": "yes",
+    "reasoning": "The coalition 'S' is a clear abbreviation for 'System' from the input, preserving the same agent set. The temporal structure (G (intruder_detected -> X alarm_sent)) is identical to the gold, and the meaning is unchanged.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<robot>> (stop_requested -> X stopped_moving)",
+    "correct": "no",
+    "reasoning": "The coalition in the prediction is <<robot>>, which is a different agent name than the gold's <<Cobot>>. The input specifies 'collaborative robot', which in the gold is abbreviated as 'Cobot'. Using a different coalition name changes the intended agent set, making the prediction semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<robot>> (gripper_closed -> F lifted)",
+    "correct": "no",
+    "reasoning": "Coalition changed from 'Arm' to 'robot', which is a different agent set. The predicate 'object_lifted' is shortened to 'lifted', which is acceptable as an alias, but the agent mismatch makes the formula semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<Mars rover>> F reaches(sampling_site)",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (Mars rover/Rover), same temporal operator F (sooner or later), and same polarity (will reach). The predicate 'reaches(sampling_site)' is a clear alias for 'at_sampling_site' from the sentence.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<S>> G (observation_window -> X(monitoring))",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the system can keep monitoring until the window is closed (U structure). The prediction uses G (globally) with an implication, which means that whenever the observation window holds, monitoring holds at the next step. This does not capture the 'until' semantics (monitoring continues only until window_closed becomes true, and does not require monitoring after). The coalition abbreviation 'S' is acceptable, but the temporal/logical structure is fundamentally different.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<machine>> G (safe U cancellation_requested)",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: gold uses <<Machine>>(safe U cancel) (safe until cancel), while prediction uses <<machine>> G (safe U cancellation_requested) (globally, safe until cancellation_requested). The G operator in the prediction forces the until formula to hold at every step, which is stronger than the original until property. Additionally, the coalition name case differs (machine vs Machine), but the main issue is the added G operator, which alters the meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<S>>F production_completed",
+    "correct": "yes",
+    "reasoning": "The coalition 'S' is a common placeholder for a generic system/agent, which matches the intent of 'The industrial system' from the input. The temporal operator F (eventually) correctly captures 'sooner or later'. The predicate 'production_completed' is a clear synonym for 'production_done'. No change in meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<system,teacher>> F certified",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (system and teacher together) and same temporal structure (F certified). The capitalization and spacing differences in the coalition names are superficial and do not change the semantic meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<S> (machine_overheats -> X machine_shutdown)",
+    "correct": "no",
+    "reasoning": "The coalition in the prediction is <<S>, which is not the same as <<IndustrySystem>> from the gold. The agent set is different, changing which coalition has the ability to guarantee the property. The predicates (machine_overheats vs overheating, machine_shutdown vs shutdown) are acceptable aliases, but the coalition mismatch makes the formula semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<robot,human>> (human_enters -> X robot_reduces_speed)",
+    "correct": "no",
+    "reasoning": "Coalition changed from a single agent ('Cobot') to a coalition of two agents ('robot,human'), which incorrectly implies the human is part of the coalition guaranteeing the property. Also, the temporal operator 'G' (globally) is missing, which is required to express that the guarantee holds at all times, not just once. Predicate names are acceptable paraphrases, but the structural deviations alter the meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<S>> F (shift_ends -> archive_logs)",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the system can guarantee that logs will be archived eventually (F logs_archived). The prediction changes the meaning by adding a condition: it guarantees that eventually, if the shift ends, then logs are archived (F (shift_ends -> archive_logs)). This is not equivalent; the original does not condition the archiving on the shift ending, it simply states archiving will happen eventually. The temporal structure and logical meaning are altered.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<S> intruder -> F <S> detected",
+    "correct": "no",
+    "reasoning": "The prediction is syntactically malformed and semantically incorrect. It uses '<S>' as a placeholder for the coalition, which does not match the gold coalition '<<System>>'. The predicates are also malformed ('intruder' and 'detected' instead of 'intruder_entered' and 'intruder_detected'), and the structure of the implication is missing. The gold formula correctly expresses 'always, if intruder enters then eventually detected' with a proper coalition, while the prediction is not a valid ATL formula.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "gemma3-27b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

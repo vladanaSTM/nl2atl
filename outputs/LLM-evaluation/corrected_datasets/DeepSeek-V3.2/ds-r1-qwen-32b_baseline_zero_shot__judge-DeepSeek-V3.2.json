@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<Robot>> (G (running_cycle U stop_requested))",
+    "correct": "no",
+    "reasoning": "The prediction incorrectly adds a G (globally) operator outside the until, changing the temporal meaning. The original gold formula means the robot can keep the cycle running until a stop is requested, at which point the cycle may stop. The prediction <<Robot>> (G (running_cycle U stop_requested)) means the robot can guarantee that globally (at all times) the until property holds, which is a stronger and semantically different property. Additionally, the coalition name differs slightly but is an acceptable alias; the main error is the extra G operator.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<RoboticArm>> G (FragileObject -> !X(maxForceExceeded))",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal operator: gold uses G !force_over_limit (globally never exceed), while prediction uses !X(maxForceExceeded) (not in the next step). This weakens the guarantee from 'never' to 'not in the next step', altering the expressed property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<AgriculturalSystem>> (soil_dry -> X irrigation_enabled)",
+    "correct": "no",
+    "reasoning": "The prediction is missing the temporal operator 'G' (globally) that is present in the gold formula. The gold formula expresses that the system can guarantee that at every step, if the soil is dry, then irrigation is enabled at the next step. The prediction only expresses this guarantee for the current state, not for all future states. The coalition alias and predicate rewording are acceptable, but the omission of 'G' changes the temporal meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<Drone>> G (hold_altitude U descend_command)",
+    "correct": "no",
+    "reasoning": "The gold formula uses <<Drone>>(holding_altitude U descend_command), which means the drone can keep holding altitude until descend_command becomes true. The prediction <<Drone>> G (hold_altitude U descend_command) incorrectly places G (globally) before the until, which means the drone can guarantee that at every step, the until property holds from that step onward. This changes the temporal meaning: the gold is about a single until path, while the prediction requires the until condition to be re-evaluated globally. Additionally, the predicate 'hold_altitude' vs 'holding_altitude' is a minor alias, but the structural change in temporal operators is semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<SecuritySystem>> G (monitoring U threat_removed)",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the security system can keep monitoring until threat_removed becomes true, after which monitoring may stop. The prediction adds a global operator G, which would require monitoring to hold forever, even after threat_removed, changing the meaning from 'until' to 'monitoring forever, with threat_removed eventually holding' (since G(p U q) implies p holds globally and q eventually holds, which is stronger and not equivalent to p U q).",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<logistics>> F completed",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (LogisticsSystem/logistics), same temporal operator F (sooner or later), and same predicate meaning (delivery_done/completed). The lowercase coalition name and predicate synonym are acceptable aliases from the sentence.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<SmartCity>> ( congested(i) -> X retime(i) )",
+    "correct": "yes",
+    "reasoning": "The coalition 'SmartCity' is a clear alias for 'CitySystem' from the input. The temporal structure G (congested -> X retime) matches the gold's G (junction_congested -> X lights_retimed). The predicates are semantically equivalent (congested(i) for junction_congested, retime(i) for lights_retimed), and the implication and next-step operator are correctly used. The parameter (i) is an acceptable formalization detail.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<Robot>> ( (SafetyBarrierOn) -> G(Stopped) )",
+    "correct": "no",
+    "reasoning": "The prediction is missing the outermost temporal operator 'G' (globally) that is present in the gold formula. The gold formula expresses that the robot can guarantee that globally, if the safety barrier is on, then it will always remain stopped. The prediction only expresses that the robot can guarantee the implication, but without the outer G, it does not enforce that this guarantee holds at all times, which changes the temporal meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<System>> ( detected -> X alarm )",
+    "correct": "no",
+    "reasoning": "The prediction omits the outer G operator, which is required to express 'if an intruder is detected, then at the next step it will send an alarm' as a guarantee that holds globally (always). Without G, the formula only guarantees the implication for the current state, not for all future states. Additionally, the predicate 'detected' is an abbreviation of 'intruder_detected', which is acceptable, but the missing G changes the temporal meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<CollaborativeRobot>> (request_stop -> X stop_moving)",
+    "correct": "no",
+    "reasoning": "The coalition is the same (Cobot vs CollaborativeRobot is an alias). However, the gold formula uses the temporal operator G globally, making the implication hold at all times. The prediction omits the G operator, changing the temporal meaning: it asserts only that the coalition can enforce the implication from the current state onward, but not necessarily at all future times. This alters the expressed property from a persistent guarantee to a one-time guarantee.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<RoboticArm>> (GripperClosed -> F ObjectLifted)",
+    "correct": "no",
+    "reasoning": "The prediction is missing the outermost temporal operator 'G' (globally) from the ATL formula. The gold formula <<Arm>>G (gripper_closed -> F object_lifted) means the coalition can guarantee that in all future states, if the gripper is closed, then eventually the object is lifted. The prediction <<RoboticArm>> (GripperClosed -> F ObjectLifted) is just a strategic ability to enforce a single implication property from the current state, not the guarantee that it holds globally. This changes the temporal meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<MarsRover>> F SamplingSite",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (Mars rover / Rover), same temporal operator F (sooner or later), and predicate 'SamplingSite' is a clear alias for 'at_sampling_site' from the sentence.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<System>> G (monitoring U observationWindowEnd)",
+    "correct": "no",
+    "reasoning": "The gold formula uses a plain until (U) to express that monitoring continues until the window closes, after which monitoring may stop. The prediction adds a global (G) operator, which would require monitoring to continue forever, even after the window closes, and also requires the until condition to hold at every moment. This changes the temporal meaning significantly.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<Machine>> (G (Safe U CancellationRequested))",
+    "correct": "no",
+    "reasoning": "The prediction incorrectly adds a global operator G, which changes the meaning. The gold formula expresses that the machine can keep the system safe until cancellation occurs, after which safety is no longer guaranteed. The prediction <<Machine>> (G (Safe U CancellationRequested)) means the machine can guarantee that globally (forever) the system is safe until cancellation, which is a stronger and different property. The temporal structure is altered, making the prediction semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<IndustrialSystem>> F ProductionCompleted",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (industrial system), same temporal operator F (sooner or later), and same predicate meaning (production will be completed). The minor naming variations (IndustrySystem vs IndustrialSystem, production_done vs ProductionCompleted) are clear aliases from the sentence.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<System,Teacher>> F Certified",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (system and teacher together), same temporal operator F (sooner or later), and same predicate meaning (certified vs Certified is a trivial case difference). No change in polarity or connective.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<System>> ( (MachineOverheats) -> X(Shutdown) )",
+    "correct": "yes",
+    "reasoning": "Coalition 'System' is a clear abbreviation of 'IndustrySystem' from the input, preserving the same agent intent. The temporal structure is identical: a global implication where the consequent is a next-step shutdown. The predicate names are logical paraphrases ('MachineOverheats' for 'overheating', 'Shutdown' for 'shutdown'). The implication rewrite and parentheses placement do not change the semantic meaning.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<collaborative_robot>> (human_enters_area -> X reduce_speed)",
+    "correct": "no",
+    "reasoning": "The prediction is missing the outermost G operator. The gold formula requires the guarantee to hold globally (for all future steps), while the prediction only asserts the implication for the current state. This changes the temporal meaning from 'always, if human enters, then next step speed low' to just 'now, if human enters, then next step speed low'.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<SurveillanceSystem>> F (shiftEnds U archiveLogs)",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the system can guarantee that eventually logs are archived (F logs_archived). The prediction uses an until structure (shiftEnds U archiveLogs), which means that shiftEnds must hold until archiveLogs becomes true, and archiveLogs must eventually hold. This is not equivalent to F logs_archived because it adds the extra requirement that shiftEnds must hold continuously until the archive happens. The natural language input says 'after the shift ends', which suggests a temporal ordering (shift ends first, then eventually logs are archived), but the gold formula does not encode that ordering, while the prediction incorrectly forces shiftEnds to hold until the archive. The temporal structure is different, and the prediction imposes an additional constraint not present in the gold.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<SurveillanceSystem>> ( (IntruderEntersArea) U (DetectsIntruder) )",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure from a conditional guarantee (G (p -> F q)) to an until formula ((p U q)), which expresses that p must hold continuously until q holds, not that p triggers an eventual q. This alters the meaning: the original says whenever an intruder enters, detection eventually follows; the prediction says intruder entering must persist until detection, which is not the same. Also, coalition name variation is acceptable, but the operator change is semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "ds-r1-qwen-32b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<Robot>>G (running_cycle U stop_requested)",
+    "correct": "no",
+    "reasoning": "Prediction changes both the coalition and the temporal structure: it uses <<Robot>> instead of <<Cobot>>, and adds an outer G, requiring (running_cycle U stop_requested) to hold globally at all times rather than just from the current state until stop_requested.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<Robot>>G (fragile ->!exceeds_max_force)",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs (<<Arm>> vs <<Robot>>). Also the gold requires a nested global condition: always, if fragile then from then on always not over the limit (G (fragile -> G !force_over_limit)), whereas the prediction lacks the inner G and thus only enforces not exceeding at the current state when fragile.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<Agricultural_system>>G (soil_dry -> X enable_irrigation)",
+    "correct": "yes",
+    "reasoning": "Same coalition (agricultural system) and same temporal structure G(soil_dry -> X ...). The predicate enable_irrigation matches the intended meaning of irrigation_on (enabling irrigation at the next step).",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<Drone>>G (holding_altitude U descend_command)",
+    "correct": "no",
+    "reasoning": "Gold requires a single until condition: holding_altitude holds up to the point a descend_command occurs. Prediction adds an outer G, requiring that on all future states the until condition holds again, which is strictly stronger and changes the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<Security>>G (monitoring W threat_removed)",
+    "correct": "no",
+    "reasoning": "Coalition name differs (SecuritySystem vs Security), and the temporal structure changes: gold is (monitoring U threat_removed) requiring threat_removed to eventually occur, while prediction uses weak-until (W) under a global G, which allows threat_removed to never happen and imposes the condition at all times, not just from now until removal.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<Logistics>>F delivery_completed",
+    "correct": "no",
+    "reasoning": "Coalition/agent name differs: gold attributes the ability to <<LogisticsSystem>> while prediction uses <<Logistics>>. Predicate renaming (delivery_done vs delivery_completed) is plausibly an alias, and F matches, but the agent mismatch makes it semantically incorrect.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<Smart_city>>G (congested -> X retimed_traffic_lights)",
+    "correct": "yes",
+    "reasoning": "Same coalition (smart city system) and same temporal structure: globally, if congestion holds then in the next step lights are retimed. Predicate names are clear paraphrases (junction_congested/congested, lights_retimed/retimed_traffic_lights).",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<Robot>>G (safety_barrier -> G stopped)",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs (<<Cobot>> vs <<Robot>>). Also the predicate name changes from safety_barrier_on to safety_barrier, which is not a clear alias; it could change meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<System>>G (intruder_detected -> X send_alarm)",
+    "correct": "yes",
+    "reasoning": "Same coalition (System) and same temporal structure G( p -> X q ). The predicate 'send_alarm' is a clear alias of 'alarm_sent' from the sentence.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<Robot>>G (stop_requested -> X! moving)",
+    "correct": "no",
+    "reasoning": "Coalition name differs (Cobot vs Robot) and the consequent differs: gold requires X stopped, while prediction requires X !moving. Not moving is not necessarily equivalent to being in the stopped state, so the meaning is not preserved.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<Robot>>G (gripper_closed -> F object_lifted)",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs: gold attributes the guarantee to <<Arm>>, while prediction uses <<Robot>>. Even with identical temporal structure and predicates, changing the responsible agent changes the ATL meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<Mars_rover>>F reach_sampling_site",
+    "correct": "yes",
+    "reasoning": "Same coalition (Mars rover/Rover) and same temporal operator F expressing eventuality; predicate names are clear paraphrases of reaching/being at the sampling site.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<System>>G (monitoring W observation_window)",
+    "correct": "no",
+    "reasoning": "Gold requires <<System>>(monitoring U window_closed): monitoring must hold until window_closed occurs, and window_closed must eventually occur. Prediction uses weak-until W and also changes the terminating condition to observation_window; W does not require the end condition to ever happen, and the proposition differs from window_closed. Adding outer G further changes the temporal scope.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<Machine>>G (safe & (safe U cancel_request))",
+    "correct": "no",
+    "reasoning": "Gold requires <<Machine>>(safe U cancel): safety must hold up to the point when cancel holds. Prediction uses G(safe & (safe U cancel_request)), which (i) strengthens the property by requiring safe globally (G safe) even after cancellation, and (ii) changes the cancellation proposition from cancel to cancel_request. Either change makes it not semantically equivalent.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<System>>F production_completed",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs: gold attributes the ability to <<IndustrySystem>> while prediction uses <<System>>. Even if the predicate names are close, changing the acting coalition is a semantic change in ATL.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<System,Teacher>>F certified",
+    "correct": "yes",
+    "reasoning": "Coalition matches the intended agents (system + teacher) despite naming variation (EduSystem vs System), and the temporal operator F correctly captures 'sooner or later'; predicate 'certified' matches.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<System>>G (overheated -> X shutdown)",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs (<<IndustrySystem>> vs <<System>>), and the condition predicate changes from \"overheating\" to \"overheated\" which is not guaranteed to be the same proposition; thus the expressed property may differ.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<Robot>>G (human_in_area -> X reduce_speed)",
+    "correct": "no",
+    "reasoning": "Coalition/agent differs (<<Cobot>> vs <<Robot>>), and the consequent predicate differs (speed_low vs reduce_speed). These changes can alter the expressed ability and property, so the prediction is not semantically equivalent to the gold.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<Surveillance>>F (shift_ends -> F archive_logs)",
+    "correct": "no",
+    "reasoning": "Coalition differs (System vs Surveillance). Also the temporal/causal structure changes: gold requires that logs_archived eventually happens unconditionally, while the prediction only requires that if shift_ends occurs then eventually archive_logs occurs; it allows never archiving if shift_ends never happens and nests an extra F.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<Surveillance>>G (intruder_entered -> F intruder_detected)",
+    "correct": "no",
+    "reasoning": "The coalition/agent differs: gold attributes the guarantee to <<System>> while the prediction uses <<Surveillance>>. Even though the temporal structure and predicates match, changing the responsible agent changes the ATL meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "llama_baseline_few_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]
