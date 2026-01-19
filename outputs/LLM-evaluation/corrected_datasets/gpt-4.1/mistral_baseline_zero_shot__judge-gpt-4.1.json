@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<\"robot\">> F G (running_cycle -> F stop_requested) U running_cycle\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes both the coalition (quotes and different name), and more importantly, the temporal structure: the gold formula uses 'U' (until) to express that cycle_running holds up to stop_requested, while the prediction nests F and G and uses 'U' in a different way, altering the property. The meaning is not preserved.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "!<<RoboticArm>>.F(fragile) -> !G(exceed_max_force)\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction is not semantically correct: (1) The coalition syntax is invalid ('!<<RoboticArm>>.F(fragile)'), (2) the temporal structure is changed—'F(fragile)' means 'eventually fragile', not 'if fragile now', (3) the implication is reversed and negated, (4) the main property is negated and the temporal operator is missing or misplaced. The gold formula expresses 'if fragile now, then always never exceed force', while the prediction does not.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<Agricultural System>> G (soil_dry -> F X irrigation_enabled)\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes both the coalition name (space in 'Agricultural System' vs 'AgriSystem') and, more importantly, the temporal structure: 'F X irrigation_enabled' means that eventually, at some future point, irrigation will be enabled in the next step, rather than guaranteeing it at the next step after soil is dry. This weakens the guarantee and does not match the original property.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<Drone>> G (Altitude -> F (received_descend_command) U Altitude)\n</s>",
+    "correct": "no",
+    "reasoning": "Prediction uses G (Altitude -> F (received_descend_command) U Altitude), which does not match the intended 'holding_altitude U descend_command' meaning. The gold formula expresses that the drone can keep holding altitude up to (but not after) the first descend command. The prediction instead says that always, if Altitude holds, then eventually a descend command will be received before Altitude stops, which is not the same temporal structure and does not guarantee holding until descend. Temporal operator and structure are incorrect.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<SecuritySystem>> G (Threat_Removed U Monitoring)\n</s>",
+    "correct": "no",
+    "reasoning": "Temporal structure is incorrect: the prediction uses G (Threat_Removed U Monitoring), which means 'always, threat_removed holds until monitoring', reversing the roles of the predicates. The gold formula correctly expresses that monitoring continues until threat_removed. Also, the outer G is unnecessary and changes the meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "F[<<LogisticsSystem>>]{delivery_completed}\n</s>",
+    "correct": "no",
+    "reasoning": "Prediction uses non-standard ATL syntax (F[<<LogisticsSystem>>]{...}) and changes the formula structure. In ATL, the coalition should be in the strategic modality (e.g., <<LogisticsSystem>>F ...), not as a parameter to F. Also, the predicate name is changed from 'delivery_done' to 'delivery_completed', which may not be a clear alias. The meaning and syntax are not preserved.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<\"smart city system\", \"intersection\">> G (congested -> F X retimed_traffic_lights)\n</s>",
+    "correct": "no",
+    "reasoning": "Coalition is incorrect (should be <<CitySystem>>, not a set including 'intersection'). The temporal structure is also wrong: 'F X' allows retiming at some future next step, not immediately after congestion as required by 'X'. Predicate names are also less precise, but the main errors are coalition and temporal operator.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<\"robot\">> G [safety_barrier -> <<\"robot\">> G stopped]\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes the structure: it nests a strategic modality inside the implication's consequent, and uses a non-standard syntax. The gold formula expresses that whenever the safety barrier is on, the robot can guarantee it will always remain stopped. The prediction instead says: for all paths, if safety_barrier holds, then the robot can guarantee always stopped, which is not the same (the strategic ability is misplaced and the implication is not at the top level). Also, the agent name is quoted differently, but that's minor compared to the semantic error.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "!((Intruder -> F(Alarm)) U X(Intruder))\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction is not semantically correct: it is not in ATL syntax (no coalition/agent modality), and the temporal structure is wrong. The gold formula uses <<System>>G (intruder_detected -> X alarm_sent), meaning the system can always guarantee that if an intruder is detected, then in the next step an alarm is sent. The prediction instead negates an until formula involving F(Alarm) and X(Intruder), which does not capture the same implication or guarantee, and lacks the agent modality. Thus, the meaning is not preserved.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<robot>> G (request_stop -> X stop)\n</s>",
+    "correct": "yes",
+    "reasoning": "Agent 'robot' is a clear alias for 'collaborative robot' in context. Predicate names are paraphrased but preserve meaning ('request_stop' for 'stop_requested', 'stop' for 'stopped'). Temporal and logical structure (G, implication, X) is preserved.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<RoboticArm>> G (ClosedGripper -> F Lifted)\n</s>",
+    "correct": "yes",
+    "reasoning": "Coalition 'RoboticArm' is a clear alias for 'Arm'; predicate names are paraphrased but preserve meaning. Temporal and logical structure (G, implication, F) is identical.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<\"MarsRover\"->F(X(F(atSamplingSite))>>\n</s>",
+    "correct": "no",
+    "reasoning": "Prediction is not valid ATL syntax: the coalition is malformed (should be <<Rover>>), and the temporal structure is incorrect (F(X(F(...))) is unnecessarily nested and not standard ATL). Also, the agent name is quoted and not matching the gold. The gold formula correctly expresses that the rover can guarantee eventually reaching the sampling site.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<System>> G (X(monitor) U F(end_of_observation_window))\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: it adds a global G and next X, and uses F(end_of_observation_window) instead of a simple U with the correct predicate. The gold formula expresses that monitoring continues until the window closes, while the prediction requires monitoring after the next step until eventually the window ends, which is not equivalent.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<Machine>> G (safe U cancel_requested)\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction uses a global (G) operator outside the until (U), which changes the temporal meaning: G(safe U cancel_requested) requires (safe U cancel_requested) to hold at every state, not just from the initial state. The gold formula expresses that the machine can guarantee safety up to cancellation from the current point. Also, the predicate 'cancel' vs 'cancel_requested' is a minor difference, but the main issue is the incorrect temporal structure.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "F[<<Industrial System>> -> G Production]\n</s>",
+    "correct": "no",
+    "reasoning": "Prediction uses a different ATL syntax and meaning: F[<<Industrial System>> -> G Production] is not standard ATL and does not express that the system can guarantee eventual production_done. The gold formula uses <<IndustrySystem>>F production_done, which means the system can ensure production_done eventually. The prediction's structure and meaning do not match.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<system,teacher>> AG (F Certified)\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction uses universal path quantification (AG) outside the ATL coalition operator, which is not standard ATL and changes the semantics. Also, the capitalization of 'Certified' is inconsistent, and the agent names are lowercased, but the main issue is the temporal structure: 'F' under 'AG' is not equivalent to '<<EduSystem,Teacher>>F certified', which expresses that the coalition can force 'certified' to eventually hold. The prediction does not correctly capture the coalition's ability.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "!<<Industrial System>>.AGENTS.overheats U X <<Industrial System>>.AGENTS.shutsDown\n</s>",
+    "correct": "no",
+    "reasoning": "Prediction is not valid ATL syntax and does not match the intended meaning. The coalition is malformed ('!<<Industrial System>>.AGENTS'), and the formula structure does not express a global implication with X (next) as required. The gold expresses 'if overheating, then next shutdown' globally for the system; prediction does not.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<\"robot\">> G (human_enters -> X <<\"robot\">> reduces_speed)\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes the agent syntax (using <<\"robot\">> instead of <<Cobot>>), alters the predicate names (human_enters vs human_in_area, reduces_speed vs speed_low), and incorrectly nests the coalition operator inside the X clause. The ATL formula structure and agent attribution are not semantically equivalent to the input.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<SurveillanceSystem>> F (X G (shift_ends -> logs_archived))\n</s>",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: the gold formula requires that eventually logs_archived holds (at some point in the future), while the prediction requires that after some point, always (globally) if shift_ends then logs_archived, and this is only required after the next step. This is a much stronger property and not equivalent to the original. Also, the gold formula does not mention shift_ends as a precondition.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<SurveillanceSystem>> G (IntruderEnters -> F DetectIntruder)\n</s>",
+    "correct": "yes",
+    "reasoning": "Coalition 'SurveillanceSystem' is a clear alias for 'System' in this context. Predicate names are paraphrased but preserve meaning. Temporal and logical structure (G, implication, F) is unchanged.",
+    "judge_model": "gpt-4.1",
+    "source_file": "mistral_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

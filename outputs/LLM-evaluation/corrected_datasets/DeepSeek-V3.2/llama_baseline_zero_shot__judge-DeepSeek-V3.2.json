@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "G (<<Robot>> U stop)",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition from 'Cobot' to 'Robot' (different agent set), uses G (globally) incorrectly instead of the until structure, and the predicate 'stop' is ambiguous compared to 'stop_requested'. The temporal structure is fundamentally different: the gold expresses 'cycle_running until stop_requested', while the prediction expresses 'globally (Robot until stop)', which is not semantically equivalent and misplaces the coalition inside the temporal operator.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<Robot>> G (Fragile ->!ExceedsMaxForce)",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (robotic arm vs robot), same temporal structure (G (p -> G !q)), and same logical meaning. Predicate names are clear aliases from the sentence (fragile_object/Fragile, force_over_limit/ExceedsMaxForce). Polarity and connective are preserved.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<AgriculturalSystem>> G (soilDry -> X enableIrrigation)",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (agricultural system), same temporal structure (G (condition -> X action)). Predicate names are clear syntactic variations (soil_dry vs soilDry, irrigation_on vs enableIrrigation) that preserve the meaning from the sentence.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "G ( (!descend ) -> ( G (!descend ) & F receive_descend ) )",
+    "correct": "no",
+    "reasoning": "The prediction is semantically incorrect. The gold formula uses an until structure to express that the drone keeps holding altitude *until* a descend command occurs. The prediction uses a globally (G) operator with a nested implication and conjunction that does not capture the same temporal meaning. Specifically, it incorrectly asserts that if no descend command has occurred, then it never will (G (!descend)) and eventually one will be received (F receive_descend), which is contradictory and does not model the 'until' relationship. Additionally, the coalition/agent set is missing entirely in the prediction, and the temporal structure is fundamentally different.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "AG <<SecuritySystem>> (G (Monitoring & ¬Threat))",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition structure (AG is a CTL operator, not ATL coalition syntax), changes the temporal structure from 'monitoring U threat_removed' to a globally nested property, flips the condition (it requires monitoring and no threat globally, rather than monitoring until threat removal), and uses different predicate names. This fundamentally alters the expressed property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "F AGENT Logistics System (DeliveryCompleted)",
+    "correct": "no",
+    "reasoning": "The prediction incorrectly uses 'AGENT' as a keyword and places the coalition in a non-standard syntax (F AGENT Logistics System ...). The correct ATL syntax requires coalition brackets <<...>>. The temporal operator F is correct for 'sooner or later', but the agent specification is malformed, changing the semantic meaning from a coalition's strategic ability to a plain CTL-like formula with an undefined agent placeholder.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<SmartCity>> G (Congested(intersection) -> X RetimeTrafficLights(intersection))",
+    "correct": "yes",
+    "reasoning": "Same coalition intent (smart city system), same temporal structure (G (condition -> X action)). The predicates are logical rephrasings of the original: 'junction_congested' vs 'Congested(intersection)' and 'lights_retimed' vs 'RetimeTrafficLights(intersection)' are semantically equivalent given the context. The implication structure and temporal operators are preserved.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<Robot>> G (SafetyBarrier & -> Stopped)",
+    "correct": "no",
+    "reasoning": "The prediction has multiple errors: 1) The coalition name 'Robot' is a deviation from the specified 'Cobot' (collaborative robot), which changes the agent set. 2) The syntax is malformed: 'SafetyBarrier & -> Stopped' is not a valid ATL formula; it appears to mix a conjunction and an implication incorrectly. 3) Even if interpreted as 'safety_barrier_on -> G stopped', the inner 'G' operator is missing, altering the temporal meaning from 'always remain stopped' to just 'stopped' (a state property without temporal guarantee).",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<System>> G (detected -> X sent_alarm)",
+    "correct": "yes",
+    "reasoning": "Same coalition (System) and same temporal structure (G (p -> X q)). The predicate 'detected' is a clear abbreviation for 'intruder_detected' and 'sent_alarm' for 'alarm_sent' from the sentence context.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<Robot>> G (requested -> X!moving)",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition from 'Cobot' to 'Robot', which is a different agent set. Additionally, the predicate 'requested' is ambiguous and not a clear alias for 'stop_requested', and 'X!moving' is syntactically incorrect (should be 'X !moving' or 'X (¬moving)'), but even if corrected, the meaning is altered because 'stopped' and '!moving' are not strictly equivalent without context. The temporal structure is similar, but the agent change and predicate ambiguity make the prediction semantically incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "G <<Robot>> (GripperClosed -> F ObjectLifted)",
+    "correct": "no",
+    "reasoning": "The coalition is changed from 'Arm' to 'Robot', which alters the agent set and the attribution of strategic ability. Additionally, the temporal operator G is placed outside the coalition operator, changing the meaning from 'the arm can guarantee that globally (gripper_closed -> F object_lifted)' to 'globally, the robot can guarantee (gripper_closed -> F object_lifted)', which is a different semantic property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "F AGENT <<MarsRover>> ReachSamplingSite",
+    "correct": "no",
+    "reasoning": "The prediction uses an incorrect ATL syntax (F AGENT <<MarsRover>> ReachSamplingSite) which is not a valid ATL formula. The coalition syntax is malformed, and the temporal operator F is placed incorrectly relative to the coalition operator. The gold formula <<Rover>>F at_sampling_site correctly expresses that the coalition {Rover} can guarantee eventually reaching the site. The prediction's structure deviates semantically and syntactically.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "AG <<System>> (G (obs_window_end -> F obs_window_end))",
+    "correct": "no",
+    "reasoning": "The prediction changes the meaning in multiple ways. The input expresses that the system can guarantee it will keep monitoring *until* the observation window ends (a temporal 'until' structure). The gold formula correctly captures this with <<System>>(monitoring U window_closed). The prediction uses AG (a CTL operator, not ATL) and a complex nested temporal structure (G (obs_window_end -> F obs_window_end)), which states a liveness property about the window ending implying it will eventually end again, unrelated to the system's ability to keep monitoring until that point. The coalition is correct, but the temporal operator, structure, and overall property are completely different.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "AG <<Machine>> (safe & (safe U request_cancel))",
+    "correct": "no",
+    "reasoning": "The prediction changes the meaning in multiple ways: (1) It adds an outer AG operator (which is CTL, not ATL, and means 'always globally' for all paths, not a coalition strategy), altering the strategic quantification. (2) The inner formula 'safe & (safe U request_cancel)' is not equivalent to 'safe U cancel' because the until condition is different ('request_cancel' vs 'cancel') and the conjunction with 'safe' is redundant but not equivalent to the original until structure. (3) The coalition is still <<Machine>>, but the temporal/logical structure and overall semantics are incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "F AGENT <<System>> (production)",
+    "correct": "no",
+    "reasoning": "The prediction is syntactically malformed and semantically incorrect. The gold formula uses the coalition <<IndustrySystem>> and the temporal operator F to express 'sooner or later'. The prediction incorrectly places the temporal operator F before the coalition, uses an undefined keyword 'AGENT', and has an incomplete/unclear predicate 'production' instead of 'production_done'. This changes both the coalition structure and the intended property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<System,Teacher>> G F Certified",
+    "correct": "no",
+    "reasoning": "The gold formula expresses that the coalition can guarantee that the student will be certified eventually (F certified). The prediction changes the temporal structure to G F Certified, which means the coalition can guarantee that the student will be certified infinitely often (always eventually certified), a stronger property than 'sooner or later' (eventually once). This alters the expressed property.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<System>> G (M overheats -> X M is_shutdown)",
+    "correct": "no",
+    "reasoning": "The coalition in the prediction is 'System', which is a different and more general agent name than the specified 'IndustrySystem' in the gold formula. This changes the intended coalition and is semantically incorrect. Additionally, the predicate syntax 'M overheats' and 'M is_shutdown' is non-standard and ambiguous, but the primary error is the coalition mismatch.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<Robot>> G (H enters & X Robot reduces_speed)",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition from 'Cobot' to 'Robot' (different agent set), uses a non-standard predicate 'H enters' instead of 'human_in_area', and uses 'Robot reduces_speed' instead of 'speed_low'. Additionally, the syntax 'H enters & X Robot reduces_speed' is not valid ATL syntax (agent names inside formulas are not allowed, and predicates must be atomic). The temporal structure is also incorrectly placed: 'X' should apply to the consequent of the implication, not be conjoined inside it.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "AG <<SurveillanceSystem>> F (not shiftEnds & logsArchived)",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition (AG vs <<SurveillanceSystem>>), adds an unnecessary and incorrect condition (not shiftEnds & logsArchived) that contradicts the temporal relationship in the input ('after the shift ends'), and uses a different temporal structure. The gold formula correctly captures that the system can guarantee logs are archived eventually, with no condition on shiftEnds. The prediction's condition 'not shiftEnds & logsArchived' is semantically different and the coalition operator is incorrect.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "AG <<Surveillance>> (E (I enters & F I is_detected) -> E F I is_detected)",
+    "correct": "no",
+    "reasoning": "The prediction is not a valid ATL formula. It uses CTL/ATL hybrid syntax incorrectly (AG, E are CTL operators, not ATL coalition syntax). The coalition is incorrectly specified as <<Surveillance>> instead of <<System>>. The temporal structure is garbled and does not match the intended meaning of 'G (intruder_entered -> F intruder_detected)'. The predicate names are also different and not simple aliases.",
+    "judge_model": "DeepSeek-V3.2",
+    "source_file": "llama_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

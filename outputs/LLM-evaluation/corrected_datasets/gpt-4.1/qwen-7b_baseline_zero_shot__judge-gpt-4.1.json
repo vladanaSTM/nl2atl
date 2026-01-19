@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<Robot>> G ((cycle -> G cycle) U stop_request)",
+    "correct": "no",
+    "reasoning": "The prediction changes both the coalition (<<Robot>> instead of <<Cobot>>) and the temporal structure. The gold formula uses (cycle_running U stop_requested), meaning the cycle runs up to the stop request. The prediction uses G ((cycle -> G cycle) U stop_request), which is not equivalent: it globally requires that if 'cycle' holds, then it always holds, up to a stop request, which is a different property. Both coalition and temporal structure are incorrect.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<RoboticArm>> (Fragile -> G ! Force > MaxForce)",
+    "correct": "no",
+    "reasoning": "The prediction is not valid ATL syntax: 'Force > MaxForce' is not a propositional atom but a comparison, which is not allowed in standard ATL. Also, the coalition syntax '<<RoboticArm>>' is missing the temporal operator 'G' at the outer level, so the global property is not enforced. Predicate names are acceptable aliases, but the formula structure and syntax are incorrect.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<AgriculturalSystem>> (G (soilDry -> X irrigationEnabled))",
+    "correct": "yes",
+    "reasoning": "Coalition name is a clear alias (AgriSystem vs AgriculturalSystem), and predicate names are equivalent in meaning. The temporal structure (G, ->, X) is preserved. Parentheses placement does not affect semantics here.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<drone>> G ((!descendCommand -> X holdingAltitude) U descendCommand)",
+    "correct": "no",
+    "reasoning": "The prediction uses G and a more complex implication structure, but the original property is simply 'holding_altitude U descend_command' under the drone's control. The prediction's use of G and X changes the temporal meaning, and the implication is not equivalent to the intended 'until' property. Also, the agent name capitalization differs, but the main issue is the altered temporal and logical structure.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<Security>> F (G Monitoring U (ThreatRemoved -> G Monitoring))",
+    "correct": "no",
+    "reasoning": "Prediction uses F (eventually) and G (globally) operators, and a conditional, instead of a simple U (until). The temporal structure is changed: the gold formula expresses that monitoring continues up to (and including) the point when threat_removed becomes true, while the prediction expresses that eventually, always, monitoring holds until if threat is removed, then always monitoring holds, which is not equivalent. Also, the coalition name is changed from SecuritySystem to Security.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<Logistics>> (F (X (G (DeliveryCompleted))))",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: F X G means that eventually, from some next state onward, delivery is always completed, which is much stronger than simply 'eventually delivery is done.' Also, the coalition name is changed from 'LogisticsSystem' to 'Logistics', which may refer to a different agent. Predicate naming is also changed, but the main issue is the temporal operator nesting and coalition mismatch.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<SmartCity>> (G (Congested(X)) -> R(X) TrafficLightsRetimed(X+1))",
+    "correct": "no",
+    "reasoning": "The prediction changes the coalition from 'CitySystem' to 'SmartCity', which may not refer to the same agent. It also moves the temporal operator G (globally) outside the implication, altering the scope: in the gold, the system guarantees globally that whenever the antecedent holds, the consequent follows at the next step. In the prediction, it is not clear if the guarantee is global or only applies when the implication holds. Additionally, the syntax is not standard ATL and introduces function-like terms (Congested(X)), which are not part of ATL's propositional structure. The meaning and structure are not preserved.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<Robot>> (SafetyBarrierOn -> G Stopped)",
+    "correct": "no",
+    "reasoning": "The prediction omits the temporal operator G at the outermost level, which is required to express 'always' for the implication. Also, the coalition is changed from <<Cobot>> to <<Robot>>, which may refer to a different agent. Both changes alter the meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<System>> (detection -> X alarm)",
+    "correct": "no",
+    "reasoning": "The prediction omits the global temporal operator G, so it does not require the property to hold at all times. Also, the coalition syntax is incomplete (missing the temporal operator after <<System>>). Predicate names are acceptable as aliases, but the missing G changes the meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<Robot>> (stop-requested -> X stop-moving)",
+    "correct": "no",
+    "reasoning": "Coalition/agent changed from 'Cobot' to 'Robot', which may not refer to the same entity. Also, the prediction omits the global temporal operator G, so the property is not required to hold at all times. Predicate names are acceptable variants, but the missing G and agent change alter the meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<RoboticArm>> (gripper_closed -> (object_lifted U object_lifted))",
+    "correct": "no",
+    "reasoning": "The prediction omits the temporal operator F (eventually) and instead uses (object_lifted U object_lifted), which is tautological and does not express 'eventually' in ATL. Also, the prediction is missing the G (globally) operator, so the property is not required to hold at all times. The coalition name is a minor deviation, but the main issue is the incorrect temporal structure.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<MarsRover>> GF (reachSamplingSite U reachSamplingSite)",
+    "correct": "no",
+    "reasoning": "Prediction uses GF (reachSamplingSite U reachSamplingSite), which is not equivalent to F at_sampling_site. 'GF' means 'infinitely often eventually', not just 'eventually'. Also, (reachSamplingSite U reachSamplingSite) is redundant and just means reachSamplingSite, but the extra G changes the meaning. The gold expresses that the rover can guarantee reaching the site at least once; the prediction requires it to do so infinitely often.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<System>> G ((monitoring -> F (observationWindowEnds)) U (monitoring -> X (observationWindowEnds)))",
+    "correct": "no",
+    "reasoning": "The prediction uses a global (G) operator and a complex formula involving implications and both F and X temporal operators, nested within an until (U). The original property is simply that monitoring continues until the window ends, i.e., <<System>>(monitoring U window_closed). The prediction does not directly express this: it adds unnecessary global and implication structure, and the temporal requirements are not equivalent. The meaning is changed.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<Machine>> G (safe -> F (cancel-requested U safe))",
+    "correct": "no",
+    "reasoning": "The prediction changes the temporal structure: the gold formula uses 'U' (until) to require that 'safe' holds up to (and including) the point when 'cancel' occurs, which matches the input. The prediction uses a global implication with a nested 'F' and 'U', which does not enforce that 'safe' holds continuously until 'cancel' is requested. Also, the predicate 'cancel-requested' is not clearly equivalent to 'cancel'. Therefore, the prediction does not preserve the intended meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<IndustrialSystem>> (F (G (X productionCompleted)))",
+    "correct": "no",
+    "reasoning": "The prediction adds extra temporal operators: F (G (X ...)) means that eventually, always in the future, in the next step productionCompleted holds, which is much stronger than just 'eventually production is completed.' Also, the agent name is slightly different but acceptable; the main issue is the temporal structure.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<System,Teacher>> (F (X (student_certified W student_certified)))",
+    "correct": "no",
+    "reasoning": "Coalition is incorrect: 'System' is not necessarily the same as 'EduSystem' from the gold. The temporal structure is also unnecessarily convoluted: 'F (X (student_certified W student_certified))' is equivalent to 'F student_certified', but the extra X and W are redundant and could introduce semantic confusion. The predicate is also renamed from 'certified' to 'student_certified', which may or may not be equivalent depending on context. Strictly, these deviations make the prediction incorrect.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<Machine>> (MachineOverheats -> MachineShutsDownX)",
+    "correct": "no",
+    "reasoning": "Coalition/agent is changed from 'IndustrySystem' to 'Machine', which alters the subject of the guarantee. Also, the temporal operator 'X' is incorrectly placed at the end of the predicate instead of before the formula, and the predicate names are not clearly aligned. The structure does not match the intended ATL semantics.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<Robot>> (Human enters area -> X Speed reduces)",
+    "correct": "no",
+    "reasoning": "The prediction omits the temporal operator G (globally), which is present in the gold formula and required by the input ('if ... then ...' is to hold always). The coalition is also changed from 'Cobot' to 'Robot', which may not be the same entity. Predicate names are paraphrased acceptably, but the missing G and coalition change alter the meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<Surveillance>> (F (shift_ends U archive_logs))",
+    "correct": "no",
+    "reasoning": "The prediction changes both the coalition (<<Surveillance>> instead of <<System>>) and the temporal structure. The gold formula expresses that the system can guarantee logs will eventually be archived (F logs_archived), while the prediction uses (F (shift_ends U archive_logs)), which means 'eventually, shift_ends holds until archive_logs', a different property. Also, the agent set is not the same.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<Surveillance>> (E -> F D)",
+    "correct": "no",
+    "reasoning": "Coalition/agent name changed ('System' vs 'Surveillance'), and atomic propositions are replaced with single letters ('E', 'D') which are not clearly mapped to the intended predicates. The formula also omits the global operator G and the implication structure is unclear. The prediction does not faithfully represent the input's meaning.",
+    "judge_model": "gpt-4.1",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

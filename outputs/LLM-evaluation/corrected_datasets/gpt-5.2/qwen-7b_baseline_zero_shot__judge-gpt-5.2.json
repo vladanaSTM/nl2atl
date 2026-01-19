@@ -1,0 +1,222 @@
+[
+  {
+    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+    "gold": "<<Cobot>>(cycle_running U stop_requested)",
+    "prediction": "<<Robot>> G ((cycle -> G cycle) U stop_request)",
+    "correct": "no",
+    "reasoning": "Prediction changes both coalition and temporal meaning. Coalition is <<Robot>> instead of <<Cobot>>. Gold is a simple until: cycle_running holds until stop_requested. Prediction adds an outer G and uses ((cycle -> G cycle) U stop_request), which is not equivalent: it requires a global condition and a different left operand (an implication about always cycling) rather than cycle_running holding continuously until the stop request.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the object is fragile, then it will never exceed a maximum force.",
+    "gold": "<<Arm>>G (fragile_object -> G !force_over_limit)",
+    "prediction": "<<RoboticArm>> (Fragile -> G ! Force > MaxForce)",
+    "correct": "no",
+    "reasoning": "Gold requires a global implication: at all times, if the object is fragile then from that point on it is always not over the force limit (<<Arm>> G(fragile -> G !force_over_limit)). The prediction lacks the outer G and the implication, and instead asserts a standalone Fragile condition with G !Force>MaxForce, which changes the meaning and strength of the property.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The agricultural system can guarantee that if the soil is dry, then at the next step it will enable irrigation.",
+    "gold": "<<AgriSystem>>G (soil_dry -> X irrigation_on)",
+    "prediction": "<<AgriculturalSystem>> (G (soilDry -> X irrigationEnabled))",
+    "correct": "yes",
+    "reasoning": "Same coalition (AgriSystem vs AgriculturalSystem) and same temporal structure: globally, if soil is dry then next step irrigation is enabled. Predicate names are clear aliases (soil_dry/soilDry, irrigation_on/irrigationEnabled).",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The drone can guarantee that it will keep holding altitude until it receives a descend command.",
+    "gold": "<<Drone>>(holding_altitude U descend_command)",
+    "prediction": "<<drone>> G ((!descendCommand -> X holdingAltitude) U descendCommand)",
+    "correct": "no",
+    "reasoning": "Gold states a simple until: the drone can ensure holding_altitude holds continuously until descend_command occurs. The prediction instead wraps an until inside a global G and uses a different condition (!descendCommand -> X holdingAltitude), which only enforces holdingAltitude at the next step when no descendCommand holds, not that holdingAltitude holds in the current state throughout the until interval. This changes the temporal meaning (adds G and shifts holding to X).",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+    "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+    "prediction": "<<Security>> F (G Monitoring U (ThreatRemoved -> G Monitoring))",
+    "correct": "no",
+    "reasoning": "Gold states the security system can ensure monitoring holds continuously until threat_removed becomes true (monitoring U threat_removed). Prediction changes both structure and meaning: it uses an outer F and an until whose right side is an implication (ThreatRemoved -> G Monitoring), which can be satisfied even if ThreatRemoved never occurs (implication true when ThreatRemoved is false). It also suggests monitoring continues forever after removal (G Monitoring), which is not required by the input/gold. Additionally, coalition/predicate names differ (SecuritySystem vs Security; monitoring vs Monitoring), but the main issue is the altered temporal/logic semantics.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The logistics system can guarantee that sooner or later the delivery will be completed.",
+    "gold": "<<LogisticsSystem>>F delivery_done",
+    "prediction": "<<Logistics>> (F (X (G (DeliveryCompleted))))",
+    "correct": "no",
+    "reasoning": "Gold says the LogisticsSystem can ensure eventual delivery completion (F delivery_done). Prediction changes the coalition (LogisticsSystem vs Logistics) and strengthens the temporal requirement to F X G DeliveryCompleted (eventually, from the next step onward, delivery is always completed), which is not equivalent to simple eventual completion.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+    "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+    "prediction": "<<SmartCity>> (G (Congested(X)) -> R(X) TrafficLightsRetimed(X+1))",
+    "correct": "no",
+    "reasoning": "Prediction is not a semantically equivalent ATL formula: it changes the coalition (<<CitySystem>> vs <<SmartCity>>), does not use the required global implication form G(congested -> X retimed), and introduces non-ATL/ill-formed constructs (Congested(X), R(X), X+1) with different temporal structure (an implication from G(...) rather than G of an implication).",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if the safety barrier is on, then it will always remain stopped.",
+    "gold": "<<Cobot>>G (safety_barrier_on -> G stopped)",
+    "prediction": "<<Robot>> (SafetyBarrierOn -> G Stopped)",
+    "correct": "no",
+    "reasoning": "Gold requires the cobot to guarantee globally that whenever the safety barrier is on, it will be stopped forever after (outer G plus inner G). The prediction changes the coalition name and omits the outer G, making it a one-time implication rather than a global condition.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that if an intruder is detected, then at the next step it will send an alarm.",
+    "gold": "<<System>>G (intruder_detected -> X alarm_sent)",
+    "prediction": "<<System>> (detection -> X alarm)",
+    "correct": "no",
+    "reasoning": "The gold formula requires the guarantee to hold globally (G): whenever an intruder is detected, then in the next step an alarm is sent. The prediction omits the G operator, so it only enforces the implication at the current state, not at all future states. Predicate renaming is fine, but the missing global temporal scope changes the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a stop is requested, then at the next step it will stop moving.",
+    "gold": "<<Cobot>>G (stop_requested -> X stopped)",
+    "prediction": "<<Robot>> (stop-requested -> X stop-moving)",
+    "correct": "no",
+    "reasoning": "The prediction is missing the global modality G, so it does not state the implication holds at all times. It also changes the coalition name (<<Cobot>> vs <<Robot>>), and the predicates differ (stop_requested/stopped vs stop-requested/stop-moving) without clear aliasing. Any of these changes can alter the meaning.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+    "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+    "prediction": "<<RoboticArm>> (gripper_closed -> (object_lifted U object_lifted))",
+    "correct": "no",
+    "reasoning": "Gold says the Arm can always ensure: if gripper_closed holds, then eventually (F) object_lifted will occur. Prediction lacks the outer G, so it is not required to hold in all states, and it uses (object_lifted U object_lifted), which is equivalent to just object_lifted now, not eventual lifting. Thus temporal meaning is changed.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The Mars rover can guarantee that sooner or later it will reach the sampling site.",
+    "gold": "<<Rover>>F at_sampling_site",
+    "prediction": "<<MarsRover>> GF (reachSamplingSite U reachSamplingSite)",
+    "correct": "no",
+    "reasoning": "Gold states the rover can eventually reach the sampling site (<<Rover>>F at_sampling_site). Prediction uses <<MarsRover>>GF(reachSamplingSite U reachSamplingSite), which is a different temporal property: GF requires reaching infinitely often, and (p U p) is equivalent to p, so it becomes <<MarsRover>>GF reachSamplingSite. This is stronger than eventual reach and not semantically equivalent.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system can guarantee that it will keep monitoring until the observation window ends.",
+    "gold": "<<System>>(monitoring U window_closed)",
+    "prediction": "<<System>> G ((monitoring -> F (observationWindowEnds)) U (monitoring -> X (observationWindowEnds)))",
+    "correct": "no",
+    "reasoning": "Gold states: System can ensure monitoring holds continuously until window_closed becomes true (monitoring U window_closed). Prediction instead wraps a G around an until between implications about monitoring leading to future/next observationWindowEnds, and it does not require monitoring to hold up to the end condition nor match the simple U structure; also uses different propositions (observationWindowEnds vs window_closed). Temporal structure and meaning are changed.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+    "gold": "<<Machine>>(safe U cancel)",
+    "prediction": "<<Machine>> G (safe -> F (cancel-requested U safe))",
+    "correct": "no",
+    "reasoning": "Gold states the machine can ensure safety holds continuously up to the point cancellation is requested (safe U cancel). The prediction instead is a global implication with an eventuality and an until in the opposite direction (cancel-requested U safe), which does not enforce safety until cancellation and even allows cancellation to never occur. Temporal structure and meaning differ.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that sooner or later production will be completed.",
+    "gold": "<<IndustrySystem>>F production_done",
+    "prediction": "<<IndustrialSystem>> (F (G (X productionCompleted)))",
+    "correct": "no",
+    "reasoning": "Gold states the system can ensure eventual completion: <<IndustrySystem>>F production_done. Prediction instead requires that eventually it reaches a state from which at every future step, in the next step productionCompleted holds (F G X ...), which is much stronger and different. Also the agent name differs (IndustrySystem vs IndustrialSystem) and the predicate differs (production_done vs productionCompleted) without clear aliasing.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The system and the teacher together can guarantee that sooner or later the student will be certified.",
+    "gold": "<<EduSystem,Teacher>>F certified",
+    "prediction": "<<System,Teacher>> (F (X (student_certified W student_certified)))",
+    "correct": "no",
+    "reasoning": "Gold states that the coalition {EduSystem, Teacher} can ensure eventually certified (<<EduSystem,Teacher>>F certified). Prediction changes the proposition to student_certified and adds an extra X and a weak-until self-loop (X(p W p) ≡ X p), making it <<System,Teacher>>F X student_certified, i.e., certification must occur at least one step later. This is not equivalent to eventual certified, and the agent name EduSystem vs System is also not clearly an alias.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The industrial system can guarantee that if a machine overheats, then at the next step it will shut down.",
+    "gold": "<<IndustrySystem>>G (overheating -> X shutdown)",
+    "prediction": "<<Machine>> (MachineOverheats -> MachineShutsDownX)",
+    "correct": "no",
+    "reasoning": "Coalition/agent is wrong (Machine vs IndustrySystem). The temporal structure is also wrong: gold requires a global condition with next-step shutdown (G(overheating -> X shutdown)), but the prediction lacks G and does not clearly encode the X operator (uses an atomic proposition MachineShutsDownX instead).",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+    "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+    "prediction": "<<Robot>> (Human enters area -> X Speed reduces)",
+    "correct": "no",
+    "reasoning": "Prediction changes the coalition (<<Robot>> vs <<Cobot>>) and omits the global modality G, so it no longer states the guarantee holds at all times. It also is not in clear ATL syntax.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that sooner or later it will archive the logs after the shift ends.",
+    "gold": "<<System>>F logs_archived",
+    "prediction": "<<Surveillance>> (F (shift_ends U archive_logs))",
+    "correct": "no",
+    "reasoning": "The prediction changes both the coalition and the temporal meaning. Gold says the System can ensure eventually logs_archived. Prediction uses <<Surveillance>> and requires eventually (shift_ends U archive_logs), which implies archive_logs occurs and shift_ends holds until then; it also doesn’t directly state logs_archived. This is not equivalent to eventual logs_archived after shift ends.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  },
+  {
+    "input": "The surveillance system can guarantee that if an intruder enters the area, then sooner or later it will detect the intruder.",
+    "gold": "<<System>>G (intruder_entered -> F intruder_detected)",
+    "prediction": "<<Surveillance>> (E -> F D)",
+    "correct": "no",
+    "reasoning": "The prediction does not match the gold ATL formula: it changes the coalition name (<<System>> vs <<Surveillance>>) and omits the required global modality G. Gold requires the guarantee to hold at all times (G), while the prediction only states a single implication without G, which is weaker.",
+    "judge_model": "gpt-5.2",
+    "source_file": "qwen-7b_baseline_zero_shot.json",
+    "match_method": "input",
+    "decision_method": "llm"
+  }
+]

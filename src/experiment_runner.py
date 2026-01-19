@@ -56,9 +56,23 @@ class ExperimentRunner:
         if model_arg in self.config.models:
             return model_arg
 
+        def normalize(token: str) -> str:
+            token = token.lower()
+            for prefix in ("azure-", "elysium-"):
+                if token.startswith(prefix):
+                    token = token[len(prefix) :]
+            return token
+
         needle = model_arg.lower()
+        normalized_needle = normalize(model_arg)
         for key, mc in self.config.models.items():
-            if mc.short_name.lower() == needle or mc.name.lower() == needle:
+            if (
+                mc.short_name.lower() == needle
+                or mc.name.lower() == needle
+                or normalize(mc.short_name) == normalized_needle
+                or normalize(mc.name) == normalized_needle
+                or normalize(key) == normalized_needle
+            ):
                 return key
 
         raise KeyError(model_arg)
@@ -70,6 +84,21 @@ class ExperimentRunner:
         model_key = self._resolve_model_key(model_key)
         model_config = self.config.models[model_key]
         model_type = get_model_type(model_config.name)
+        is_elysium = model_config.provider.lower() == "elysium"
+        if condition.finetuned and is_elysium:
+            print(
+                f"Skipping {model_config.short_name} ({condition.name}): fine-tuning disabled for provider=elysium."
+            )
+            return {
+                "run_name": f"{model_config.short_name}_{condition.name}",
+                "model": model_config.short_name,
+                "condition": condition.name,
+                "finetuned": condition.finetuned,
+                "few_shot": condition.few_shot,
+                "skipped": True,
+                "skip_reason": "finetuning_disabled_for_elysium",
+            }
+        effective_finetuned = condition.finetuned
 
         run_name = f"{model_config.short_name}_{condition.name}"
         print(f"\n{'='*60}")
@@ -85,9 +114,9 @@ class ExperimentRunner:
                 "model": model_config.name,
                 "model_short": model_config.short_name,
                 "condition": condition.name,
-                "finetuned": condition.finetuned,
+                "finetuned": effective_finetuned,
                 "few_shot": condition.few_shot,
-                "num_epochs": self.config.num_epochs if condition.finetuned else 0,
+                "num_epochs": self.config.num_epochs if effective_finetuned else 0,
                 "learning_rate": self.config.learning_rate,
                 "batch_size": self.config.batch_size,
                 "num_few_shot": (
@@ -100,18 +129,18 @@ class ExperimentRunner:
         adapter_path = None
 
         # Train if needed
-        if condition.finetuned:
-            if model_config.provider.lower() == "elysium":
-                raise ValueError(
-                    "Fine-tuning is not supported for Elysium/Azure-hosted models; set finetuned=False."
-                )
+        if effective_finetuned:
             adapter_path = self._train_model(model_config, model_type, run_name)
 
         cache_key = (model_config.name, adapter_path or "base")
         reused = False
         model = tokenizer = None
 
-        if self.reuse_models and not condition.finetuned and cache_key in self.model_cache:
+        if (
+            self.reuse_models
+            and not effective_finetuned
+            and cache_key in self.model_cache
+        ):
             model, tokenizer = self.model_cache[cache_key]
             reused = True
             print("Reusing cached model from GPU memory for this condition")
@@ -119,7 +148,7 @@ class ExperimentRunner:
             model, tokenizer = load_model(
                 model_config, for_training=False, load_adapter=adapter_path
             )
-            if self.reuse_models and not condition.finetuned:
+            if self.reuse_models and not effective_finetuned:
                 self.model_cache[cache_key] = (model, tokenizer)
 
         # Evaluate
@@ -208,7 +237,7 @@ class ExperimentRunner:
             "run_name": run_name,
             "model": model_config.short_name,
             "condition": condition.name,
-            "finetuned": condition.finetuned,
+            "finetuned": effective_finetuned,
             "few_shot": condition.few_shot,
             "metrics": metrics,
             "detailed_results": self.evaluator.results,
@@ -217,13 +246,15 @@ class ExperimentRunner:
         self.all_results.append(result)
 
         # Save to file
-        result_path = Path(self.config.output_dir) / "results" / f"{run_name}.json"
+        result_path = (
+            Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
+        )
         result_path.parent.mkdir(parents=True, exist_ok=True)
         with open(result_path, "w") as f:
             json.dump(result, f, indent=2, default=str)
 
         # Clean up if not caching this model
-        if not (self.reuse_models and not condition.finetuned):
+        if not (self.reuse_models and not effective_finetuned):
             del model, tokenizer
             clear_gpu_memory()
 
@@ -373,12 +404,6 @@ class ExperimentRunner:
 
                 try:
                     resolved_key = self._resolve_model_key(model_key)
-                    model_cfg = self.config.models[resolved_key]
-                    if model_cfg.provider.lower() == "elysium" and condition.finetuned:
-                        print(
-                            f"Skipping {condition.name} for {model_cfg.short_name}: fine-tuning not supported for Elysium/Azure models."
-                        )
-                        continue
                     self.run_single_experiment(resolved_key, condition)
                 except Exception as e:
                     print(f"ERROR: {e}")
