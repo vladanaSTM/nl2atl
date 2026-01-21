@@ -16,13 +16,17 @@ def load_yaml(path: str) -> dict:
 class ModelConfig:
     name: str
     short_name: str
-    provider: str = "huggingface"  # huggingface or azure
+    provider: str = "huggingface"  # huggingface, local, or azure
     api_model: Optional[str] = None  # Optional override for remote model id
     max_seq_length: int = 512
     load_in_4bit: bool = True
     lora_r: int = 64
     lora_alpha: int = 128
+    train_batch_size: Optional[int] = None
+    eval_batch_size: Optional[int] = None
+    gradient_accumulation_steps: Optional[int] = None
     target_modules: List[str] = field(default_factory=list)
+    params_b: Optional[float] = None
 
 
 @dataclass
@@ -40,10 +44,12 @@ class Config:
     models_dir: str = "./models"
 
     # Data settings
-    test_size: float = 0.20
+    test_size: float = 0.30
     val_size: float = 0.50
     augment_factor: int = 10
     seed: int = 42
+    seeds: List[int] = field(default_factory=list)
+    num_seeds: int = 1
 
     # Training settings
     num_epochs: int = 10
@@ -72,12 +78,22 @@ class Config:
         models_cfg = load_yaml(models_path)
         exp_cfg = load_yaml(experiments_path)
 
+        exp_settings = exp_cfg.get("experiment", {})
+        seed = exp_settings.get("seed", 42)
+        seeds = exp_settings.get("seeds") or []
+        num_seeds = exp_settings.get("num_seeds", 1)
+
+        if seeds:
+            seed = seeds[0]
+
         config = cls(
             data_path=exp_cfg["data"]["path"],
             test_size=exp_cfg["data"]["test_size"],
             val_size=exp_cfg["data"]["val_size"],
             augment_factor=exp_cfg["data"]["augment_factor"],
-            seed=exp_cfg["experiment"]["seed"],
+            seed=seed,
+            seeds=seeds,
+            num_seeds=num_seeds,
             num_epochs=exp_cfg["training"]["num_epochs"],
             batch_size=exp_cfg["training"]["batch_size"],
             gradient_accumulation_steps=exp_cfg["training"][
@@ -101,3 +117,10 @@ class Config:
             config.conditions.append(ExperimentCondition(**cond))
 
         return config
+
+    def resolve_seeds(self) -> List[int]:
+        if self.seeds:
+            return list(self.seeds)
+        if self.num_seeds and self.num_seeds > 1:
+            return [self.seed + i for i in range(self.num_seeds)]
+        return [self.seed]

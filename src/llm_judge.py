@@ -2,6 +2,7 @@
 LLM-as-a-judge evaluator for ATL outputs.
 """
 
+import ast
 import hashlib
 import json
 import os
@@ -11,7 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .model_registry import AzureClient
+from .config import ModelConfig
+from .model_registry import AzureClient, generate, load_model
 
 PROMPT_VERSION = "v1.0"
 
@@ -23,6 +25,22 @@ class JudgeDecision:
     decision_method: str
 
 
+class LocalJudgeClient:
+    """Lightweight wrapper for local HF models."""
+
+    provider = "local"
+
+    def __init__(self, model_config: ModelConfig):
+        self.model_config = model_config
+        self.model, self.tokenizer = load_model(model_config, for_training=False)
+
+    def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
+        raw = generate(self.model, self.tokenizer, prompt, max_new_tokens=max_new_tokens)
+        if raw.startswith(prompt):
+            return raw[len(prompt) :].strip()
+        return raw.strip()
+
+
 class LLMJudge:
     def __init__(
         self,
@@ -31,6 +49,8 @@ class LLMJudge:
         no_llm: bool = False,
         prompt_version: str = PROMPT_VERSION,
         api_model: Optional[str] = None,
+        provider: Optional[str] = None,
+        model_config: Optional[ModelConfig] = None,
     ):
         self.judge_model = judge_model
         self.api_model = api_model or judge_model
@@ -38,29 +58,38 @@ class LLMJudge:
         self.prompt_version = prompt_version
         self.cache_path = cache_path
         self.cache = self._load_cache(cache_path)
-        self.client: Optional[AzureClient] = None
+        self.provider = (provider or (model_config.provider if model_config else "azure")).lower()
+        self.model_config = model_config
+        self.client = None
 
         if not self.no_llm:
-            api_key = os.getenv("AZURE_API_KEY")
-            endpoint = os.getenv("AZURE_INFER_ENDPOINT")
-            api_version = os.getenv("AZURE_API_VERSION")
-            verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
-            verify_ssl = verify_ssl_env in ["1", "true", "yes"]
+            if self.provider == "azure":
+                api_key = os.getenv("AZURE_API_KEY")
+                endpoint = os.getenv("AZURE_INFER_ENDPOINT")
+                api_version = os.getenv("AZURE_API_VERSION")
+                verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
+                verify_ssl = verify_ssl_env in ["1", "true", "yes"]
 
-            if not api_key or not endpoint:
-                raise ValueError(
-                    "Missing LLM credentials. Set AZURE_API_KEY and AZURE_INFER_ENDPOINT, "
-                    "or pass --no_llm to run exact-match only."
+                if not api_key or not endpoint:
+                    raise ValueError(
+                        "Missing LLM credentials. Set AZURE_API_KEY and AZURE_INFER_ENDPOINT, "
+                        "or pass --no_llm to run exact-match only."
+                    )
+
+                self.client = AzureClient(
+                    endpoint=endpoint,
+                    api_key=api_key,
+                    model=self.api_model,
+                    api_version=api_version,
+                    verify_ssl=verify_ssl,
+                    use_cache=True,
                 )
-
-            self.client = AzureClient(
-                endpoint=endpoint,
-                api_key=api_key,
-                model=self.api_model,
-                api_version=api_version,
-                verify_ssl=verify_ssl,
-                use_cache=True,
-            )
+            elif self.provider in {"local", "huggingface"}:
+                if not self.model_config:
+                    raise ValueError("Local judge requires model_config.")
+                self.client = LocalJudgeClient(self.model_config)
+            else:
+                raise ValueError(f"Unsupported judge provider: {self.provider}")
 
     def _load_cache(self, cache_path: Path) -> Dict[str, dict]:
         if cache_path.exists():
@@ -134,16 +163,37 @@ class LLMJudge:
         )
 
     def _parse_judge_response(self, raw: str) -> Tuple[str, str]:
+        def _clean_json_like(text: str) -> str:
+            cleaned = text.strip()
+            cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"')
+            cleaned = cleaned.replace("\u2018", "'").replace("\u2019", "'")
+            cleaned = re.sub(r",\s*\}", "}", cleaned)
+            cleaned = re.sub(r",\s*\]", "]", cleaned)
+            return cleaned
+
+        if "output:" in raw:
+            raw = raw.split("output:")[-1]
+
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
-            match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-            if match:
+            candidates = re.findall(r"\{.*?\}", raw, flags=re.DOTALL)
+            data = None
+            for candidate in reversed(candidates):
+                cleaned = _clean_json_like(candidate)
                 try:
-                    data = json.loads(match.group(0))
+                    data = json.loads(cleaned)
+                    break
                 except json.JSONDecodeError:
-                    return "no", "Judge response was not valid JSON."
-            else:
+                    try:
+                        data = ast.literal_eval(cleaned)
+                        if isinstance(data, dict):
+                            break
+                        data = None
+                    except Exception:
+                        data = None
+                        continue
+            if data is None:
                 return "no", "Judge response was not valid JSON."
 
         correct = str(data.get("correct", "no")).strip().lower()

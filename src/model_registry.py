@@ -132,13 +132,39 @@ class AzureClient:
 
 
 def clear_gpu_memory():
-    """Clear GPU memory."""
-    gc.collect()
-    torch.cuda.empty_cache()
+    """Aggressively clear GPU memory."""
+    import gc
+    import ctypes
+    
+    # Multiple gc passes for circular references
+    for _ in range(3):
+        gc.collect()
+    
     if torch.cuda.is_available():
+        # Synchronize to ensure all ops complete
+        torch.cuda.synchronize()
+        
+        # Empty the cache
+        torch.cuda.empty_cache()
+        
+        # Reset peak memory stats
+        torch.cuda.reset_peak_memory_stats()
+        
+        # Force Python to release memory back to OS (Linux)
+        try:
+            libc = ctypes.CDLL("libc.so.6")
+            libc.malloc_trim(0)
+        except:
+            pass
+        
+        # Final gc pass
+        gc.collect()
+        torch.cuda.empty_cache()
+        
         allocated = torch.cuda.memory_allocated() / 1e9
+        reserved = torch.cuda.memory_reserved() / 1e9
         total = torch.cuda.get_device_properties(0).total_memory / 1e9
-        print(f"GPU Memory: {allocated:.2f} / {total:.2f} GB")
+        print(f"GPU Memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved / {total:.2f} GB total")
 
 
 def get_model_type(model_name: str) -> str:
@@ -178,15 +204,8 @@ def load_model(
     for_training: bool = False,
     load_adapter: Optional[str] = None,
 ) -> Tuple[any, any]:
-    """
-    Load model and tokenizer.
-
-    Args:
-        model_config: Model configuration
-        for_training: Whether to prepare for training (apply LoRA)
-        load_adapter: Path to load fine-tuned adapter from
-    """
-    # Route to Azure backend when requested; no GPU allocations.
+    """Load model and tokenizer."""
+    # Route to Azure backend when requested
     if model_config.provider.lower() == "azure":
         api_key = os.getenv("AZURE_API_KEY")
         endpoint = os.getenv("AZURE_INFER_ENDPOINT")
@@ -201,13 +220,9 @@ def load_model(
         )
 
         if not api_key:
-            raise ValueError(
-                "AZURE_API_KEY is not set; populate .env or environment variables."
-            )
+            raise ValueError("AZURE_API_KEY is not set")
         if not endpoint:
-            raise ValueError(
-                "AZURE_INFER_ENDPOINT is not set; populate .env or environment variables."
-            )
+            raise ValueError("AZURE_INFER_ENDPOINT is not set")
 
         client = AzureClient(
             endpoint=endpoint,
@@ -217,12 +232,9 @@ def load_model(
             api_version=api_version,
             verify_ssl=verify_ssl,
         )
-
-        # Tokenizer is not required for remote inference.
         return client, None
 
     clear_gpu_memory()
-
     print(f"Loading model: {model_config.name}")
 
     def build_bnb_config() -> BitsAndBytesConfig:
@@ -245,13 +257,10 @@ def load_model(
         )
     except Exception as e:
         error_msg = str(e).lower()
-        # Check for authentication errors
         if "gated" in error_msg or "access" in error_msg:
             raise ValueError(
-                f"Model {model_config.name} requires HuggingFace authentication. "
-                f"Please set HUGGINGFACE_TOKEN or run: huggingface-cli login"
+                f"Model {model_config.name} requires HuggingFace authentication."
             )
-        # For tokenizer deserialization errors (e.g., Mistral), retry with legacy tokenizer
         if (
             "pretokenizer" in error_msg
             or "variant" in error_msg
@@ -259,7 +268,6 @@ def load_model(
         ):
             print(f"Warning: Tokenizer deserialization issue. Attempting recovery...")
             try:
-                # Try loading with use_fast=False for Mistral and similar issues
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_config.name,
                     trust_remote_code=True,
@@ -267,37 +275,31 @@ def load_model(
                     token=os.getenv("HUGGINGFACE_TOKEN"),
                 )
                 print(f"Recovered tokenizer with use_fast=False")
-            except Exception as retry_error:
-                print(f"Warning: Tokenizer recovery failed. Trying without token...")
+            except Exception:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_config.name, trust_remote_code=True, use_fast=False
                 )
         else:
-            # For other errors, try without token as fallback
             print(f"Warning: {e}. Trying without token...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_config.name, trust_remote_code=True
             )
 
-    # Set pad token
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
     load_attempted_4bit = use_4bit
     last_error = None
+    
     while True:
-        # Default to auto placement; override to single-GPU placement only for very large models.
         model_kwargs = {
             "trust_remote_code": True,
-            "dtype": torch.bfloat16,
+            "torch_dtype": torch.bfloat16,
             "device_map": "auto",
         }
 
-        if torch.cuda.is_available() and is_large_model(
-            model_config.name, cutoff_billion=60
-        ):
-            # Avoid CPU/disk offload heuristics for 60B+ models; keep them on cuda:0.
+        if torch.cuda.is_available() and is_large_model(model_config.name, cutoff_billion=60):
             max_gpu_mem_gb = int(
                 torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
             )
@@ -307,7 +309,6 @@ def load_model(
         if use_4bit:
             model_kwargs["quantization_config"] = bnb_config
 
-        # Avoid flash attention per user request: prefer SDPA, then eager
         attn_impls = ["sdpa", "eager"]
 
         for attn_impl in attn_impls:
@@ -321,29 +322,21 @@ def load_model(
             except (ValueError, NotImplementedError, ImportError, RuntimeError) as e:
                 last_error = e
                 error_msg = str(e).lower()
-                # If the failure is OOM and we have not tried 4-bit yet, retry with 4-bit
                 if "out of memory" in error_msg and not load_attempted_4bit:
-                    print(
-                        "OOM loading model in full precision; retrying with 4-bit quantization."
-                    )
+                    print("OOM loading model; retrying with 4-bit quantization.")
                     use_4bit = True
                     bnb_config = build_bnb_config()
                     load_attempted_4bit = True
                     clear_gpu_memory()
                     break
-                # If attention implementation unsupported, try next option
                 if attn_impl != attn_impls[-1] and "attention" in error_msg:
-                    print(
-                        f"{attn_impl} not supported ({e}); trying next attention implementation"
-                    )
+                    print(f"{attn_impl} not supported; trying next")
                     continue
                 raise
         else:
-            # No break occurred; if we exited due to OOM retry we loop again
             if load_attempted_4bit and last_error:
                 raise last_error
             continue
-        # Break outer while when model successfully loaded
         if last_error is None:
             break
 
@@ -351,7 +344,14 @@ def load_model(
     if load_adapter:
         print(f"Loading adapter from: {load_adapter}")
         model = PeftModel.from_pretrained(model, load_adapter)
-        model = model.merge_and_unload()
+        
+        # Only merge if NOT using 4-bit quantization
+        # merge_and_unload() corrupts weight dimensions with 4-bit models
+        if not use_4bit:
+            model = model.merge_and_unload()
+            print("Adapter merged into base model")
+        else:
+            print("Keeping adapter separate (4-bit mode)")
 
     # Apply LoRA for training
     elif for_training:
