@@ -16,7 +16,7 @@ def load_yaml(path: str) -> dict:
 class ModelConfig:
     name: str
     short_name: str
-    provider: str = "huggingface"  # huggingface, local, or azure
+    provider: str = "huggingface"  # huggingface or azure
     api_model: Optional[str] = None  # Optional override for remote model id
     max_seq_length: int = 512
     load_in_4bit: bool = True
@@ -44,10 +44,10 @@ class Config:
     models_dir: str = "./models"
 
     # Data settings
-    test_size: float = 0.30
-    val_size: float = 0.50
-    augment_factor: int = 10
-    seed: int = 42
+    test_size: Optional[float] = None
+    val_size: Optional[float] = None
+    augment_factor: Optional[int] = None
+    seed: Optional[int] = None
     seeds: List[int] = field(default_factory=list)
     num_seeds: int = 1
 
@@ -79,7 +79,7 @@ class Config:
         exp_cfg = load_yaml(experiments_path)
 
         exp_settings = exp_cfg.get("experiment", {})
-        seed = exp_settings.get("seed", 42)
+        seed = exp_settings.get("seed")
         seeds = exp_settings.get("seeds") or []
         num_seeds = exp_settings.get("num_seeds", 1)
 
@@ -115,6 +115,21 @@ class Config:
         # Load conditions
         for cond in exp_cfg["conditions"]:
             config.conditions.append(ExperimentCondition(**cond))
+
+        missing = []
+        if config.seed is None:
+            missing.append("experiment.seed")
+        if config.test_size is None:
+            missing.append("data.test_size")
+        if config.val_size is None:
+            missing.append("data.val_size")
+        if config.augment_factor is None:
+            missing.append("data.augment_factor")
+        if missing:
+            raise ValueError(
+                "Missing required config values in experiments.yaml: "
+                + ", ".join(missing)
+            )
 
         return config
 

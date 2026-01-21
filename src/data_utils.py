@@ -22,11 +22,19 @@ def save_data(data: List[Dict], filepath: str):
 def split_data(
     data: List[Dict], test_size: float = 0.2, val_size: float = 0.5, seed: int = 42
 ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
-    train_data, temp_data = train_test_split(
-        data, test_size=test_size, random_state=seed
+    labels = [item.get("difficulty") for item in data]
+    train_data, temp_data, train_labels, temp_labels = train_test_split(
+        data,
+        labels,
+        test_size=test_size,
+        random_state=seed,
+        stratify=labels,
     )
     val_data, test_data = train_test_split(
-        temp_data, test_size=val_size, random_state=seed
+        temp_data,
+        test_size=val_size,
+        random_state=seed,
+        stratify=temp_labels,
     )
     return train_data, val_data, test_data
 

@@ -195,6 +195,7 @@ class ExperimentRunner:
                 "Input",
                 "Expected_Output",
                 "Generated_Output",
+                "Difficulty",
                 "Exact_Match",
             ]
 
@@ -209,6 +210,7 @@ class ExperimentRunner:
                             result["input"],
                             result["expected"],
                             result["generated"],
+                            result.get("difficulty"),
                             result["exact_match"],
                         ]
                     )

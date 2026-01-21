@@ -187,6 +187,7 @@ class ExactMatchEvaluator:
                 "input": item["input"],
                 "expected": item["output"],
                 "generated": generated,
+                "difficulty": item.get("difficulty"),
                 "exact_match": exact_match,
             }
             self.results.append(result)

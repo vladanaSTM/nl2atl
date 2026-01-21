@@ -84,7 +84,7 @@ class LLMJudge:
                     verify_ssl=verify_ssl,
                     use_cache=True,
                 )
-            elif self.provider in {"local", "huggingface"}:
+            elif self.provider == "huggingface":
                 if not self.model_config:
                     raise ValueError("Local judge requires model_config.")
                 self.client = LocalJudgeClient(self.model_config)
@@ -355,7 +355,6 @@ def evaluate_prediction_file(
                 "reasoning": decision.reasoning,
                 "judge_model": judge.judge_model,
                 "source_file": prediction_path.name,
-                "match_method": match_method,
                 "decision_method": decision.decision_method,
             }
         )
@@ -370,38 +369,133 @@ def evaluate_prediction_file(
     return corrected_rows, stats
 
 
-def compute_metrics(rows: List[Dict]) -> Dict[str, float]:
-    evaluated_rows = [r for r in rows if r.get("match_method") != "unmatched"]
-    evaluated = len(evaluated_rows)
-
-    correct_yes = sum(1 for r in evaluated_rows if r.get("correct") == "yes")
-    correct_no = evaluated - correct_yes
-
-    accuracy = (correct_yes / evaluated) if evaluated else 0.0
-
-    precision = accuracy
-    recall = accuracy
-    f1 = accuracy
-
-    tp = correct_yes
-    fp = correct_no
-    fn = correct_no
-    tn = 0
-
+def compute_metrics(rows: List[Dict]) -> Dict[str, Any]:
+    """
+    Compute meaningful metrics for ATL generation evaluation.
+    
+    Metrics focus on:
+    - Overall correctness rate
+    - Breakdown by decision method (exact match vs LLM judge)
+    - Semantic flexibility (how often non-exact matches are still correct)
+    """
+    if not rows:
+        return _empty_metrics()
+    
+    # Filter to evaluated rows only
+    evaluated_rows = [r for r in rows if r.get("decision_method") != "unmatched"]
+    total_evaluated = len(evaluated_rows)
+    
+    if total_evaluated == 0:
+        return _empty_metrics()
+    
+    # === Core Correctness ===
+    correct_count = sum(1 for r in evaluated_rows if r.get("correct") == "yes")
+    incorrect_count = total_evaluated - correct_count
+    accuracy = correct_count / total_evaluated
+    
+    # === Breakdown by Decision Method ===
+    exact_match_rows = [r for r in evaluated_rows if r.get("decision_method") == "exact"]
+    llm_judged_rows = [r for r in evaluated_rows if r.get("decision_method") == "llm"]
+    no_llm_rows = [r for r in evaluated_rows if r.get("decision_method") == "no_llm"]
+    
+    exact_match_count = len(exact_match_rows)
+    llm_judged_count = len(llm_judged_rows)
+    
+    # Exact matches are always correct by definition
+    exact_match_correct = exact_match_count
+    
+    # LLM-judged: how many did the judge approve?
+    llm_approved = sum(1 for r in llm_judged_rows if r.get("correct") == "yes")
+    llm_rejected = llm_judged_count - llm_approved
+    
+    # === Derived Rates ===
+    # What fraction of outputs matched gold exactly?
+    exact_match_rate = exact_match_count / total_evaluated if total_evaluated else 0.0
+    
+    # What fraction required LLM judgment?
+    llm_judge_rate = llm_judged_count / total_evaluated if total_evaluated else 0.0
+    
+    # Of those requiring LLM judgment, how many were approved?
+    # This measures "semantic flexibility" - correct despite surface differences
+    llm_approval_rate = llm_approved / llm_judged_count if llm_judged_count else 0.0
+    
+    # How much does LLM judging "rescue" the accuracy?
+    # (accuracy with LLM judge) - (accuracy if we only counted exact matches)
+    accuracy_boost_from_llm = (llm_approved / total_evaluated) if total_evaluated else 0.0
+    
     return {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "tp": tp,
-        "fp": fp,
-        "tn": tn,
-        "fn": fn,
-        "evaluated": evaluated,
-        "correct_yes": correct_yes,
-        "correct_no": correct_no,
+        # === Primary Metrics ===
+        "accuracy": round(accuracy, 4),
+        "total_evaluated": total_evaluated,
+        "correct": correct_count,
+        "incorrect": incorrect_count,
+        
+        # === Decision Method Breakdown ===
+        "exact_match": {
+            "count": exact_match_count,
+            "rate": round(exact_match_rate, 4),
+        },
+        "llm_judged": {
+            "count": llm_judged_count,
+            "rate": round(llm_judge_rate, 4),
+            "approved": llm_approved,
+            "rejected": llm_rejected,
+            "approval_rate": round(llm_approval_rate, 4),
+        },
+        
+        # === Interpretable Summary ===
+        "accuracy_from_exact_match": round(exact_match_rate, 4),
+        "accuracy_boost_from_llm": round(accuracy_boost_from_llm, 4),
+        
+        # === No LLM fallback (if used) ===
+        "no_llm_fallback_count": len(no_llm_rows),
     }
 
+
+def _empty_metrics() -> Dict[str, Any]:
+    """Return empty metrics structure."""
+    return {
+        "accuracy": 0.0,
+        "total_evaluated": 0,
+        "correct": 0,
+        "incorrect": 0,
+        "exact_match": {"count": 0, "rate": 0.0},
+        "llm_judged": {
+            "count": 0,
+            "rate": 0.0,
+            "approved": 0,
+            "rejected": 0,
+            "approval_rate": 0.0,
+        },
+        "accuracy_from_exact_match": 0.0,
+        "accuracy_boost_from_llm": 0.0,
+        "no_llm_fallback_count": 0,
+    }
+
+def compute_metrics_with_difficulty(rows: List[Dict]) -> Dict[str, Any]:
+    """Compute metrics with breakdown by difficulty level."""
+    base_metrics = compute_metrics(rows)
+    
+    # Group by difficulty
+    by_difficulty = defaultdict(list)
+    for r in rows:
+        difficulty = r.get("difficulty", "unknown")
+        by_difficulty[difficulty].append(r)
+    
+    difficulty_breakdown = {}
+    for difficulty, diff_rows in sorted(by_difficulty.items()):
+        evaluated = [r for r in diff_rows if r.get("decision_method") != "unmatched"]
+        if not evaluated:
+            continue
+        correct = sum(1 for r in evaluated if r.get("correct") == "yes")
+        difficulty_breakdown[difficulty] = {
+            "count": len(evaluated),
+            "correct": correct,
+            "accuracy": round(correct / len(evaluated), 4),
+        }
+    
+    base_metrics["by_difficulty"] = difficulty_breakdown
+    return base_metrics
 
 def build_summary(
     results: List[Dict],
@@ -409,59 +503,51 @@ def build_summary(
     judge_model: str,
     prompt_version: str,
 ) -> Dict:
-    overall_rows = []
+    """Build summary with improved metrics."""
+    
+    # Aggregate all rows
+    all_rows = []
     for result in results:
-        overall_rows.extend(result["rows"])
-
-    overall_metrics = compute_metrics(overall_rows)
-
+        all_rows.extend(result["rows"])
+    
+    overall_metrics = compute_metrics(all_rows)
+    
+    # Per-file breakdown
     per_file = []
     for result in results:
-        per_file.append(
-            {
-                "source_file": result["source_file"],
-                "stem": result["stem"],
-                "metrics": result["metrics"],
-                "stats": result["stats"],
-            }
-        )
-
+        per_file.append({
+            "source_file": result["source_file"],
+            "stem": result["stem"],
+            "metrics": result["metrics"],
+            "stats": result["stats"],
+        })
+    
+    # Ranking by accuracy
     ranking = sorted(
         per_file,
-        key=lambda r: (
-            -r["metrics"]["accuracy"],
-            -r["metrics"]["f1"],
-        ),
+        key=lambda r: -r["metrics"]["accuracy"],
     )
-
-    ranking_rows = []
-    for idx, item in enumerate(ranking, start=1):
-        ranking_rows.append(
-            {
-                "rank": idx,
-                "source_file": item["source_file"],
-                "accuracy": item["metrics"]["accuracy"],
-                "f1": item["metrics"]["f1"],
-                "tp": item["metrics"]["tp"],
-                "fp": item["metrics"]["fp"],
-                "tn": item["metrics"]["tn"],
-                "fn": item["metrics"]["fn"],
-            }
-        )
-
+    
+    ranking_table = [
+        {
+            "rank": idx,
+            "source_file": item["source_file"],
+            "accuracy": item["metrics"]["accuracy"],
+            "exact_match_rate": item["metrics"]["exact_match"]["rate"],
+            "llm_approval_rate": item["metrics"]["llm_judged"]["approval_rate"],
+            "total": item["metrics"]["total_evaluated"],
+        }
+        for idx, item in enumerate(ranking, start=1)
+    ]
+    
     return {
         "judge_model": judge_model,
         "prompt_version": prompt_version,
         "created_at": datetime.utcnow().isoformat() + "Z",
         "overall": overall_metrics,
         "per_file": per_file,
-        "ranking": ranking_rows,
+        "ranking": ranking_table,
         "totals": totals,
-        "metric_notes": {
-            "accuracy": "correct_yes / evaluated",
-            "precision_recall_f1": "computed as correct_yes / evaluated (positive class correct==yes)",
-            "confusion_matrix": "tp=correct_yes, fp=incorrect, fn=incorrect, tn=0",
-        },
     }
 
 
@@ -511,13 +597,12 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
                     "df = pd.DataFrame([\n",
                     "    {\n",
                     "        'source_file': item['source_file'],\n",
-                    "        'accuracy': item['metrics']['accuracy'],\n",
-                    "        'f1': item['metrics']['f1'],\n",
-                    "        'evaluated': item['metrics']['evaluated'],\n",
-                    "        'tp': item['metrics']['tp'],\n",
-                    "        'fp': item['metrics']['fp'],\n",
-                    "        'fn': item['metrics']['fn'],\n",
-                    "        'tn': item['metrics']['tn'],\n",
+                    "        'accuracy': item.get('metrics', {}).get('accuracy', 0.0),\n",
+                    "        'evaluated': item.get('metrics', {}).get('total_evaluated', item.get('metrics', {}).get('evaluated', 0)),\n",
+                    "        'correct': item.get('metrics', {}).get('correct', 0),\n",
+                    "        'incorrect': item.get('metrics', {}).get('incorrect', 0),\n",
+                    "        'exact_match_rate': item.get('metrics', {}).get('exact_match', {}).get('rate', None),\n",
+                    "        'llm_approval_rate': item.get('metrics', {}).get('llm_judged', {}).get('approval_rate', None),\n",
                     "    }\n",
                     "    for item in per_file\n",
                     "])\n",
@@ -529,8 +614,9 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
                 "metadata": {"language": "python"},
                 "source": [
                     "# Leaderboard table\n",
-                    "leaderboard = df.sort_values(['accuracy', 'f1'], ascending=[False, False])\n",
-                    "leaderboard[['source_file', 'accuracy', 'f1', 'evaluated']]\n",
+                    "# Sort primarily by accuracy, secondarily by correct count\n",
+                    "leaderboard = df.sort_values(['accuracy', 'correct'], ascending=[False, False])\n",
+                    "leaderboard[['source_file', 'accuracy', 'evaluated', 'correct', 'incorrect']]\n",
                 ],
             },
             {
@@ -565,18 +651,14 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
                 "cell_type": "code",
                 "metadata": {"language": "python"},
                 "source": [
-                    "# Confusion matrix heatmap for best model\n",
+                    "# Correct vs Incorrect bar chart for best model\n",
                     "best = summary['ranking'][0]['source_file'] if summary['ranking'] else None\n",
                     "if best is not None:\n",
                     "    best_row = df[df['source_file'] == best].iloc[0]\n",
-                    "    cm = np.array([[best_row['tp'], best_row['fp']], [best_row['fn'], best_row['tn']]])\n",
-                    "    plt.figure(figsize=(4, 4))\n",
-                    "    plt.imshow(cm, cmap='Blues')\n",
-                    "    plt.title(f'Confusion Matrix: {best}')\n",
-                    "    plt.xticks([0, 1], ['Pred Yes', 'Pred No'])\n",
-                    "    plt.yticks([0, 1], ['Actual Yes', 'Actual No'])\n",
-                    "    for (i, j), val in np.ndenumerate(cm):\n",
-                    "        plt.text(j, i, int(val), ha='center', va='center')\n",
+                    "    plt.figure(figsize=(6, 4))\n",
+                    "    plt.bar(['correct', 'incorrect'], [int(best_row.get('correct', 0)), int(best_row.get('incorrect', 0))])\n",
+                    "    plt.title(f'Correct vs Incorrect: {best}')\n",
+                    "    plt.ylabel('Count')\n",
                     "    plt.tight_layout()\n",
                     "    plt.show()\n",
                 ],

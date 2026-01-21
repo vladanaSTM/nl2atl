@@ -261,3 +261,25 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    # After processing all judges, compute inter-rater agreement if multiple judges
+    if len(judge_entries) > 1:
+        from src.judge_agreement import (
+            generate_agreement_report,
+            print_agreement_summary,
+        )
+
+        eval_datasets_dir = output_dir / "evaluated_datasets"
+        if not eval_datasets_dir.exists():
+            # Fall back to checking if judge dirs are directly in output_dir
+            eval_datasets_dir = output_dir
+
+        try:
+            agreement_report = generate_agreement_report(
+                eval_dir=eval_datasets_dir,
+                output_path=output_dir / "agreement_report.json",
+            )
+            print_agreement_summary(agreement_report)
+        except ValueError as e:
+            print(f"Skipping agreement analysis: {e}")
+
