@@ -16,7 +16,7 @@ from datasets import Dataset
 from .config import Config, ModelConfig, ExperimentCondition
 from .data_utils import load_data, split_data, augment_data
 from .model_registry import load_model, get_model_type, clear_gpu_memory
-from .evaluator import ATLEvaluator
+from .exact_match_evaluator import ExactMatchEvaluator
 from .few_shot import format_prompt
 
 
@@ -25,7 +25,7 @@ class ExperimentRunner:
 
     def __init__(self, config: Config):
         self.config = config
-        self.evaluator = ATLEvaluator()
+        self.evaluator = ExactMatchEvaluator()
         self.all_results = []
 
         # Load and split data once
@@ -58,7 +58,7 @@ class ExperimentRunner:
 
         def normalize(token: str) -> str:
             token = token.lower()
-            for prefix in ("azure-", "elysium-"):
+            for prefix in "azure-":
                 if token.startswith(prefix):
                     token = token[len(prefix) :]
             return token
@@ -84,10 +84,10 @@ class ExperimentRunner:
         model_key = self._resolve_model_key(model_key)
         model_config = self.config.models[model_key]
         model_type = get_model_type(model_config.name)
-        is_elysium = model_config.provider.lower() == "elysium"
-        if condition.finetuned and is_elysium:
+        is_azure = model_config.provider.lower() == "azure"
+        if condition.finetuned and is_azure:
             print(
-                f"Skipping {model_config.short_name} ({condition.name}): fine-tuning disabled for provider=elysium."
+                f"Skipping {model_config.short_name} ({condition.name}): fine-tuning disabled for provider=azure."
             )
             return {
                 "run_name": f"{model_config.short_name}_{condition.name}",
@@ -96,7 +96,7 @@ class ExperimentRunner:
                 "finetuned": condition.finetuned,
                 "few_shot": condition.few_shot,
                 "skipped": True,
-                "skip_reason": "finetuning_disabled_for_elysium",
+                "skip_reason": "finetuning_disabled_for_azure",
             }
         effective_finetuned = condition.finetuned
 
@@ -164,14 +164,7 @@ class ExperimentRunner:
 
         # Log metrics to wandb
         wandb.log(
-            {
-                "eval/exact_match": metrics["exact_match"],
-                "eval/agent_f1": metrics["agent_f1"],
-                "eval/temporal_f1": metrics["temporal_f1"],
-                "eval/logical_f1": metrics["logical_f1"],
-                "eval/syntax_valid": metrics["syntax_valid"],
-                "eval/overall_score": metrics["overall_score"],
-            },
+            {"eval/exact_match": metrics["exact_match"]},
             commit=False,
         )
 
@@ -184,11 +177,6 @@ class ExperimentRunner:
             "Expected_Output",
             "Generated_Output",
             "Exact_Match",
-            "Agent_F1",
-            "Temporal_F1",
-            "Logical_F1",
-            "Syntax_Valid",
-            "Overall_Score",
         ]
 
         table_rows = []
@@ -202,12 +190,7 @@ class ExperimentRunner:
                         result["input"],
                         result["expected"],
                         result["generated"],
-                        result["scores"]["exact_match"],
-                        result["scores"]["agent_f1"],
-                        result["scores"]["temporal_f1"],
-                        result["scores"]["logical_f1"],
-                        result["scores"]["syntax_valid"],
-                        result["scores"]["overall_score"],
+                        result["exact_match"],
                     ]
                 )
 
@@ -226,11 +209,6 @@ class ExperimentRunner:
         # Print summary
         print(f"\nResults for {run_name}:")
         print(f"  Exact Match:    {metrics['exact_match']:.1%}")
-        print(f"  Agent F1:       {metrics['agent_f1']:.1%}")
-        print(f"  Temporal F1:    {metrics['temporal_f1']:.1%}")
-        print(f"  Logical F1:     {metrics['logical_f1']:.1%}")
-        print(f"  Syntax Valid:   {metrics['syntax_valid']:.1%}")
-        print(f"  Overall Score:  {metrics['overall_score']:.1%}")
 
         # Save results
         result = {
@@ -250,8 +228,8 @@ class ExperimentRunner:
             Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
         )
         result_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, default=str, ensure_ascii=False)
 
         # Clean up if not caching this model
         if not (self.reuse_models and not effective_finetuned):
@@ -267,8 +245,8 @@ class ExperimentRunner:
     ) -> str:
         """Train a model and return the adapter path."""
 
-        if model_config.provider.lower() == "elysium":
-            raise ValueError("Training is disabled for Elysium/Azure models.")
+        if model_config.provider.lower() == "azure":
+            raise ValueError("Training is disabled for Azure models.")
 
         print(f"\nTraining {model_config.short_name}...")
 
@@ -376,12 +354,32 @@ class ExperimentRunner:
         return str(final_path)
 
     def run_all_experiments(
-        self, models: List[str] = None, conditions: List[str] = None
+        self,
+        models: List[str] = None,
+        conditions: List[str] = None,
+        model_provider: str = "hf",
     ):
         """Run all experiments."""
 
         if models is None:
             models = list(self.config.models.keys())
+
+        if model_provider not in {"hf", "azure", "all"}:
+            raise ValueError(
+                f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
+            )
+
+        if model_provider != "all":
+            filtered_models = []
+            for model_key in models:
+                resolved_key = self._resolve_model_key(model_key)
+                provider = self.config.models[resolved_key].provider.lower()
+                is_azure = provider == "azure"
+                if (model_provider == "azure" and is_azure) or (
+                    model_provider == "hf" and not is_azure
+                ):
+                    filtered_models.append(model_key)
+            models = filtered_models
 
         if conditions is None:
             conditions = self.config.conditions

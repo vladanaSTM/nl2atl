@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from .model_registry import ElysiumClient
+from .model_registry import AzureClient
 
 PROMPT_VERSION = "v1.0"
 
@@ -38,22 +38,22 @@ class LLMJudge:
         self.prompt_version = prompt_version
         self.cache_path = cache_path
         self.cache = self._load_cache(cache_path)
-        self.client: Optional[ElysiumClient] = None
+        self.client: Optional[AzureClient] = None
 
         if not self.no_llm:
-            api_key = os.getenv("ELYSIUM_API_KEY")
-            endpoint = os.getenv("ELYSIUM_INFER_ENDPOINT")
-            api_version = os.getenv("ELYSIUM_API_VERSION")
-            verify_ssl_env = os.getenv("ELYSIUM_VERIFY_SSL", "false").lower()
+            api_key = os.getenv("AZURE_API_KEY")
+            endpoint = os.getenv("AZURE_INFER_ENDPOINT")
+            api_version = os.getenv("AZURE_API_VERSION")
+            verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
             verify_ssl = verify_ssl_env in ["1", "true", "yes"]
 
             if not api_key or not endpoint:
                 raise ValueError(
-                    "Missing LLM credentials. Set ELYSIUM_API_KEY and ELYSIUM_INFER_ENDPOINT, "
+                    "Missing LLM credentials. Set AZURE_API_KEY and AZURE_INFER_ENDPOINT, "
                     "or pass --no_llm to run exact-match only."
                 )
 
-            self.client = ElysiumClient(
+            self.client = AzureClient(
                 endpoint=endpoint,
                 api_key=api_key,
                 model=self.api_model,
@@ -224,7 +224,15 @@ def extract_prediction_items(prediction_data) -> List[Dict[str, Optional[str]]]:
             or item.get("model_output")
         )
         gold = item.get("expected") or item.get("gold") or item.get("reference")
-        parsed.append({"input": input_text, "prediction": prediction, "gold": gold})
+        exact_match = item.get("exact_match")
+        parsed.append(
+            {
+                "input": input_text,
+                "prediction": prediction,
+                "gold": gold,
+                "exact_match": exact_match,
+            }
+        )
     return parsed
 
 
@@ -247,6 +255,7 @@ def evaluate_prediction_file(
         input_text = pred_item.get("input")
         prediction = pred_item.get("prediction") or ""
         gold = pred_item.get("gold") or ""
+        exact_match = pred_item.get("exact_match")
         match_method = "input" if gold else "unmatched"
 
         if not prediction or not gold:
@@ -260,7 +269,12 @@ def evaluate_prediction_file(
                 decision_method="unmatched",
             )
         else:
-            if normalize_text(prediction) == normalize_text(gold):
+            if exact_match is not None:
+                is_exact = bool(exact_match)
+            else:
+                is_exact = normalize_text(prediction) == normalize_text(gold)
+
+            if is_exact:
                 decision = JudgeDecision(
                     correct="yes",
                     reasoning="Exact match (normalized).",

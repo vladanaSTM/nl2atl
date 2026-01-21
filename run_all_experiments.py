@@ -18,6 +18,12 @@ def main():
         default=None,
         help="Conditions to test (default: all)",
     )
+    parser.add_argument(
+        "--model_provider",
+        choices=["hf", "azure", "all"],
+        default="hf",
+        help="Which model provider to run (default: hf).",
+    )
     parser.add_argument("--models_config", default="configs/models.yaml")
     parser.add_argument("--experiments_config", default="configs/experiments.yaml")
     args = parser.parse_args()
@@ -27,7 +33,11 @@ def main():
 
     # Run experiments
     runner = ExperimentRunner(config)
-    runner.run_all_experiments(models=args.models, conditions=args.conditions)
+    runner.run_all_experiments(
+        models=args.models,
+        conditions=args.conditions,
+        model_provider=args.model_provider,
+    )
 
 
 if __name__ == "__main__":

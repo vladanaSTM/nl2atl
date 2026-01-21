@@ -59,7 +59,7 @@ def resolve_judge_model(judge_model: str, models_config_path: Path) -> str:
 
     def normalize(token: str) -> str:
         token = token.lower()
-        for prefix in ("azure-", "elysium-"):
+        for prefix in "azure-":
             if token.startswith(prefix):
                 token = token[len(prefix) :]
         return token

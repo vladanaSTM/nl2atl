@@ -16,7 +16,7 @@ def load_yaml(path: str) -> dict:
 class ModelConfig:
     name: str
     short_name: str
-    provider: str = "huggingface"  # huggingface or elysium
+    provider: str = "huggingface"  # huggingface or azure
     api_model: Optional[str] = None  # Optional override for remote model id
     max_seq_length: int = 512
     load_in_4bit: bool = True

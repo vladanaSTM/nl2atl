@@ -18,17 +18,17 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 
 from .config import ModelConfig
 
-# Ensure environment variables from .env are loaded for Elysium/Azure access.
+# Ensure environment variables from .env are loaded for Azure access.
 load_dotenv()
 
 # Silence noisy warnings when verify_ssl is intentionally disabled.
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
-class ElysiumClient:
-    """Simple client for the Elysium Azure OpenAI proxy."""
+class AzureClient:
+    """Simple client for the Azure OpenAI proxy."""
 
-    provider = "elysium"
+    provider = "azure"
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class ElysiumClient:
 
     def _build_headers(self) -> dict:
         headers = {
-            # Elysium expects Azure-style api-key header, not Authorization bearer.
+            # Azure expects api-key header, not Authorization bearer.
             "api-key": self.api_key,
             "Content-Type": "application/json",
             "Connection": "close",  # avoid keep-alive issues with the proxy
@@ -105,7 +105,7 @@ class ElysiumClient:
                 last_error = e
                 if attempt == 2:
                     raise RuntimeError(
-                        f"Elysium request failed after retries: {e}"
+                        f"Azure request failed after retries: {e}"
                     ) from e
                 time.sleep(1.5 * (attempt + 1))
 
@@ -186,30 +186,30 @@ def load_model(
         for_training: Whether to prepare for training (apply LoRA)
         load_adapter: Path to load fine-tuned adapter from
     """
-    # Route to Elysium/Azure backend when requested; no GPU allocations.
-    if model_config.provider.lower() == "elysium":
-        api_key = os.getenv("ELYSIUM_API_KEY")
-        endpoint = os.getenv("ELYSIUM_INFER_ENDPOINT")
-        api_version = os.getenv("ELYSIUM_API_VERSION")
-        use_cache = os.getenv("ELYSIUM_USE_CACHE", "true").lower() == "true"
-        verify_ssl_env = os.getenv("ELYSIUM_VERIFY_SSL", "false").lower()
+    # Route to Azure backend when requested; no GPU allocations.
+    if model_config.provider.lower() == "azure":
+        api_key = os.getenv("AZURE_API_KEY")
+        endpoint = os.getenv("AZURE_INFER_ENDPOINT")
+        api_version = os.getenv("AZURE_API_VERSION")
+        use_cache = os.getenv("AZURE_USE_CACHE", "true").lower() == "true"
+        verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
         verify_ssl = verify_ssl_env in ["1", "true", "yes"]
         api_model = (
             model_config.api_model
-            or os.getenv("ELYSIUM_INFER_MODEL")
+            or os.getenv("AZURE_INFER_MODEL")
             or model_config.name
         )
 
         if not api_key:
             raise ValueError(
-                "ELYSIUM_API_KEY is not set; populate .env or environment variables."
+                "AZURE_API_KEY is not set; populate .env or environment variables."
             )
         if not endpoint:
             raise ValueError(
-                "ELYSIUM_INFER_ENDPOINT is not set; populate .env or environment variables."
+                "AZURE_INFER_ENDPOINT is not set; populate .env or environment variables."
             )
 
-        client = ElysiumClient(
+        client = AzureClient(
             endpoint=endpoint,
             api_key=api_key,
             model=api_model,
@@ -376,8 +376,8 @@ def load_model(
 
 def generate(model, tokenizer, prompt: str, max_new_tokens: int = 256) -> str:
     """Generate output from model."""
-    # Remote Elysium/Azure models expose a simple generate() API.
-    if hasattr(model, "provider") and getattr(model, "provider") == "elysium":
+    # Remote Azure models expose a simple generate() API.
+    if hasattr(model, "provider") and getattr(model, "provider") == "azure":
         return model.generate(prompt, max_new_tokens=max_new_tokens)
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
