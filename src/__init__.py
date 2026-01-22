@@ -1,1 +1,1 @@
-"""ATL Formula Generation Comparison Framework."""
+"""NL2ATL: Natural Language to ATL Formula Generation."""

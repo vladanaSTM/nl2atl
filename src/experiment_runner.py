@@ -1,27 +1,27 @@
 """
-Main experiment runner with wandb integration.
+Main experiment runner with W&B integration.
 """
 
 import os
-import json
 import random
-import wandb
-from datetime import datetime
-from typing import Dict, List
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Any
 
-import torch
 import numpy as np
+import torch
+import wandb
+from datasets import Dataset
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from datasets import Dataset
 
 from .config import Config, ModelConfig, ExperimentCondition
+from .constants import Provider
 from .data_utils import load_data, split_data, augment_data
-from .model_registry import load_model, get_model_type, clear_gpu_memory
-from .model_utils import resolve_model_key
 from .exact_match_evaluator import ExactMatchEvaluator
 from .few_shot import format_prompt
+from .io_utils import save_json
+from .model_registry import load_model, get_model_type, clear_gpu_memory
+from .model_utils import resolve_model_key
 
 
 class ExperimentRunner:
@@ -30,7 +30,7 @@ class ExperimentRunner:
     def __init__(self, config: Config):
         self.config = config
         self.evaluator = ExactMatchEvaluator()
-        self.all_results = []
+        self.all_results: List[Dict] = []
 
         # Global seeding for reproducibility
         self._set_global_seed(self.config.seed)
@@ -47,37 +47,32 @@ class ExperimentRunner:
         # Augment training data
         self.train_data_aug = augment_data(self.train_data, config.augment_factor)
 
-        # Optional reuse of loaded models across conditions
-        self.model_cache = {}
+        # Model caching
+        self.model_cache: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
         self.reuse_models = os.getenv("REUSE_MODEL_CACHE", "1") != "0"
 
         print(
-            f"Data loaded: Train={len(self.train_data_aug)}, Val={len(self.val_data)}, Test={len(self.test_data)}"
-        )
-
-    def _resolve_model_key(self, model_arg: str) -> str:
-        """Resolve user-provided model argument to a config key."""
-        return resolve_model_key(
-            model_arg,
-            self.config.models,
-            prefixes="azure-",
-            require_mapping_entries=False,
-            match_key_lower=False,
+            f"Data loaded: Train={len(self.train_data_aug)}, "
+            f"Val={len(self.val_data)}, Test={len(self.test_data)}"
         )
 
     def _seed_suffix(self) -> str:
-        if getattr(self.config, "seeds", None) and len(self.config.seeds) > 1:
+        """Get seed suffix for run naming."""
+        if self.config.seeds and len(self.config.seeds) > 1:
             return f"_seed{self.config.seed}"
         return ""
 
     def _build_run_name(self, model_key: str, condition: ExperimentCondition) -> str:
+        """Build a unique run name."""
         model_config = self.config.models[model_key]
         return f"{model_config.short_name}_{condition.name}{self._seed_suffix()}"
 
     def _get_result_path(self, run_name: str) -> Path:
+        """Get path for saving results."""
         return Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
 
     def _set_global_seed(self, seed: int) -> None:
+        """Set random seeds for reproducibility."""
         random.seed(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -87,13 +82,14 @@ class ExperimentRunner:
         torch.backends.cudnn.benchmark = False
 
     def _assert_finetune_allowed(self, model_config: ModelConfig) -> None:
-        if model_config.provider.lower() == "azure":
+        """Check if finetuning is allowed for this model."""
+        if model_config.is_azure:
             raise ValueError(
-                f"Finetuning disabled for provider=azure (model={model_config.short_name})."
+                f"Finetuning disabled for Azure models (model={model_config.short_name})."
             )
         if model_config.params_b is not None and model_config.params_b > 8:
             raise ValueError(
-                "Finetuning disabled for models >8B params "
+                f"Finetuning disabled for models >8B params "
                 f"(model={model_config.short_name}, params_b={model_config.params_b})."
             )
 
@@ -103,6 +99,7 @@ class ExperimentRunner:
         condition: ExperimentCondition,
         effective_finetuned: bool,
     ) -> Dict:
+        """Build configuration dict for W&B."""
         return {
             "model": model_config.name,
             "model_short": model_config.short_name,
@@ -125,14 +122,13 @@ class ExperimentRunner:
         condition: ExperimentCondition,
         effective_finetuned: bool,
     ) -> None:
+        """Initialize a W&B run."""
         wandb.init(
             project=self.config.wandb_project,
             entity=self.config.wandb_entity,
             name=run_name,
             config=self._build_wandb_config(
-                model_config,
-                condition,
-                effective_finetuned,
+                model_config, condition, effective_finetuned
             ),
             reinit=True,
         )
@@ -140,9 +136,10 @@ class ExperimentRunner:
     def _load_or_reuse_model(
         self,
         model_config: ModelConfig,
-        adapter_path: str,
+        adapter_path: Optional[str],
         effective_finetuned: bool,
-    ):
+    ) -> Tuple[Any, Any]:
+        """Load model, reusing from cache if possible."""
         cache_key = (model_config.name, adapter_path or "base")
 
         if (
@@ -151,21 +148,25 @@ class ExperimentRunner:
             and cache_key in self.model_cache
         ):
             model, tokenizer = self.model_cache[cache_key]
-            print("Reusing cached model from GPU memory for this condition")
+            print("Reusing cached model from GPU memory")
             return model, tokenizer
 
         model, tokenizer = load_model(
-            model_config, for_training=False, load_adapter=adapter_path
+            model_config,
+            for_training=False,
+            load_adapter=adapter_path,
         )
+
         if self.reuse_models and not effective_finetuned:
             self.model_cache[cache_key] = (model, tokenizer)
 
         return model, tokenizer
 
     def _log_predictions_table(self, run_name: str) -> None:
+        """Log predictions to W&B as a table."""
         wandb.run.summary["num_predictions"] = len(self.evaluator.results)
 
-        table_columns = [
+        columns = [
             "Example_ID",
             "Input",
             "Expected_Output",
@@ -174,45 +175,45 @@ class ExperimentRunner:
             "Exact_Match",
         ]
 
-        table_rows = []
-        if not self.evaluator.results:
-            print("No predictions generated; logging empty predictions table to wandb.")
-        else:
-            for idx, result in enumerate(self.evaluator.results):
-                table_rows.append(
-                    [
-                        idx + 1,
-                        result["input"],
-                        result["expected"],
-                        result["generated"],
-                        result.get("difficulty"),
-                        result["exact_match"],
-                    ]
-                )
+        rows = []
+        for idx, result in enumerate(self.evaluator.results):
+            rows.append(
+                [
+                    idx + 1,
+                    result["input"],
+                    result["expected"],
+                    result["generated"],
+                    result.get("difficulty"),
+                    result["exact_match"],
+                ]
+            )
 
-        predictions_table = wandb.Table(columns=table_columns, data=table_rows)
-        wandb.log({"predictions_table": predictions_table}, commit=True)
+        if not rows:
+            print("No predictions generated; logging empty table to W&B.")
 
-        predictions_artifact = wandb.Artifact(
-            name=f"{run_name}-predictions", type="predictions"
-        )
-        predictions_artifact.add(predictions_table, "predictions")
-        wandb.log_artifact(predictions_artifact)
+        table = wandb.Table(columns=columns, data=rows)
+        wandb.log({"predictions_table": table}, commit=True)
 
-        wandb.run.summary["predictions_table_rows"] = len(table_rows)
-        wandb.run.summary["predictions_table_artifact"] = predictions_artifact.name
+        artifact = wandb.Artifact(name=f"{run_name}-predictions", type="predictions")
+        artifact.add(table, "predictions")
+        wandb.log_artifact(artifact)
+
+        wandb.run.summary["predictions_table_rows"] = len(rows)
+        wandb.run.summary["predictions_table_artifact"] = artifact.name
 
     def _save_result(self, run_name: str, result: Dict) -> None:
+        """Save result to JSON file."""
         result_path = self._get_result_path(run_name)
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, default=str, ensure_ascii=False)
+        save_json(result, result_path)
 
     def run_single_experiment(
-        self, model_key: str, condition: ExperimentCondition, save_model: bool = True
+        self,
+        model_key: str,
+        condition: ExperimentCondition,
+        save_model: bool = True,
     ) -> Dict:
         """Run a single experiment (one model, one condition)."""
-        model_key = self._resolve_model_key(model_key)
+        model_key = resolve_model_key(model_key, self.config.models)
         model_config = self.config.models[model_key]
         model_type = get_model_type(model_config.name)
 
@@ -221,18 +222,12 @@ class ExperimentRunner:
 
         effective_finetuned = condition.finetuned
         run_name = self._build_run_name(model_key, condition)
-        
+
         print(f"\n{'='*60}")
         print(f"Running: {run_name}")
         print(f"{'='*60}")
 
-        # Initialize wandb run
-        self._init_wandb_run(
-            run_name,
-            model_config,
-            condition,
-            effective_finetuned,
-        )
+        self._init_wandb_run(run_name, model_config, condition, effective_finetuned)
 
         adapter_path = None
         model = None
@@ -244,9 +239,7 @@ class ExperimentRunner:
                 adapter_path = self._train_model(model_config, model_type, run_name)
 
             model, tokenizer = self._load_or_reuse_model(
-                model_config,
-                adapter_path,
-                effective_finetuned,
+                model_config, adapter_path, effective_finetuned
             )
 
             # Evaluate
@@ -260,20 +253,12 @@ class ExperimentRunner:
                 verbose=True,
             )
 
-            # Log metrics to wandb
-            wandb.log(
-                {"eval/exact_match": metrics["exact_match"]},
-                commit=False,
-            )
-
-            # Log detailed predictions as a table
+            wandb.log({"eval/exact_match": metrics["exact_match"]}, commit=False)
             self._log_predictions_table(run_name)
 
-            # Print summary
             print(f"\nResults for {run_name}:")
-            print(f"  Exact Match:    {metrics['exact_match']:.1%}")
+            print(f"  Exact Match: {metrics['exact_match']:.1%}")
 
-            # Save results
             result = {
                 "run_name": run_name,
                 "model": model_config.short_name,
@@ -286,17 +271,12 @@ class ExperimentRunner:
             }
 
             self.all_results.append(result)
-
-            # Save to file
             self._save_result(run_name, result)
 
         finally:
-            # Clean up if not caching this model
             if not (self.reuse_models and not effective_finetuned):
-                if model is not None:
-                    del model
-                if tokenizer is not None:
-                    del tokenizer
+                del model
+                del tokenizer
                 clear_gpu_memory()
 
             wandb.finish()
@@ -304,19 +284,20 @@ class ExperimentRunner:
         return result
 
     def _train_model(
-        self, model_config: ModelConfig, model_type: str, run_name: str
+        self,
+        model_config: ModelConfig,
+        model_type: str,
+        run_name: str,
     ) -> str:
         """Train a model and return the adapter path."""
         self._assert_finetune_allowed(model_config)
-
         print(f"\nTraining {model_config.short_name}...")
 
-        # Load model for training
         model, tokenizer = load_model(model_config, for_training=True)
 
         # Optional short-run probe
-        max_steps_env = os.getenv("TRAIN_MAX_STEPS")
         max_steps = -1
+        max_steps_env = os.getenv("TRAIN_MAX_STEPS")
         if max_steps_env:
             try:
                 parsed = int(max_steps_env)
@@ -324,8 +305,8 @@ class ExperimentRunner:
             except ValueError:
                 print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={max_steps_env}")
 
-        # Prepare dataset
-        def build_prompt_dataset(items: List[Dict]) -> Dataset:
+        # Prepare datasets
+        def build_dataset(items: List[Dict]) -> Dataset:
             return Dataset.from_dict(
                 {
                     "text": [
@@ -341,31 +322,20 @@ class ExperimentRunner:
                 }
             )
 
-        train_dataset = build_prompt_dataset(self.train_data_aug)
-        val_dataset = build_prompt_dataset(self.val_data)
+        train_dataset = build_dataset(self.train_data_aug)
+        val_dataset = build_dataset(self.val_data)
 
-        # Output directory
         output_dir = Path(self.config.models_dir) / run_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # Resolve per-model training overrides
-        train_batch_size = (
-            model_config.train_batch_size
-            if model_config.train_batch_size is not None
-            else self.config.batch_size
-        )
-        eval_batch_size = (
-            model_config.eval_batch_size
-            if model_config.eval_batch_size is not None
-            else train_batch_size
-        )
+        train_batch_size = model_config.train_batch_size or self.config.batch_size
+        eval_batch_size = model_config.eval_batch_size or train_batch_size
         grad_accum_steps = (
             model_config.gradient_accumulation_steps
-            if model_config.gradient_accumulation_steps is not None
-            else self.config.gradient_accumulation_steps
+            or self.config.gradient_accumulation_steps
         )
 
-        # Training arguments
         training_args = TrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=self.config.num_epochs,
@@ -400,7 +370,6 @@ class ExperimentRunner:
             tf32=True,
         )
 
-        # Trainer
         trainer = SFTTrainer(
             model=model,
             args=training_args,
@@ -408,139 +377,126 @@ class ExperimentRunner:
             eval_dataset=val_dataset,
         )
 
-        # Train
         trainer.train()
 
-        # Save
         final_path = output_dir / "final"
         trainer.save_model(str(final_path))
         tokenizer.save_pretrained(str(final_path))
 
-        self._cleanup_training_objects(trainer, model, tokenizer, train_dataset, val_dataset)
+        self._cleanup_training(trainer, model, tokenizer, train_dataset, val_dataset)
 
         return str(final_path)
 
-    def _cleanup_training_objects(
+    def _cleanup_training(
         self,
-        trainer,
-        model,
-        tokenizer,
-        train_dataset,
-        val_dataset,
+        trainer: SFTTrainer,
+        model: Any,
+        tokenizer: Any,
+        train_dataset: Dataset,
+        val_dataset: Dataset,
     ) -> None:
-        # Clear trainer internal references
-        if hasattr(trainer, "model"):
-            trainer.model = None
-        if hasattr(trainer, "model_wrapped"):
-            trainer.model_wrapped = None
-        if hasattr(trainer, "optimizer"):
-            trainer.optimizer = None
-        if hasattr(trainer, "lr_scheduler"):
-            trainer.lr_scheduler = None
+        """Clean up after training."""
+        # Clear trainer references
+        for attr in ("model", "model_wrapped", "optimizer", "lr_scheduler"):
+            if hasattr(trainer, attr):
+                setattr(trainer, attr, None)
+
         if hasattr(trainer, "accelerator"):
             try:
                 trainer.accelerator.free_memory()
             except Exception:
                 pass
 
-        # Delete objects
-        del trainer
-        del train_dataset
-        del val_dataset
+        del trainer, train_dataset, val_dataset
 
-        # Move model to CPU before deleting (helps with some edge cases)
         try:
             model.cpu()
         except Exception:
             pass
 
-        del model
-        del tokenizer
-
-        # Force cleanup
+        del model, tokenizer
         clear_gpu_memory()
 
     def run_all_experiments(
         self,
-        models: List[str] = None,
-        conditions: List[str] = None,
+        models: Optional[List[str]] = None,
+        conditions: Optional[List[str]] = None,
         model_provider: str = "hf",
         overwrite: bool = False,
-    ):
-        """Run all experiments."""
-
+    ) -> None:
+        """Run all specified experiments."""
         if models is None:
             models = list(self.config.models.keys())
 
-        if model_provider not in {"hf", "azure", "all"}:
+        if model_provider not in ("hf", "azure", "all"):
             raise ValueError(
                 f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
             )
 
+        # Filter by provider
         if model_provider != "all":
-            filtered_models = []
+            filtered = []
             for model_key in models:
-                resolved_key = self._resolve_model_key(model_key)
-                provider = self.config.models[resolved_key].provider.lower()
-                is_azure = provider == "azure"
+                resolved_key = resolve_model_key(model_key, self.config.models)
+                model_cfg = self.config.models[resolved_key]
+                is_azure = model_cfg.is_azure
+
                 if (model_provider == "azure" and is_azure) or (
                     model_provider == "hf" and not is_azure
                 ):
-                    filtered_models.append(model_key)
-            models = filtered_models
+                    filtered.append(model_key)
+            models = filtered
 
+        # Resolve conditions
         if conditions is None:
-            conditions = self.config.conditions
+            run_conditions = self.config.conditions
         else:
-            conditions = [c for c in self.config.conditions if c.name in conditions]
+            run_conditions = [c for c in self.config.conditions if c.name in conditions]
 
-        total = len(models) * len(conditions)
+        total = len(models) * len(run_conditions)
         current = 0
 
         print(f"\n{'='*60}")
         print(f"RUNNING {total} EXPERIMENTS")
         print(f"Models: {models}")
-        print(f"Conditions: {[c.name for c in conditions]}")
+        print(f"Conditions: {[c.name for c in run_conditions]}")
         print(f"{'='*60}")
 
         for model_key in models:
-            for condition in conditions:
+            for condition in run_conditions:
                 current += 1
                 print(f"\n[{current}/{total}] ", end="")
 
                 try:
-                    resolved_key = self._resolve_model_key(model_key)
+                    resolved_key = resolve_model_key(model_key, self.config.models)
                     run_name = self._build_run_name(resolved_key, condition)
                     result_path = self._get_result_path(run_name)
+
                     if result_path.exists() and not overwrite:
-                        print(
-                            f"Skipping {run_name}: results exist at {result_path}"
-                        )
+                        print(f"Skipping {run_name}: results exist at {result_path}")
                         continue
 
-                    print(
-                        f"Running {run_name}: writing results to {result_path}"
-                    )
+                    print(f"Running {run_name}: writing results to {result_path}")
                     self.run_single_experiment(resolved_key, condition)
+
                 except Exception as e:
                     print(f"ERROR: {e}")
                     wandb.finish(exit_code=1)
-                    # Still try to clean up on error
                     clear_gpu_memory()
-                    continue
 
-        # Release any cached models
         self._release_model_cache()
 
-    def _release_model_cache(self):
-        """Free any cached models to release GPU/CPU memory."""
+    def _release_model_cache(self) -> None:
+        """Free all cached models."""
         if not self.model_cache:
             return
+
         for _, (model, tokenizer) in self.model_cache.items():
             try:
                 model.cpu()
             except Exception:
                 pass
             del model, tokenizer
+
         self.model_cache.clear()
         clear_gpu_memory()

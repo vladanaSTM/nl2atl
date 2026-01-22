@@ -1,3 +1,5 @@
+import pytest
+
 from src import model_utils
 
 
@@ -30,9 +32,6 @@ def test_resolve_model_key_prefix_and_case():
 
 def test_resolve_model_key_missing_raises():
     models = {"qwen-3b": {"name": "qwen-3b", "short_name": "qwen-3b"}}
-    try:
+    with pytest.raises(KeyError) as exc:
         model_utils.resolve_model_key("unknown", models)
-    except KeyError as exc:
-        assert str(exc).strip("'") == "unknown"
-    else:
-        raise AssertionError("Expected KeyError for unknown model key")
+    assert "unknown" in str(exc.value)

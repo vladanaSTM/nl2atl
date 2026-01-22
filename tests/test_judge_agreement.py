@@ -16,14 +16,10 @@ def test_create_item_key_stable():
 def test_align_and_filter_common_items():
     judge_results = {
         "judge1": {
-            "file1": [
-                {"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}
-            ]
+            "file1": [{"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}]
         },
         "judge2": {
-            "file1": [
-                {"input": "x", "gold": "g", "prediction": "p", "correct": "no"}
-            ]
+            "file1": [{"input": "x", "gold": "g", "prediction": "p", "correct": "no"}]
         },
     }
     aligned, details = judge_agreement.align_judgments(judge_results)
@@ -54,9 +50,7 @@ def test_load_evaluated_files(tmp_path):
     judge_dir = eval_dir / "judge1"
     judge_dir.mkdir(parents=True)
 
-    payload = [
-        {"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}
-    ]
+    payload = [{"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}]
     file_path = judge_dir / "model__judge-judge1.json"
     file_path.write_text(json.dumps(payload))
 

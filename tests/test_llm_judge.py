@@ -13,9 +13,7 @@ def test_normalize_text():
 
 
 def test_extract_prediction_items():
-    data = [
-        {"input": "x", "generated": "g", "expected": "e", "exact_match": 1}
-    ]
+    data = [{"input": "x", "generated": "g", "expected": "e", "exact_match": 1}]
     parsed = extract_prediction_items(data)
     assert parsed and parsed[0]["input"] == "x"
 

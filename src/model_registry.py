@@ -1,193 +1,77 @@
 """
-Model loading and management.
+Model loading, management, and generation utilities.
 """
 
-import os
+import ctypes
 import gc
-import json
-import time
-import requests
+import os
+from typing import Optional, Tuple, Any
+
 import torch
-from typing import Tuple, Optional
-from dotenv import load_dotenv
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from urllib3.exceptions import InsecureRequestWarning
+from .env_utils import load_env
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 from .config import ModelConfig
+from .constants import Provider, ModelType
+from .azure_utils import AzureClient, AzureConfig
 
-# Ensure environment variables from .env are loaded for Azure access.
-load_dotenv()
-
-# Silence noisy warnings when verify_ssl is intentionally disabled.
-requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
-
-
-class AzureClient:
-    """Simple client for the Azure OpenAI proxy."""
-
-    provider = "azure"
-
-    def __init__(
-        self,
-        endpoint: str,
-        api_key: str,
-        model: str,
-        use_cache: bool = True,
-        api_version: Optional[str] = None,
-        verify_ssl: Optional[bool] = None,
-    ):
-        self.endpoint = endpoint.rstrip("/")
-        self.api_key = api_key
-        self.model = model
-        self.use_cache = use_cache
-        self.api_version = api_version
-        self.verify_ssl = verify_ssl if verify_ssl is not None else False
-
-        # Session with retries to survive transient disconnects from proxy.
-        retry = Retry(
-            total=3,
-            backoff_factor=1.5,
-            status_forcelist=[502, 503, 504],
-            allowed_methods=["POST"],
-        )
-        adapter = HTTPAdapter(max_retries=retry)
-        self.session = requests.Session()
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
-
-    def _build_headers(self) -> dict:
-        headers = {
-            # Azure expects api-key header, not Authorization bearer.
-            "api-key": self.api_key,
-            "Content-Type": "application/json",
-            "Connection": "close",  # avoid keep-alive issues with the proxy
-        }
-        return headers
-
-    def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
-        # If caller provides the fully qualified chat/completions URL, use it.
-        if self.endpoint.endswith("/chat/completions"):
-            url = self.endpoint
-        else:
-            # Default Azure-compatible path; append api-version as query
-            url = f"{self.endpoint}/openai/deployments/{self.model}/chat/completions"
-            api_ver = self.api_version or "2024-08-01-preview"
-            url = f"{url}?api-version={api_ver}"
-
-        payload = {
-            "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": max_new_tokens,
-            "temperature": 0,
-            "stream": False,
-        }
-
-        last_error = None
-        for attempt in range(3):
-            try:
-                response = self.session.post(
-                    url,
-                    headers=self._build_headers(),
-                    json=payload,
-                    timeout=(10, 120),
-                    verify=self.verify_ssl,
-                )
-                if response.status_code >= 400:
-                    # Include body for easier troubleshooting
-                    body = response.text[:500]
-                    raise RuntimeError(f"HTTP {response.status_code}: {body}")
-                response.raise_for_status()
-                break
-            except Exception as e:
-                last_error = e
-                if attempt == 2:
-                    raise RuntimeError(
-                        f"Azure request failed after retries: {e}"
-                    ) from e
-                time.sleep(1.5 * (attempt + 1))
-
-        try:
-            data = response.json()
-        except json.JSONDecodeError:
-            return response.text
-
-        # OpenAI-style response parsing
-        choices = data.get("choices")
-        if choices:
-            first = choices[0]
-            # Prefer chat-style content
-            message = first.get("message") or {}
-            content = message.get("content")
-            if content:
-                return content
-            # Fallback to completion-style text
-            if "text" in first and first["text"]:
-                return first["text"]
-
-        # If schema differs, return best-effort string
-        return json.dumps(data)
+# Ensure environment variables are loaded
+load_env()
 
 
-def clear_gpu_memory():
+def clear_gpu_memory() -> None:
     """Aggressively clear GPU memory."""
-    import gc
-    import ctypes
-    
     # Multiple gc passes for circular references
     for _ in range(3):
         gc.collect()
-    
+
     if torch.cuda.is_available():
-        # Synchronize to ensure all ops complete
         torch.cuda.synchronize()
-        
-        # Empty the cache
         torch.cuda.empty_cache()
-        
-        # Reset peak memory stats
         torch.cuda.reset_peak_memory_stats()
-        
+
         # Force Python to release memory back to OS (Linux)
         try:
             libc = ctypes.CDLL("libc.so.6")
             libc.malloc_trim(0)
-        except:
+        except (OSError, AttributeError):
             pass
-        
-        # Final gc pass
+
         gc.collect()
         torch.cuda.empty_cache()
-        
+
+        # Log memory status
         allocated = torch.cuda.memory_allocated() / 1e9
         reserved = torch.cuda.memory_reserved() / 1e9
         total = torch.cuda.get_device_properties(0).total_memory / 1e9
-        print(f"GPU Memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved / {total:.2f} GB total")
+        print(
+            f"GPU Memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved / {total:.2f} GB total"
+        )
 
 
 def get_model_type(model_name: str) -> str:
     """Determine model type from name for prompt formatting."""
     model_lower = model_name.lower()
+
     if "azure" in model_lower or model_lower.startswith("gpt-"):
-        return "generic"
+        return ModelType.GENERIC
     if "qwen" in model_lower:
-        return "qwen"
-    elif "phi" in model_lower:
-        return "phi3"
-    elif "mistral" in model_lower:
-        return "mistral"
-    elif "llama" in model_lower:
-        return "llama"
-    elif "gemma" in model_lower:
-        return "gemma"
-    else:
-        return "generic"
+        return ModelType.QWEN
+    if "phi" in model_lower:
+        return ModelType.PHI3
+    if "mistral" in model_lower:
+        return ModelType.MISTRAL
+    if "llama" in model_lower:
+        return ModelType.LLAMA
+    if "gemma" in model_lower:
+        return ModelType.GEMMA
+
+    return ModelType.GENERIC
 
 
 def is_large_model(model_name: str, cutoff_billion: int = 60) -> bool:
-    """Heuristic: detect models with >= cutoff_billion parameters from name tokens like 70B."""
+    """Detect models with >= cutoff_billion parameters from name tokens like 70B."""
     for token in model_name.replace("-", " ").replace("_", " ").split():
         t = token.lower()
         if t.endswith("b") and t[:-1].isdigit():
@@ -199,99 +83,79 @@ def is_large_model(model_name: str, cutoff_billion: int = 60) -> bool:
     return False
 
 
-def load_model(
-    model_config: ModelConfig,
-    for_training: bool = False,
-    load_adapter: Optional[str] = None,
-) -> Tuple[any, any]:
-    """Load model and tokenizer."""
-    # Route to Azure backend when requested
-    if model_config.provider.lower() == "azure":
-        api_key = os.getenv("AZURE_API_KEY")
-        endpoint = os.getenv("AZURE_INFER_ENDPOINT")
-        api_version = os.getenv("AZURE_API_VERSION")
-        use_cache = os.getenv("AZURE_USE_CACHE", "true").lower() == "true"
-        verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
-        verify_ssl = verify_ssl_env in ["1", "true", "yes"]
-        api_model = (
-            model_config.api_model
-            or os.getenv("AZURE_INFER_MODEL")
-            or model_config.name
-        )
+def _build_bnb_config() -> BitsAndBytesConfig:
+    """Build 4-bit quantization configuration."""
+    return BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_use_double_quant=True,
+    )
 
-        if not api_key:
-            raise ValueError("AZURE_API_KEY is not set")
-        if not endpoint:
-            raise ValueError("AZURE_INFER_ENDPOINT is not set")
 
-        client = AzureClient(
-            endpoint=endpoint,
-            api_key=api_key,
-            model=api_model,
-            use_cache=use_cache,
-            api_version=api_version,
-            verify_ssl=verify_ssl,
-        )
-        return client, None
+def _load_tokenizer(model_name: str) -> AutoTokenizer:
+    """Load tokenizer with fallback handling."""
+    hf_token = os.getenv("HUGGINGFACE_TOKEN")
 
-    clear_gpu_memory()
-    print(f"Loading model: {model_config.name}")
-
-    def build_bnb_config() -> BitsAndBytesConfig:
-        return BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-
-    use_4bit = model_config.load_in_4bit
-    bnb_config = build_bnb_config() if use_4bit else None
-
-    # Load tokenizer
     try:
         tokenizer = AutoTokenizer.from_pretrained(
-            model_config.name,
+            model_name,
             trust_remote_code=True,
-            token=os.getenv("HUGGINGFACE_TOKEN"),
+            token=hf_token,
         )
     except Exception as e:
         error_msg = str(e).lower()
+
         if "gated" in error_msg or "access" in error_msg:
             raise ValueError(
-                f"Model {model_config.name} requires HuggingFace authentication."
-            )
-        if (
-            "pretokenizer" in error_msg
-            or "variant" in error_msg
-            or "untagged enum" in error_msg
-        ):
-            print(f"Warning: Tokenizer deserialization issue. Attempting recovery...")
+                f"Model {model_name} requires HuggingFace authentication."
+            ) from e
+
+        if any(x in error_msg for x in ("pretokenizer", "variant", "untagged enum")):
+            print("Warning: Tokenizer deserialization issue. Attempting recovery...")
             try:
                 tokenizer = AutoTokenizer.from_pretrained(
-                    model_config.name,
+                    model_name,
                     trust_remote_code=True,
                     use_fast=False,
-                    token=os.getenv("HUGGINGFACE_TOKEN"),
+                    token=hf_token,
                 )
-                print(f"Recovered tokenizer with use_fast=False")
+                print("Recovered tokenizer with use_fast=False")
             except Exception:
                 tokenizer = AutoTokenizer.from_pretrained(
-                    model_config.name, trust_remote_code=True, use_fast=False
+                    model_name,
+                    trust_remote_code=True,
+                    use_fast=False,
                 )
         else:
             print(f"Warning: {e}. Trying without token...")
             tokenizer = AutoTokenizer.from_pretrained(
-                model_config.name, trust_remote_code=True
+                model_name,
+                trust_remote_code=True,
             )
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
+    return tokenizer
+
+
+def _load_hf_model(
+    model_config: ModelConfig,
+    for_training: bool,
+    load_adapter: Optional[str],
+) -> Tuple[Any, Any]:
+    """Load a HuggingFace model and tokenizer."""
+    clear_gpu_memory()
+    print(f"Loading model: {model_config.name}")
+
+    tokenizer = _load_tokenizer(model_config.name)
+
+    use_4bit = model_config.load_in_4bit
+    bnb_config = _build_bnb_config() if use_4bit else None
     load_attempted_4bit = use_4bit
-    last_error = None
-    
+
     while True:
         model_kwargs = {
             "trust_remote_code": True,
@@ -299,7 +163,10 @@ def load_model(
             "device_map": "auto",
         }
 
-        if torch.cuda.is_available() and is_large_model(model_config.name, cutoff_billion=60):
+        # Special handling for very large models
+        if torch.cuda.is_available() and is_large_model(
+            model_config.name, cutoff_billion=60
+        ):
             max_gpu_mem_gb = int(
                 torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
             )
@@ -310,25 +177,29 @@ def load_model(
             model_kwargs["quantization_config"] = bnb_config
 
         attn_impls = ["sdpa", "eager"]
+        last_error = None
 
         for attn_impl in attn_impls:
             model_kwargs["attn_implementation"] = attn_impl
             try:
                 model = AutoModelForCausalLM.from_pretrained(
-                    model_config.name, **model_kwargs
+                    model_config.name,
+                    **model_kwargs,
                 )
                 last_error = None
                 break
             except (ValueError, NotImplementedError, ImportError, RuntimeError) as e:
                 last_error = e
                 error_msg = str(e).lower()
+
                 if "out of memory" in error_msg and not load_attempted_4bit:
                     print("OOM loading model; retrying with 4-bit quantization.")
                     use_4bit = True
-                    bnb_config = build_bnb_config()
+                    bnb_config = _build_bnb_config()
                     load_attempted_4bit = True
                     clear_gpu_memory()
                     break
+
                 if attn_impl != attn_impls[-1] and "attention" in error_msg:
                     print(f"{attn_impl} not supported; trying next")
                     continue
@@ -337,6 +208,7 @@ def load_model(
             if load_attempted_4bit and last_error:
                 raise last_error
             continue
+
         if last_error is None:
             break
 
@@ -344,9 +216,8 @@ def load_model(
     if load_adapter:
         print(f"Loading adapter from: {load_adapter}")
         model = PeftModel.from_pretrained(model, load_adapter)
-        
-        # Only merge if NOT using 4-bit quantization
-        # merge_and_unload() corrupts weight dimensions with 4-bit models
+
+        # Only merge if NOT using 4-bit (merge corrupts weights with 4-bit)
         if not use_4bit:
             model = model.merge_and_unload()
             print("Adapter merged into base model")
@@ -374,17 +245,46 @@ def load_model(
     return model, tokenizer
 
 
-def generate(model, tokenizer, prompt: str, max_new_tokens: int = 256) -> str:
+def load_model(
+    model_config: ModelConfig,
+    for_training: bool = False,
+    load_adapter: Optional[str] = None,
+) -> Tuple[Any, Any]:
+    """
+    Load model and tokenizer based on provider.
+
+    Args:
+        model_config: Model configuration
+        for_training: Whether to prepare model for training
+        load_adapter: Path to LoRA adapter to load
+
+    Returns:
+        Tuple of (model, tokenizer) - tokenizer is None for Azure models
+    """
+    if model_config.is_azure:
+        azure_config = AzureConfig.from_env()
+        api_model = (
+            model_config.api_model
+            or os.getenv("AZURE_INFER_MODEL")
+            or model_config.name
+        )
+        client = AzureClient.from_config(azure_config, model=api_model)
+        return client, None
+
+    return _load_hf_model(model_config, for_training, load_adapter)
+
+
+def generate(model: Any, tokenizer: Any, prompt: str, max_new_tokens: int = 256) -> str:
     """Generate output from model."""
-    # Remote Azure models expose a simple generate() API.
-    if hasattr(model, "provider") and getattr(model, "provider") == "azure":
+    # Azure models expose a simple generate() API
+    if hasattr(model, "provider") and model.provider == "azure":
         return model.generate(prompt, max_new_tokens=max_new_tokens)
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
-    # Newer Phi-3 builds sometimes return DynamicCache without seen_tokens; disable cache to avoid it
+    # Phi-3 sometimes has cache issues; disable for safety
     model_type = getattr(getattr(model, "config", None), "model_type", "")
-    use_cache = False if model_type == "phi3" else True
+    use_cache = model_type != "phi3"
 
     with torch.no_grad():
         outputs = model.generate(
@@ -397,5 +297,4 @@ def generate(model, tokenizer, prompt: str, max_new_tokens: int = 256) -> str:
             use_cache=use_cache,
         )
 
-    response = tokenizer.decode(outputs[0], skip_special_tokens=False)
-    return response
+    return tokenizer.decode(outputs[0], skip_special_tokens=False)

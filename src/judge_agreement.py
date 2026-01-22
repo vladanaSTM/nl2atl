@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .io_utils import load_json, save_json
+
 
 def create_item_key(item: dict) -> str:
     """Create a unique key for an (input, gold, prediction) tuple."""
@@ -48,11 +50,8 @@ def load_evaluated_files(eval_dir: Path) -> Dict[str, Dict[str, List[dict]]]:
                 continue
 
             try:
-                with open(json_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
+                data = load_json(json_file)
                 if isinstance(data, list):
-                    # Extract source file: "llama-8b_baseline__judge-llama-70b.json" -> "llama-8b_baseline"
                     source_file = json_file.stem.split("__judge-")[0]
                     results[judge_name][source_file] = data
             except Exception as e:
@@ -62,7 +61,7 @@ def load_evaluated_files(eval_dir: Path) -> Dict[str, Dict[str, List[dict]]]:
 
 
 def align_judgments(
-    judge_results: Dict[str, Dict[str, List[dict]]]
+    judge_results: Dict[str, Dict[str, List[dict]]],
 ) -> Tuple[Dict[str, Dict[str, str]], Dict[str, dict]]:
     """
     Align judgments across judges for the same items.
@@ -96,7 +95,8 @@ def align_judgments(
 
 
 def filter_common_items(
-    aligned: Dict[str, Dict[str, str]], min_judges: int = 2
+    aligned: Dict[str, Dict[str, str]],
+    min_judges: int = 2,
 ) -> Dict[str, Dict[str, str]]:
     """Keep only items rated by at least min_judges judges."""
     return {key: judges for key, judges in aligned.items() if len(judges) >= min_judges}
@@ -140,9 +140,6 @@ def compute_fleiss_kappa(ratings_matrix: np.ndarray) -> float:
     if n_items == 0 or n_raters_per_item.max() <= 1:
         return 1.0
 
-    # Use the minimum number of raters (for items with varying rater counts)
-    n_raters = int(n_raters_per_item.min())
-
     # Proportion of ratings in each category
     total_ratings = ratings_matrix.sum()
     p_j = ratings_matrix.sum(axis=0) / total_ratings
@@ -166,7 +163,8 @@ def compute_fleiss_kappa(ratings_matrix: np.ndarray) -> float:
 
 
 def compute_pairwise_kappa(
-    aligned: Dict[str, Dict[str, str]], judges: List[str]
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
 ) -> Dict[Tuple[str, str], dict]:
     """Compute Cohen's Kappa for each pair of judges."""
     results = {}
@@ -192,12 +190,10 @@ def compute_pairwise_kappa(
         kappa = compute_cohen_kappa(labels1, labels2)
         agreement = sum(1 for a, b in zip(labels1, labels2) if a == b) / len(labels1)
 
-        # Confusion matrix (judge1 rows, judge2 cols)
+        # Confusion matrix
         tp = sum(1 for a, b in zip(labels1, labels2) if a == "yes" and b == "yes")
         tn = sum(1 for a, b in zip(labels1, labels2) if a == "no" and b == "no")
-        # judge1=yes, judge2=no
         fn = sum(1 for a, b in zip(labels1, labels2) if a == "yes" and b == "no")
-        # judge1=no, judge2=yes
         fp = sum(1 for a, b in zip(labels1, labels2) if a == "no" and b == "yes")
 
         results[(judge1, judge2)] = {
@@ -218,7 +214,8 @@ def compute_pairwise_kappa(
 
 
 def compute_overall_fleiss(
-    aligned: Dict[str, Dict[str, str]], judges: List[str]
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
 ) -> dict:
     """Compute Fleiss' Kappa across all judges."""
     complete_items = [
@@ -259,7 +256,7 @@ def find_disagreements(
             continue
 
         decisions = list(ratings.values())
-        if len(set(decisions)) > 1:  # Disagreement
+        if len(set(decisions)) > 1:
             disagreements.append(
                 {
                     "item_key": item_key,
@@ -272,10 +269,10 @@ def find_disagreements(
 
 
 def compute_per_source_agreement(
-    aligned: Dict[str, Dict[str, str]], judges: List[str]
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
 ) -> Dict[str, dict]:
     """Compute agreement metrics per source file."""
-    # Group by source file
     source_items = defaultdict(dict)
     for key, ratings in aligned.items():
         source = key.split("::")[0]
@@ -283,7 +280,7 @@ def compute_per_source_agreement(
 
     per_source = {}
     for source, items in sorted(source_items.items()):
-        if len(items) == 0:
+        if not items:
             continue
 
         pairwise = compute_pairwise_kappa(items, judges)
@@ -294,20 +291,113 @@ def compute_per_source_agreement(
             "mean_kappa": round(np.mean(kappas), 4) if kappas else None,
             "min_kappa": round(np.min(kappas), 4) if kappas else None,
             "max_kappa": round(np.max(kappas), 4) if kappas else None,
-            "pairwise": {f"{j1}_vs_{j2}": v["kappa"] for (j1, j2), v in pairwise.items()},
+            "pairwise": {
+                f"{j1}_vs_{j2}": v["kappa"] for (j1, j2), v in pairwise.items()
+            },
         }
 
     return per_source
 
 
+def compute_agreement_breakdown(
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
+) -> dict:
+    """Compute detailed breakdown of agreement patterns."""
+    n_judges = len(judges)
+
+    by_rater_count = defaultdict(list)
+    for item_key, ratings in aligned.items():
+        by_rater_count[len(ratings)].append((item_key, ratings))
+
+    breakdown = {
+        "total_items": len(aligned),
+        "by_rater_coverage": {},
+        "agreement_summary": {
+            "full_agreement": 0,
+            "partial_disagreement": 0,
+        },
+        "unanimous_all_judges": 0,
+    }
+
+    for n_raters, items in sorted(by_rater_count.items()):
+        full_agree = 0
+        disagree = 0
+
+        for item_key, ratings in items:
+            decisions = list(ratings.values())
+            if len(set(decisions)) == 1:
+                full_agree += 1
+                breakdown["agreement_summary"]["full_agreement"] += 1
+                if n_raters == n_judges:
+                    breakdown["unanimous_all_judges"] += 1
+            else:
+                disagree += 1
+                breakdown["agreement_summary"]["partial_disagreement"] += 1
+
+        all_judges_present = set().union(*[set(r.keys()) for _, r in items])
+        breakdown["by_rater_coverage"][f"{n_raters}_raters"] = {
+            "count": len(items),
+            "judges_present": sorted(all_judges_present),
+            "full_agreement": full_agree,
+            "any_disagreement": disagree,
+        }
+
+    return breakdown
+
+
+def compute_detailed_disagreement_stats(
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
+) -> dict:
+    """Compute detailed statistics about disagreement patterns."""
+    disagreement_patterns = defaultdict(int)
+
+    for item_key, ratings in aligned.items():
+        if len(ratings) < 2:
+            continue
+
+        decisions = list(ratings.values())
+        if len(set(decisions)) == 1:
+            pattern = "unanimous"
+        else:
+            yes_count = decisions.count("yes")
+            no_count = decisions.count("no")
+            total = len(decisions)
+
+            if yes_count > no_count:
+                pattern = f"majority_yes_{yes_count}_of_{total}"
+            elif no_count > yes_count:
+                pattern = f"majority_no_{no_count}_of_{total}"
+            else:
+                pattern = f"split_{yes_count}_vs_{no_count}"
+
+        disagreement_patterns[pattern] += 1
+
+    return {
+        "patterns": dict(disagreement_patterns),
+        "unanimous_count": disagreement_patterns.get("unanimous", 0),
+        "any_disagreement_count": sum(
+            v for k, v in disagreement_patterns.items() if k != "unanimous"
+        ),
+    }
+
+
 def generate_agreement_report(
     eval_dir: Path,
     output_path: Optional[Path] = None,
+    judges: Optional[List[str]] = None,
     include_disagreements: bool = True,
     max_disagreements: int = 50,
 ) -> dict:
     """Generate a complete inter-rater agreement report."""
     judge_results = load_evaluated_files(eval_dir)
+
+    if judges:
+        missing = [j for j in judges if j not in judge_results]
+        if missing:
+            raise ValueError(f"Requested judges not found: {missing}")
+        judge_results = {j: judge_results[j] for j in judges}
 
     if len(judge_results) < 2:
         raise ValueError(
@@ -317,29 +407,23 @@ def generate_agreement_report(
     judges = sorted(judge_results.keys())
     print(f"Found {len(judges)} judges: {judges}")
 
-    # Align judgments
     aligned, item_details = align_judgments(judge_results)
     common_aligned = filter_common_items(aligned, min_judges=2)
 
     print(f"Total unique items: {len(aligned)}")
     print(f"Items rated by 2+ judges: {len(common_aligned)}")
 
-    # Compute metrics
     pairwise = compute_pairwise_kappa(common_aligned, judges)
     fleiss_result = compute_overall_fleiss(common_aligned, judges)
     per_source = compute_per_source_agreement(common_aligned, judges)
-    
-    # NEW: Detailed agreement breakdown
     agreement_breakdown = compute_agreement_breakdown(common_aligned, judges)
     disagreement_stats = compute_detailed_disagreement_stats(common_aligned, judges)
 
-    # Find disagreements
+    all_disagreements = find_disagreements(common_aligned, item_details, judges)
     disagreements = []
     if include_disagreements:
-        all_disagreements = find_disagreements(common_aligned, item_details, judges)
         disagreements = all_disagreements[:max_disagreements]
 
-    # Summary statistics
     kappa_values = [v["kappa"] for v in pairwise.values() if v["kappa"] is not None]
     summary = {}
     if kappa_values:
@@ -358,14 +442,14 @@ def generate_agreement_report(
         "items_with_multiple_judges": len(common_aligned),
         "summary": summary,
         "fleiss_kappa": fleiss_result,
-        "agreement_breakdown": agreement_breakdown,  # NEW
-        "disagreement_stats": disagreement_stats,    # NEW
+        "agreement_breakdown": agreement_breakdown,
+        "disagreement_stats": disagreement_stats,
         "pairwise_cohen_kappa": {
             f"{j1}_vs_{j2}": data for (j1, j2), data in pairwise.items()
         },
         "per_source_file": per_source,
         "disagreements": {
-            "total_count": len(find_disagreements(common_aligned, item_details, judges)),
+            "total_count": len(all_disagreements),
             "sample": disagreements,
         },
         "interpretation": {
@@ -381,15 +465,13 @@ def generate_agreement_report(
     }
 
     if output_path:
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2, ensure_ascii=False)
+        save_json(report, output_path)
         print(f"Agreement report saved to: {output_path}")
 
     return report
 
 
-def print_agreement_summary(report: dict):
+def print_agreement_summary(report: dict) -> None:
     """Print a formatted summary of the agreement report."""
     print("\n" + "=" * 70)
     print("INTER-RATER AGREEMENT REPORT")
@@ -404,20 +486,10 @@ def print_agreement_summary(report: dict):
         n = data.get("n_common", 0)
         agreement = data.get("agreement_rate")
         if kappa is not None:
-            # Interpret kappa
-            if kappa < 0:
-                interp = "Poor"
-            elif kappa < 0.21:
-                interp = "Slight"
-            elif kappa < 0.41:
-                interp = "Fair"
-            elif kappa < 0.61:
-                interp = "Moderate"
-            elif kappa < 0.81:
-                interp = "Substantial"
-            else:
-                interp = "Almost Perfect"
-            print(f"  {pair}: κ = {kappa:.3f} ({interp}, n={n}, raw agreement={agreement:.1%})")
+            interp = _interpret_kappa(kappa)
+            print(
+                f"  {pair}: κ = {kappa:.3f} ({interp}, n={n}, raw agreement={agreement:.1%})"
+            )
         else:
             print(f"  {pair}: No common items")
 
@@ -431,7 +503,9 @@ def print_agreement_summary(report: dict):
         print("\n--- Summary Statistics ---")
         print(f"  Mean pairwise κ:  {s['mean_pairwise_kappa']:.3f}")
         print(f"  Std pairwise κ:   {s['std_pairwise_kappa']:.3f}")
-        print(f"  Range: [{s['min_pairwise_kappa']:.3f}, {s['max_pairwise_kappa']:.3f}]")
+        print(
+            f"  Range: [{s['min_pairwise_kappa']:.3f}, {s['max_pairwise_kappa']:.3f}]"
+        )
 
     disagreements = report.get("disagreements", {})
     if disagreements.get("total_count", 0) > 0:
@@ -444,93 +518,18 @@ def print_agreement_summary(report: dict):
 
     print("=" * 70)
 
-def compute_agreement_breakdown(
-    aligned: Dict[str, Dict[str, str]], judges: List[str]
-) -> dict:
-    """
-    Compute detailed breakdown of agreement patterns.
-    
-    Returns counts of:
-    - Full agreement (all raters agree)
-    - Partial agreement (majority agrees)
-    - Full disagreement (no majority)
-    """
-    n_judges = len(judges)
-    
-    # Group by number of raters
-    by_rater_count = defaultdict(list)
-    for item_key, ratings in aligned.items():
-        n_raters = len(ratings)
-        by_rater_count[n_raters].append((item_key, ratings))
-    
-    breakdown = {
-        "total_items": len(aligned),
-        "by_rater_coverage": {},
-        "agreement_summary": {
-            "full_agreement": 0,      # All raters who rated this item agree
-            "partial_disagreement": 0, # At least one rater disagrees
-        },
-        "unanimous_all_judges": 0,  # All N judges rated AND all agree
-    }
-    
-    for n_raters, items in sorted(by_rater_count.items()):
-        full_agree = 0
-        disagree = 0
-        
-        for item_key, ratings in items:
-            decisions = list(ratings.values())
-            if len(set(decisions)) == 1:
-                full_agree += 1
-                breakdown["agreement_summary"]["full_agreement"] += 1
-                if n_raters == n_judges:
-                    breakdown["unanimous_all_judges"] += 1
-            else:
-                disagree += 1
-                breakdown["agreement_summary"]["partial_disagreement"] += 1
-        
-        raters_in_group = list(items[0][1].keys()) if items else []
-        breakdown["by_rater_coverage"][f"{n_raters}_raters"] = {
-            "count": len(items),
-            "judges_present": sorted(set().union(*[set(r.keys()) for _, r in items])),
-            "full_agreement": full_agree,
-            "any_disagreement": disagree,
-        }
-    
-    return breakdown
 
-
-def compute_detailed_disagreement_stats(
-    aligned: Dict[str, Dict[str, str]], judges: List[str]
-) -> dict:
-    """Compute detailed statistics about disagreement patterns."""
-    
-    disagreement_patterns = defaultdict(int)
-    
-    for item_key, ratings in aligned.items():
-        if len(ratings) < 2:
-            continue
-            
-        decisions = list(ratings.values())
-        if len(set(decisions)) == 1:
-            pattern = "unanimous"
-        else:
-            yes_count = decisions.count("yes")
-            no_count = decisions.count("no")
-            total = len(decisions)
-            
-            if yes_count > no_count:
-                pattern = f"majority_yes_{yes_count}_of_{total}"
-            elif no_count > yes_count:
-                pattern = f"majority_no_{no_count}_of_{total}"
-            else:
-                pattern = f"split_{yes_count}_vs_{no_count}"
-        
-        disagreement_patterns[pattern] += 1
-    
-    return {
-        "patterns": dict(disagreement_patterns),
-        "unanimous_count": disagreement_patterns.get("unanimous", 0),
-        "any_disagreement_count": sum(
-            v for k, v in disagreement_patterns.items() if k != "unanimous"
-        ),
-    }
+def _interpret_kappa(kappa: float) -> str:
+    """Interpret kappa value."""
+    if kappa < 0:
+        return "Poor"
+    elif kappa < 0.21:
+        return "Slight"
+    elif kappa < 0.41:
+        return "Fair"
+    elif kappa < 0.61:
+        return "Moderate"
+    elif kappa < 0.81:
+        return "Substantial"
+    else:
+        return "Almost Perfect"

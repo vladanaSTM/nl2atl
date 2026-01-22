@@ -4,8 +4,6 @@ LLM-as-a-judge evaluator for ATL outputs.
 
 import ast
 import hashlib
-import json
-import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -13,27 +11,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .azure_utils import AzureClient, AzureConfig
 from .config import ModelConfig
-
-
-def _get_model_registry():
-    # Lazy import to avoid heavy dependencies (torch) during module import
-    from . import model_registry
-
-    return model_registry
+from .io_utils import load_json, load_json_safe, save_json
 
 PROMPT_VERSION = "v1.0"
 
 
+def _get_model_registry():
+    """Lazy import to avoid heavy dependencies during module import."""
+    from . import model_registry
+
+    return model_registry
+
+
 @dataclass
 class JudgeDecision:
+    """Result of a judge evaluation."""
+
     correct: str
     reasoning: str
     decision_method: str
 
 
 class LocalJudgeClient:
-    """Lightweight wrapper for local HF models."""
+    """Wrapper for local HuggingFace models as judges."""
 
     provider = "local"
 
@@ -44,13 +46,17 @@ class LocalJudgeClient:
 
     def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
         mr = _get_model_registry()
-        raw = mr.generate(self.model, self.tokenizer, prompt, max_new_tokens=max_new_tokens)
+        raw = mr.generate(
+            self.model, self.tokenizer, prompt, max_new_tokens=max_new_tokens
+        )
         if raw.startswith(prompt):
             return raw[len(prompt) :].strip()
         return raw.strip()
 
 
 class LLMJudge:
+    """LLM-based judge for evaluating ATL formula correctness."""
+
     def __init__(
         self,
         judge_model: str,
@@ -65,68 +71,48 @@ class LLMJudge:
         self.api_model = api_model or judge_model
         self.no_llm = no_llm
         self.prompt_version = prompt_version
-        self.cache_path = cache_path
-        self.cache = self._load_cache(cache_path)
-        self.provider = (provider or (model_config.provider if model_config else "azure")).lower()
+        self.cache_path = Path(cache_path)
+        self.cache = load_json_safe(self.cache_path, default={})
+        self.provider = (
+            provider or (model_config.provider if model_config else "azure")
+        ).lower()
         self.model_config = model_config
         self.client = None
 
         if not self.no_llm:
-            if self.provider == "azure":
-                api_key = os.getenv("AZURE_API_KEY")
-                endpoint = os.getenv("AZURE_INFER_ENDPOINT")
-                api_version = os.getenv("AZURE_API_VERSION")
-                verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
-                verify_ssl = verify_ssl_env in ["1", "true", "yes"]
+            self._init_client()
 
-                if not api_key or not endpoint:
-                    raise ValueError(
-                        "Missing LLM credentials. Set AZURE_API_KEY and AZURE_INFER_ENDPOINT, "
-                        "or pass --no_llm to run exact-match only."
-                    )
+    def _init_client(self) -> None:
+        """Initialize the appropriate client based on provider."""
+        if self.provider == "azure":
+            azure_config = AzureConfig.from_env()
+            self.client = AzureClient.from_config(azure_config, model=self.api_model)
 
-                mr = _get_model_registry()
-                self.client = mr.AzureClient(
-                    endpoint=endpoint,
-                    api_key=api_key,
-                    model=self.api_model,
-                    api_version=api_version,
-                    verify_ssl=verify_ssl,
-                    use_cache=True,
-                )
-            elif self.provider == "huggingface":
-                if not self.model_config:
-                    raise ValueError("Local judge requires model_config.")
-                self.client = LocalJudgeClient(self.model_config)
-            else:
-                raise ValueError(f"Unsupported judge provider: {self.provider}")
+        elif self.provider == "huggingface":
+            if not self.model_config:
+                raise ValueError("Local judge requires model_config.")
+            self.client = LocalJudgeClient(self.model_config)
 
-    def _load_cache(self, cache_path: Path) -> Dict[str, dict]:
-        if cache_path.exists():
-            try:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, dict):
-                    return data
-            except Exception:
-                return {}
-        return {}
+        else:
+            raise ValueError(f"Unsupported judge provider: {self.provider}")
 
-    def _save_cache(self):
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.cache_path, "w", encoding="utf-8") as f:
-            json.dump(self.cache, f, indent=2, ensure_ascii=False)
+    def _save_cache(self) -> None:
+        """Save cache to disk."""
+        save_json(self.cache, self.cache_path)
 
     def _cache_key(
-        self, input_text: str, gold: str, prediction: str, judge_model: str
+        self,
+        input_text: str,
+        gold: str,
+        prediction: str,
+        judge_model: str,
     ) -> str:
-        key_payload = json.dumps(
-            [input_text, gold, prediction, judge_model, self.prompt_version],
-            ensure_ascii=False,
-        )
-        return hashlib.sha256(key_payload.encode("utf-8")).hexdigest()
+        """Generate cache key for a judgment."""
+        key_payload = [input_text, gold, prediction, judge_model, self.prompt_version]
+        return hashlib.sha256(str(key_payload).encode("utf-8")).hexdigest()
 
     def _build_prompt(self, input_text: str, gold: str, prediction: str) -> str:
+        """Build the judge prompt."""
         return (
             "You are an expert judge for ATL (Alternating-time Temporal Logic) formulas.\n"
             "Decide whether the prediction is semantically correct ATL for the given natural-language input.\n"
@@ -149,7 +135,7 @@ class LLMJudge:
             "input: The user can guarantee that at the next step either a card or cash will be inserted.\n"
             "gold: <<User>>X (card_inserted || cash_inserted)\n"
             "prediction: <<User>>X (cash_inserted || card_inserted)\n"
-            'output: { "correct": "yes", "reasoning": "Disjunction order doesn’t matter; same agent and X." }\n\n'
+            'output: { "correct": "yes", "reasoning": "Disjunction order doesn\'t matter; same agent and X." }\n\n'
             "Example 4 (incorrect: wrong temporal operator)\n"
             "input: The user can guarantee that at the next step either a card or cash will be inserted.\n"
             "gold: <<User>>X (card_inserted || cash_inserted)\n"
@@ -172,8 +158,13 @@ class LLMJudge:
             "output:"
         )
 
-    def _parse_judge_response(self, raw: str) -> Tuple[str, str]:
-        def _clean_json_like(text: str) -> str:
+    def _parse_response(self, raw: str) -> Tuple[str, str]:
+        """Parse judge response to extract decision."""
+        if "output:" in raw:
+            raw = raw.split("output:")[-1]
+
+        # Clean up common JSON issues
+        def clean_json(text: str) -> str:
             cleaned = text.strip()
             cleaned = cleaned.replace("\u201c", '"').replace("\u201d", '"')
             cleaned = cleaned.replace("\u2018", "'").replace("\u2019", "'")
@@ -181,16 +172,17 @@ class LLMJudge:
             cleaned = re.sub(r",\s*\]", "]", cleaned)
             return cleaned
 
-        if "output:" in raw:
-            raw = raw.split("output:")[-1]
+        # Try to parse JSON
+        import json
 
         try:
             data = json.loads(raw)
         except json.JSONDecodeError:
             candidates = re.findall(r"\{.*?\}", raw, flags=re.DOTALL)
             data = None
+
             for candidate in reversed(candidates):
-                cleaned = _clean_json_like(candidate)
+                cleaned = clean_json(candidate)
                 try:
                     data = json.loads(cleaned)
                     break
@@ -201,20 +193,20 @@ class LLMJudge:
                             break
                         data = None
                     except Exception:
-                        data = None
                         continue
+
             if data is None:
                 return "no", "Judge response was not valid JSON."
 
         correct = str(data.get("correct", "no")).strip().lower()
-        if correct not in {"yes", "no"}:
+        if correct not in ("yes", "no"):
             correct = "no"
-        reasoning = str(data.get("reasoning", "")).strip()
-        if not reasoning:
-            reasoning = "No reasoning provided."
+
+        reasoning = str(data.get("reasoning", "")).strip() or "No reasoning provided."
         return correct, reasoning
 
     def judge(self, input_text: str, gold: str, prediction: str) -> JudgeDecision:
+        """Judge a single prediction."""
         if self.no_llm:
             return JudgeDecision(
                 correct="no",
@@ -231,11 +223,12 @@ class LLMJudge:
                 decision_method=cached.get("decision_method", "llm"),
             )
 
-        prompt = self._build_prompt(input_text, gold, prediction)
         if not self.client:
             raise RuntimeError("LLM client is not configured.")
+
+        prompt = self._build_prompt(input_text, gold, prediction)
         raw = self.client.generate(prompt, max_new_tokens=256)
-        correct, reasoning = self._parse_judge_response(raw)
+        correct, reasoning = self._parse_response(raw)
 
         self.cache[cache_key] = {
             "correct": correct,
@@ -253,18 +246,14 @@ class LLMJudge:
 
 
 def normalize_text(text: Optional[str]) -> str:
+    """Normalize text for comparison."""
     if text is None:
         return ""
-    collapsed = re.sub(r"\s+", " ", text)
-    return collapsed.strip()
+    return re.sub(r"\s+", " ", text).strip()
 
 
-def load_json(path: Path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def extract_prediction_items(prediction_data) -> List[Dict[str, Optional[str]]]:
+def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Optional[str]]]:
+    """Extract prediction items from various input formats."""
     if isinstance(prediction_data, dict) and "detailed_results" in prediction_data:
         items = prediction_data.get("detailed_results", [])
     elif isinstance(prediction_data, list):
@@ -276,7 +265,7 @@ def extract_prediction_items(prediction_data) -> List[Dict[str, Optional[str]]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        input_text = item.get("input")
+
         prediction = (
             item.get("generated")
             or item.get("output")
@@ -284,15 +273,16 @@ def extract_prediction_items(prediction_data) -> List[Dict[str, Optional[str]]]:
             or item.get("model_output")
         )
         gold = item.get("expected") or item.get("gold") or item.get("reference")
-        exact_match = item.get("exact_match")
+
         parsed.append(
             {
-                "input": input_text,
+                "input": item.get("input"),
                 "prediction": prediction,
                 "gold": gold,
-                "exact_match": exact_match,
+                "exact_match": item.get("exact_match"),
             }
         )
+
     return parsed
 
 
@@ -301,73 +291,63 @@ def evaluate_prediction_file(
     judge: LLMJudge,
     no_llm: bool = False,
 ) -> Tuple[List[Dict], Dict]:
+    """Evaluate a prediction file."""
     prediction_data = load_json(prediction_path)
     prediction_items = extract_prediction_items(prediction_data)
-    unmatched = 0
-    auto_exact = 0
-    llm_calls = 0
-    no_llm_count = 0
-    cache_hits = 0
 
-    corrected_rows = []
+    stats = {
+        "unmatched": 0,
+        "auto_exact": 0,
+        "llm_calls": 0,
+        "cache_hits": 0,
+        "no_llm": 0,
+    }
+    rows = []
 
-    def make_decision(correct: str, reasoning: str, method: str) -> JudgeDecision:
-        return JudgeDecision(
-            correct=correct,
-            reasoning=reasoning,
-            decision_method=method,
-        )
+    def is_exact_match(pred: str, gold: str, flag: Optional[bool]) -> bool:
+        if flag is not None:
+            return bool(flag)
+        return normalize_text(pred) == normalize_text(gold)
 
-    def is_exact_match(prediction_text: str, gold_text: str, exact_flag) -> bool:
-        if exact_flag is not None:
-            return bool(exact_flag)
-        return normalize_text(prediction_text) == normalize_text(gold_text)
-
-    for i, pred_item in enumerate(prediction_items):
-        input_text = pred_item.get("input")
-        prediction = pred_item.get("prediction") or ""
-        gold = pred_item.get("gold") or ""
-        exact_match = pred_item.get("exact_match")
-        match_method = "input" if gold else "unmatched"
+    for item in prediction_items:
+        input_text = item.get("input") or ""
+        prediction = item.get("prediction") or ""
+        gold = item.get("gold") or ""
+        exact_flag = item.get("exact_match")
 
         if not prediction or not gold:
-            match_method = "unmatched"
-
-        if match_method == "unmatched":
-            unmatched += 1
-            decision = make_decision(
+            stats["unmatched"] += 1
+            decision = JudgeDecision(
                 correct="no",
-                reasoning="Missing prediction or gold for input.",
-                method="unmatched",
+                reasoning="Missing prediction or gold.",
+                decision_method="unmatched",
+            )
+        elif is_exact_match(prediction, gold, exact_flag):
+            stats["auto_exact"] += 1
+            decision = JudgeDecision(
+                correct="yes",
+                reasoning="Exact match (normalized).",
+                decision_method="exact",
+            )
+        elif no_llm:
+            stats["no_llm"] += 1
+            decision = JudgeDecision(
+                correct="no",
+                reasoning="LLM disabled; non-exact match treated as incorrect.",
+                decision_method="no_llm",
             )
         else:
-            if is_exact_match(prediction, gold, exact_match):
-                decision = make_decision(
-                    correct="yes",
-                    reasoning="Exact match (normalized).",
-                    method="exact",
-                )
-                auto_exact += 1
+            decision = judge.judge(input_text, gold, prediction)
+            if decision.decision_method == "llm":
+                stats["llm_calls"] += 1
             else:
-                if no_llm:
-                    decision = make_decision(
-                        correct="no",
-                        reasoning="LLM disabled; non-exact match treated as incorrect.",
-                        method="no_llm",
-                    )
-                    no_llm_count += 1
-                else:
-                    decision = judge.judge(input_text or "", gold, prediction or "")
-                    if decision.decision_method == "llm":
-                        llm_calls += 1
-                    elif decision.decision_method == "cache":
-                        cache_hits += 1
+                stats["cache_hits"] += 1
 
-        corrected_rows.append(
+        rows.append(
             {
-                "input": input_text or "",
+                "input": input_text,
                 "gold": gold,
-                "prediction": prediction or "",
+                "prediction": prediction,
                 "correct": decision.correct,
                 "reasoning": decision.reasoning,
                 "judge_model": judge.judge_model,
@@ -376,86 +356,54 @@ def evaluate_prediction_file(
             }
         )
 
-    stats = {
-        "unmatched": unmatched,
-        "auto_exact": auto_exact,
-        "llm_calls": llm_calls,
-        "cache_hits": cache_hits,
-        "no_llm": no_llm_count,
-    }
-    return corrected_rows, stats
+    return rows, stats
+
+
+def _safe_rate(numerator: int, denominator: int) -> float:
+    """Compute rate safely, avoiding division by zero."""
+    return numerator / denominator if denominator else 0.0
 
 
 def compute_metrics(rows: List[Dict]) -> Dict[str, Any]:
-    """
-    Compute meaningful metrics for ATL generation evaluation.
-    
-    Metrics focus on:
-    - Overall correctness rate
-    - Breakdown by decision method (exact match vs LLM judge)
-    - Semantic flexibility (how often non-exact matches are still correct)
-    """
+    """Compute evaluation metrics from judged rows."""
     if not rows:
         return _empty_metrics()
 
-    def safe_rate(numerator: int, denominator: int) -> float:
-        return numerator / denominator if denominator else 0.0
+    evaluated = [r for r in rows if r.get("decision_method") != "unmatched"]
+    total = len(evaluated)
 
-    # Filter to evaluated rows only
-    evaluated_rows = [r for r in rows if r.get("decision_method") != "unmatched"]
-    total_evaluated = len(evaluated_rows)
-
-    if total_evaluated == 0:
+    if total == 0:
         return _empty_metrics()
 
-    # === Core Correctness ===
-    correct_count = sum(1 for r in evaluated_rows if r.get("correct") == "yes")
-    incorrect_count = total_evaluated - correct_count
-    accuracy = safe_rate(correct_count, total_evaluated)
+    correct_count = sum(1 for r in evaluated if r.get("correct") == "yes")
+    accuracy = _safe_rate(correct_count, total)
 
-    # === Breakdown by Decision Method ===
-    exact_match_rows = [r for r in evaluated_rows if r.get("decision_method") == "exact"]
-    llm_judged_rows = [r for r in evaluated_rows if r.get("decision_method") == "llm"]
-    no_llm_rows = [r for r in evaluated_rows if r.get("decision_method") == "no_llm"]
+    # Breakdown by decision method
+    exact_rows = [r for r in evaluated if r.get("decision_method") == "exact"]
+    llm_rows = [r for r in evaluated if r.get("decision_method") == "llm"]
+    no_llm_rows = [r for r in evaluated if r.get("decision_method") == "no_llm"]
 
-    exact_match_count = len(exact_match_rows)
-    llm_judged_count = len(llm_judged_rows)
-
-    # LLM-judged: how many did the judge approve?
-    llm_approved = sum(1 for r in llm_judged_rows if r.get("correct") == "yes")
-    llm_rejected = llm_judged_count - llm_approved
-
-    # === Derived Rates ===
-    exact_match_rate = safe_rate(exact_match_count, total_evaluated)
-    llm_judge_rate = safe_rate(llm_judged_count, total_evaluated)
-    llm_approval_rate = safe_rate(llm_approved, llm_judged_count)
-    accuracy_boost_from_llm = safe_rate(llm_approved, total_evaluated)
+    llm_approved = sum(1 for r in llm_rows if r.get("correct") == "yes")
 
     return {
-        # === Primary Metrics ===
         "accuracy": round(accuracy, 4),
-        "total_evaluated": total_evaluated,
+        "total_evaluated": total,
+        "evaluated": total,  # Alias for compatibility
         "correct": correct_count,
-        "incorrect": incorrect_count,
-        
-        # === Decision Method Breakdown ===
+        "incorrect": total - correct_count,
         "exact_match": {
-            "count": exact_match_count,
-            "rate": round(exact_match_rate, 4),
+            "count": len(exact_rows),
+            "rate": round(_safe_rate(len(exact_rows), total), 4),
         },
         "llm_judged": {
-            "count": llm_judged_count,
-            "rate": round(llm_judge_rate, 4),
+            "count": len(llm_rows),
+            "rate": round(_safe_rate(len(llm_rows), total), 4),
             "approved": llm_approved,
-            "rejected": llm_rejected,
-            "approval_rate": round(llm_approval_rate, 4),
+            "rejected": len(llm_rows) - llm_approved,
+            "approval_rate": round(_safe_rate(llm_approved, len(llm_rows)), 4),
         },
-        
-        # === Interpretable Summary ===
-        "accuracy_from_exact_match": round(exact_match_rate, 4),
-        "accuracy_boost_from_llm": round(accuracy_boost_from_llm, 4),
-        
-        # === No LLM fallback (if used) ===
+        "accuracy_from_exact_match": round(_safe_rate(len(exact_rows), total), 4),
+        "accuracy_boost_from_llm": round(_safe_rate(llm_approved, total), 4),
         "no_llm_fallback_count": len(no_llm_rows),
     }
 
@@ -465,6 +413,7 @@ def _empty_metrics() -> Dict[str, Any]:
     return {
         "accuracy": 0.0,
         "total_evaluated": 0,
+        "evaluated": 0,
         "correct": 0,
         "incorrect": 0,
         "exact_match": {"count": 0, "rate": 0.0},
@@ -480,30 +429,31 @@ def _empty_metrics() -> Dict[str, Any]:
         "no_llm_fallback_count": 0,
     }
 
+
 def compute_metrics_with_difficulty(rows: List[Dict]) -> Dict[str, Any]:
     """Compute metrics with breakdown by difficulty level."""
-    base_metrics = compute_metrics(rows)
-    
-    # Group by difficulty
+    base = compute_metrics(rows)
+
     by_difficulty = defaultdict(list)
     for r in rows:
         difficulty = r.get("difficulty", "unknown")
         by_difficulty[difficulty].append(r)
-    
-    difficulty_breakdown = {}
+
+    breakdown = {}
     for difficulty, diff_rows in sorted(by_difficulty.items()):
         evaluated = [r for r in diff_rows if r.get("decision_method") != "unmatched"]
         if not evaluated:
             continue
         correct = sum(1 for r in evaluated if r.get("correct") == "yes")
-        difficulty_breakdown[difficulty] = {
+        breakdown[difficulty] = {
             "count": len(evaluated),
             "correct": correct,
             "accuracy": round(correct / len(evaluated), 4),
         }
-    
-    base_metrics["by_difficulty"] = difficulty_breakdown
-    return base_metrics
+
+    base["by_difficulty"] = breakdown
+    return base
+
 
 def build_summary(
     results: List[Dict],
@@ -511,31 +461,24 @@ def build_summary(
     judge_model: str,
     prompt_version: str,
 ) -> Dict:
-    """Build summary with improved metrics."""
-    
-    # Aggregate all rows
+    """Build summary report."""
     all_rows = []
     for result in results:
         all_rows.extend(result["rows"])
-    
-    overall_metrics = compute_metrics(all_rows)
-    
-    # Per-file breakdown
-    per_file = []
-    for result in results:
-        per_file.append({
-            "source_file": result["source_file"],
-            "stem": result["stem"],
-            "metrics": result["metrics"],
-            "stats": result["stats"],
-        })
-    
-    # Ranking by accuracy
-    ranking = sorted(
-        per_file,
-        key=lambda r: -r["metrics"]["accuracy"],
-    )
-    
+
+    overall = compute_metrics(all_rows)
+
+    per_file = [
+        {
+            "source_file": r["source_file"],
+            "stem": r["stem"],
+            "metrics": r["metrics"],
+            "stats": r["stats"],
+        }
+        for r in results
+    ]
+
+    ranking = sorted(per_file, key=lambda x: -x["metrics"]["accuracy"])
     ranking_table = [
         {
             "rank": idx,
@@ -547,30 +490,25 @@ def build_summary(
         }
         for idx, item in enumerate(ranking, start=1)
     ]
-    
+
     return {
         "judge_model": judge_model,
         "prompt_version": prompt_version,
         "created_at": datetime.utcnow().isoformat() + "Z",
-        "overall": overall_metrics,
+        "overall": overall,
         "per_file": per_file,
         "ranking": ranking_table,
         "totals": totals,
     }
 
 
-def write_json(path: Path, data: Any):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def build_summary_notebook(summary_path: Path, output_path: Path):
+def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
+    """Generate a Jupyter notebook for exploring the summary."""
     notebook = {
         "cells": [
             {
                 "cell_type": "markdown",
-                "metadata": {"language": "markdown"},
+                "metadata": {},
                 "source": [
                     "# ATL LLM Judge Summary\n",
                     f"Summary file: {summary_path.name}\n",
@@ -578,83 +516,45 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
             },
             {
                 "cell_type": "code",
-                "metadata": {"language": "python"},
+                "metadata": {},
                 "source": [
                     "import json\n",
                     "from pathlib import Path\n",
                     "import pandas as pd\n",
                     "import matplotlib.pyplot as plt\n",
-                    "import numpy as np\n",
                     "\n",
-                    "# Resolve summary path from common locations\n",
-                    f'summary_rel = Path("{summary_path.name}")\n',
-                    "candidates = [Path.cwd() / summary_rel]\n",
-                    "for parent in Path.cwd().parents:\n",
-                    "    candidates.append(parent / summary_rel)\n",
-                    "candidates.append(Path(__file__).resolve().parent / summary_rel if '__file__' in globals() else None)\n",
-                    "candidates = [c for c in candidates if c is not None]\n",
+                    f'summary_path = Path("{summary_path.name}")\n',
+                    "if not summary_path.exists():\n",
+                    "    for parent in Path.cwd().parents:\n",
+                    "        candidate = parent / summary_path.name\n",
+                    "        if candidate.exists():\n",
+                    "            summary_path = candidate\n",
+                    "            break\n",
                     "\n",
-                    "summary_path = next((c for c in candidates if c.exists()), None)\n",
-                    "if summary_path is None:\n",
-                    "    raise FileNotFoundError(\n",
-                    "        'Could not find summary__judge-*.json. Run run_llm_judge.py first.'\n",
-                    "    )\n",
-                    "\n",
-                    "summary = json.loads(summary_path.read_text(encoding='utf-8'))\n",
-                    "per_file = summary['per_file']\n",
+                    "summary = json.loads(summary_path.read_text())\n",
                     "df = pd.DataFrame([\n",
                     "    {\n",
                     "        'source_file': item['source_file'],\n",
-                    "        'accuracy': item.get('metrics', {}).get('accuracy', 0.0),\n",
-                    "        'evaluated': item.get('metrics', {}).get('total_evaluated', item.get('metrics', {}).get('evaluated', 0)),\n",
-                    "        'correct': item.get('metrics', {}).get('correct', 0),\n",
-                    "        'incorrect': item.get('metrics', {}).get('incorrect', 0),\n",
-                    "        'exact_match_rate': item.get('metrics', {}).get('exact_match', {}).get('rate', None),\n",
-                    "        'llm_approval_rate': item.get('metrics', {}).get('llm_judged', {}).get('approval_rate', None),\n",
+                    "        'accuracy': item['metrics']['accuracy'],\n",
+                    "        'evaluated': item['metrics']['total_evaluated'],\n",
+                    "        'correct': item['metrics']['correct'],\n",
                     "    }\n",
-                    "    for item in per_file\n",
+                    "    for item in summary['per_file']\n",
                     "])\n",
-                    "df\n",
+                    "df.sort_values('accuracy', ascending=False)\n",
                 ],
             },
             {
                 "cell_type": "code",
-                "metadata": {"language": "python"},
+                "metadata": {},
                 "source": [
-                    "# Leaderboard table\n",
-                    "# Sort primarily by accuracy, secondarily by correct count\n",
-                    "leaderboard = df.sort_values(['accuracy', 'correct'], ascending=[False, False])\n",
-                    "leaderboard[['source_file', 'accuracy', 'evaluated', 'correct', 'incorrect']]\n",
-                ],
-            },
-            {
-                "cell_type": "code",
-                "metadata": {"language": "python"},
-                "source": [
-                    "# Accuracy by model file\n",
                     "plt.figure(figsize=(10, 4))\n",
                     "plt.bar(df['source_file'], df['accuracy'])\n",
                     "plt.xticks(rotation=45, ha='right')\n",
                     "plt.ylabel('Accuracy')\n",
-                    "plt.title('Accuracy by Model File')\n",
+                    "plt.title('Accuracy by Model')\n",
                     "plt.tight_layout()\n",
                     "plt.show()\n",
-                ],
-            },
-            {
-                "cell_type": "code",
-                "metadata": {"language": "python"},
-                "source": [
-                    "# Correct vs Incorrect bar chart for best model\n",
-                    "best = summary['ranking'][0]['source_file'] if summary['ranking'] else None\n",
-                    "if best is not None:\n",
-                    "    best_row = df[df['source_file'] == best].iloc[0]\n",
-                    "    plt.figure(figsize=(6, 4))\n",
-                    "    plt.bar(['correct', 'incorrect'], [int(best_row.get('correct', 0)), int(best_row.get('incorrect', 0))])\n",
-                    "    plt.title(f'Correct vs Incorrect: {best}')\n",
-                    "    plt.ylabel('Count')\n",
-                    "    plt.tight_layout()\n",
-                    "    plt.show()\n",
                 ],
             },
         ],
@@ -663,13 +563,10 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
                 "display_name": "Python 3",
                 "language": "python",
                 "name": "python3",
-            },
-            "language_info": {"name": "python"},
+            }
         },
         "nbformat": 4,
         "nbformat_minor": 5,
     }
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(notebook, f, indent=2)
+    save_json(notebook, output_path)
