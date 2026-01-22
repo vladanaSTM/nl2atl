@@ -7,13 +7,20 @@ import hashlib
 import json
 import os
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .config import ModelConfig
-from .model_registry import AzureClient, generate, load_model
+
+
+def _get_model_registry():
+    # Lazy import to avoid heavy dependencies (torch) during module import
+    from . import model_registry
+
+    return model_registry
 
 PROMPT_VERSION = "v1.0"
 
@@ -32,10 +39,12 @@ class LocalJudgeClient:
 
     def __init__(self, model_config: ModelConfig):
         self.model_config = model_config
-        self.model, self.tokenizer = load_model(model_config, for_training=False)
+        mr = _get_model_registry()
+        self.model, self.tokenizer = mr.load_model(model_config, for_training=False)
 
     def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
-        raw = generate(self.model, self.tokenizer, prompt, max_new_tokens=max_new_tokens)
+        mr = _get_model_registry()
+        raw = mr.generate(self.model, self.tokenizer, prompt, max_new_tokens=max_new_tokens)
         if raw.startswith(prompt):
             return raw[len(prompt) :].strip()
         return raw.strip()
@@ -76,7 +85,8 @@ class LLMJudge:
                         "or pass --no_llm to run exact-match only."
                     )
 
-                self.client = AzureClient(
+                mr = _get_model_registry()
+                self.client = mr.AzureClient(
                     endpoint=endpoint,
                     api_key=api_key,
                     model=self.api_model,
@@ -301,6 +311,18 @@ def evaluate_prediction_file(
 
     corrected_rows = []
 
+    def make_decision(correct: str, reasoning: str, method: str) -> JudgeDecision:
+        return JudgeDecision(
+            correct=correct,
+            reasoning=reasoning,
+            decision_method=method,
+        )
+
+    def is_exact_match(prediction_text: str, gold_text: str, exact_flag) -> bool:
+        if exact_flag is not None:
+            return bool(exact_flag)
+        return normalize_text(prediction_text) == normalize_text(gold_text)
+
     for i, pred_item in enumerate(prediction_items):
         input_text = pred_item.get("input")
         prediction = pred_item.get("prediction") or ""
@@ -313,30 +335,25 @@ def evaluate_prediction_file(
 
         if match_method == "unmatched":
             unmatched += 1
-            decision = JudgeDecision(
+            decision = make_decision(
                 correct="no",
                 reasoning="Missing prediction or gold for input.",
-                decision_method="unmatched",
+                method="unmatched",
             )
         else:
-            if exact_match is not None:
-                is_exact = bool(exact_match)
-            else:
-                is_exact = normalize_text(prediction) == normalize_text(gold)
-
-            if is_exact:
-                decision = JudgeDecision(
+            if is_exact_match(prediction, gold, exact_match):
+                decision = make_decision(
                     correct="yes",
                     reasoning="Exact match (normalized).",
-                    decision_method="exact",
+                    method="exact",
                 )
                 auto_exact += 1
             else:
                 if no_llm:
-                    decision = JudgeDecision(
+                    decision = make_decision(
                         correct="no",
                         reasoning="LLM disabled; non-exact match treated as incorrect.",
-                        decision_method="no_llm",
+                        method="no_llm",
                     )
                     no_llm_count += 1
                 else:
@@ -380,49 +397,40 @@ def compute_metrics(rows: List[Dict]) -> Dict[str, Any]:
     """
     if not rows:
         return _empty_metrics()
-    
+
+    def safe_rate(numerator: int, denominator: int) -> float:
+        return numerator / denominator if denominator else 0.0
+
     # Filter to evaluated rows only
     evaluated_rows = [r for r in rows if r.get("decision_method") != "unmatched"]
     total_evaluated = len(evaluated_rows)
-    
+
     if total_evaluated == 0:
         return _empty_metrics()
-    
+
     # === Core Correctness ===
     correct_count = sum(1 for r in evaluated_rows if r.get("correct") == "yes")
     incorrect_count = total_evaluated - correct_count
-    accuracy = correct_count / total_evaluated
-    
+    accuracy = safe_rate(correct_count, total_evaluated)
+
     # === Breakdown by Decision Method ===
     exact_match_rows = [r for r in evaluated_rows if r.get("decision_method") == "exact"]
     llm_judged_rows = [r for r in evaluated_rows if r.get("decision_method") == "llm"]
     no_llm_rows = [r for r in evaluated_rows if r.get("decision_method") == "no_llm"]
-    
+
     exact_match_count = len(exact_match_rows)
     llm_judged_count = len(llm_judged_rows)
-    
-    # Exact matches are always correct by definition
-    exact_match_correct = exact_match_count
-    
+
     # LLM-judged: how many did the judge approve?
     llm_approved = sum(1 for r in llm_judged_rows if r.get("correct") == "yes")
     llm_rejected = llm_judged_count - llm_approved
-    
+
     # === Derived Rates ===
-    # What fraction of outputs matched gold exactly?
-    exact_match_rate = exact_match_count / total_evaluated if total_evaluated else 0.0
-    
-    # What fraction required LLM judgment?
-    llm_judge_rate = llm_judged_count / total_evaluated if total_evaluated else 0.0
-    
-    # Of those requiring LLM judgment, how many were approved?
-    # This measures "semantic flexibility" - correct despite surface differences
-    llm_approval_rate = llm_approved / llm_judged_count if llm_judged_count else 0.0
-    
-    # How much does LLM judging "rescue" the accuracy?
-    # (accuracy with LLM judge) - (accuracy if we only counted exact matches)
-    accuracy_boost_from_llm = (llm_approved / total_evaluated) if total_evaluated else 0.0
-    
+    exact_match_rate = safe_rate(exact_match_count, total_evaluated)
+    llm_judge_rate = safe_rate(llm_judged_count, total_evaluated)
+    llm_approval_rate = safe_rate(llm_approved, llm_judged_count)
+    accuracy_boost_from_llm = safe_rate(llm_approved, total_evaluated)
+
     return {
         # === Primary Metrics ===
         "accuracy": round(accuracy, 4),

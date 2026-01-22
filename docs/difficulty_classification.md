@@ -11,7 +11,6 @@ This algorithm classifies the difficulty of translating natural language specifi
 
 - [Motivation](#motivation)
 - [The Two Dimensions](#the-two-dimensions)
-- [Installation](#installation)
 - [Usage](#usage)
   - [Command Line](#command-line)
   - [Programmatic Usage](#programmatic-usage)

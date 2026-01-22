@@ -18,6 +18,7 @@ from src.llm_judge import (
     evaluate_prediction_file,
     write_json,
 )
+from src.model_utils import resolve_model_key as resolve_shared_model_key
 
 
 def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
@@ -58,34 +59,13 @@ def load_models_config(models_config_path: Path) -> dict:
 
 
 def resolve_model_key(model_arg: str, models: dict) -> str:
-    if model_arg in models:
-        return model_arg
-
-    def normalize(token: str) -> str:
-        token = token.lower()
-        for prefix in ("azure-",):
-            if token.startswith(prefix):
-                token = token[len(prefix) :]
-        return token
-
-    needle = model_arg.lower()
-    normalized_needle = normalize(model_arg)
-    for key, data in models.items():
-        if not isinstance(data, dict):
-            continue
-        short_name = str(data.get("short_name", ""))
-        name = str(data.get("name", ""))
-        if (
-            key.lower() == needle
-            or short_name.lower() == needle
-            or name.lower() == needle
-            or normalize(key) == normalized_needle
-            or normalize(short_name) == normalized_needle
-            or normalize(name) == normalized_needle
-        ):
-            return key
-
-    raise KeyError(model_arg)
+    return resolve_shared_model_key(
+        model_arg,
+        models,
+        prefixes=("azure-",),
+        require_mapping_entries=True,
+        match_key_lower=True,
+    )
 
 
 def resolve_judge_models(
