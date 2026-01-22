@@ -2,10 +2,15 @@ models:
   qwen-3b:
     name: "Qwen/Qwen2.5-3B-Instruct"
     short_name: "qwen-3b"
+    provider: "huggingface"
+    params_b: 3
     max_seq_length: 512
-    load_in_4bit: false
+    load_in_4bit: false          # 3B fits in bf16
     lora_r: 64
     lora_alpha: 128
+    train_batch_size: 24
+    eval_batch_size: 32
+    gradient_accumulation_steps: 4
     target_modules:
       - q_proj
       - k_proj
@@ -18,10 +23,15 @@ models:
   qwen-7b:
     name: "Qwen/Qwen2.5-7B-Instruct"
     short_name: "qwen-7b"
+    provider: "huggingface"
+    params_b: 7
     max_seq_length: 512
-    load_in_4bit: false
+    load_in_4bit: true           # ← CHANGED: 4-bit for 7B
     lora_r: 64
     lora_alpha: 128
+    train_batch_size: 16
+    eval_batch_size: 24
+    gradient_accumulation_steps: 5
     target_modules:
       - q_proj
       - k_proj
@@ -34,10 +44,15 @@ models:
   phi3:
     name: "microsoft/Phi-3-mini-4k-instruct"
     short_name: "phi3"
+    provider: "huggingface"
+    params_b: 3.8
     max_seq_length: 512
-    load_in_4bit: false
+    load_in_4bit: false          # 3.8B fits in bf16
     lora_r: 32
     lora_alpha: 64
+    train_batch_size: 24
+    eval_batch_size: 32
+    gradient_accumulation_steps: 4
     target_modules:
       - qkv_proj
       - o_proj
@@ -47,10 +62,15 @@ models:
   mistral:
     name: "mistralai/Mistral-7B-Instruct-v0.3"
     short_name: "mistral"
+    provider: "huggingface"
+    params_b: 7
     max_seq_length: 512
-    load_in_4bit: false
+    load_in_4bit: true           # ← CHANGED: 4-bit for 7B
     lora_r: 64
     lora_alpha: 128
+    train_batch_size: 16
+    eval_batch_size: 24
+    gradient_accumulation_steps: 5
     target_modules:
       - q_proj
       - k_proj
@@ -60,45 +80,18 @@ models:
       - up_proj
       - down_proj
 
-  llama:
+  llama-8b:
     name: "meta-llama/Meta-Llama-3.1-8B-Instruct"
     short_name: "llama-8b"
+    provider: "huggingface"
+    params_b: 8
     max_seq_length: 512
-    load_in_4bit: false
+    load_in_4bit: true           # ← CHANGED: 4-bit for 8B
     lora_r: 64
     lora_alpha: 128
-    target_modules:
-      - q_proj
-      - k_proj
-      - v_proj
-      - o_proj
-      - gate_proj
-      - up_proj
-      - down_proj
-
-  deepseek-r1-qwen-32b:
-    name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
-    short_name: "ds-r1-qwen-32b"
-    max_seq_length: 8192
-    load_in_4bit: true
-    lora_r: 64
-    lora_alpha: 128
-    target_modules:
-      - q_proj
-      - k_proj
-      - v_proj
-      - o_proj
-      - gate_proj
-      - up_proj
-      - down_proj
-
-  qwen-coder-32b:
-    name: "Qwen/Qwen2.5-Coder-32B-Instruct"
-    short_name: "qwen-coder-32b"
-    max_seq_length: 8192
-    load_in_4bit: true
-    lora_r: 64
-    lora_alpha: 128
+    train_batch_size: 10
+    eval_batch_size: 16
+    gradient_accumulation_steps: 8
     target_modules:
       - q_proj
       - k_proj
@@ -111,10 +104,15 @@ models:
   gemma3-27b:
     name: "google/gemma-3-27b-it"
     short_name: "gemma3-27b"
+    provider: "huggingface"
+    params_b: 27
     max_seq_length: 8192
     load_in_4bit: true
     lora_r: 64
     lora_alpha: 128
+    train_batch_size: 1
+    eval_batch_size: 2
+    gradient_accumulation_steps: 80
     target_modules:
       - q_proj
       - k_proj
@@ -124,11 +122,103 @@ models:
       - up_proj
       - down_proj
 
+  deepseek-r1-qwen-32b:
+    name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    short_name: "ds-r1-qwen-32b"
+    provider: "huggingface"
+    params_b: 32
+    max_seq_length: 8192
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    train_batch_size: 1
+    eval_batch_size: 2
+    gradient_accumulation_steps: 80
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+  qwen-coder-32b:
+    name: "Qwen/Qwen2.5-Coder-32B-Instruct"
+    short_name: "qwen-coder-32b"
+    provider: "huggingface"
+    params_b: 32
+    max_seq_length: 8192
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    train_batch_size: 1
+    eval_batch_size: 2
+    gradient_accumulation_steps: 80
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+  # --- NEW: Qwen 2.5 32B ---
+  # Fits comfortably in 4-bit on A100 40GB
+  qwen-32b:
+    name: "Qwen/Qwen2.5-32B-Instruct"
+    short_name: "qwen-32b"
+    provider: "huggingface"
+    params_b: 32
+    max_seq_length: 8192
+    load_in_4bit: true
+    lora_r: 64
+    lora_alpha: 128
+    train_batch_size: 1
+    eval_batch_size: 2
+    gradient_accumulation_steps: 16
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+  # --- NEW: Llama 3.3 70B ---
+  # EXTREME TIGHT FIT. Requires conservative settings.
+  llama-70b:
+    name: "meta-llama/Llama-3.3-70B-Instruct"
+    short_name: "llama-70b"
+    provider: "huggingface"
+    params_b: 70
+    max_seq_length: 1024         # Reduced from 8192 to prevent OOM
+    load_in_4bit: true           # Mandatory for 70B on 40GB VRAM
+    lora_r: 16                   # Reduced to save VRAM
+    lora_alpha: 32
+    train_batch_size: 1          # Must be 1
+    eval_batch_size: 1           # Must be 1
+    gradient_accumulation_steps: 32
+    target_modules:
+      - q_proj
+      - k_proj
+      - v_proj
+      - o_proj
+      - gate_proj
+      - up_proj
+      - down_proj
+
+
+
+
   azure-gpt-4.1:
     name: "azure-openai-gpt-4.1"
     short_name: "gpt-4.1"
-    provider: "elysium"
+    provider: "azure"
     api_model: "azure-openai-gpt-4.1"
+    params_b: 0
     max_seq_length: 8192
     load_in_4bit: false
     lora_r: 0
@@ -138,8 +228,9 @@ models:
   azure-gpt-5:
     name: "azure-openai-gpt-5"
     short_name: "azure-gpt-5"
-    provider: "elysium"
+    provider: "azure"
     api_model: "azure-openai-gpt-5"
+    params_b: 0
     max_seq_length: 8192
     load_in_4bit: false
     lora_r: 0
@@ -149,8 +240,9 @@ models:
   gpt-5.2:
     name: "gpt-5.2"
     short_name: "gpt-5.2"
-    provider: "elysium"
+    provider: "azure"
     api_model: "gpt-5.2"
+    params_b: 0
     max_seq_length: 8192
     load_in_4bit: false
     lora_r: 0
@@ -160,11 +252,11 @@ models:
   DeepSeek-V3.2:
     name: "DeepSeek-V3.2"
     short_name: "ds-v3.2"
-    provider: "elysium"
+    provider: "azure"
     api_model: "DeepSeek-V3.2"
+    params_b: 0
     max_seq_length: 8192
     load_in_4bit: false
     lora_r: 0
     lora_alpha: 0
     target_modules: []
-

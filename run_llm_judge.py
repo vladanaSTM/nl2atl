@@ -5,8 +5,9 @@ Run the ATL LLM-as-a-judge evaluator over prediction files.
 
 import argparse
 from pathlib import Path
+from typing import Optional
 
-from src.config import load_yaml
+from src.config import ModelConfig, load_yaml
 
 from src.llm_judge import (
     LLMJudge,
@@ -48,24 +49,27 @@ def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
     return resolved
 
 
-def resolve_judge_model(judge_model: str, models_config_path: Path) -> str:
+def load_models_config(models_config_path: Path) -> dict:
     if not models_config_path.exists():
-        return judge_model
-
+        return {}
     models_cfg = load_yaml(str(models_config_path))
     models = models_cfg.get("models", {}) if isinstance(models_cfg, dict) else {}
-    if not isinstance(models, dict):
-        return judge_model
+    return models if isinstance(models, dict) else {}
+
+
+def resolve_model_key(model_arg: str, models: dict) -> str:
+    if model_arg in models:
+        return model_arg
 
     def normalize(token: str) -> str:
         token = token.lower()
-        for prefix in ("azure-", "elysium-"):
+        for prefix in ("azure-",):
             if token.startswith(prefix):
                 token = token[len(prefix) :]
         return token
 
-    needle = judge_model.lower()
-    normalized_needle = normalize(judge_model)
+    needle = model_arg.lower()
+    normalized_needle = normalize(model_arg)
     for key, data in models.items():
         if not isinstance(data, dict):
             continue
@@ -79,9 +83,67 @@ def resolve_judge_model(judge_model: str, models_config_path: Path) -> str:
             or normalize(short_name) == normalized_needle
             or normalize(name) == normalized_needle
         ):
-            return str(data.get("api_model") or name or judge_model)
+            return key
 
-    return judge_model
+    raise KeyError(model_arg)
+
+
+def resolve_judge_models(
+    models_config_path: Path,
+    judge_models: Optional[list],
+    judge_model: Optional[str],
+) -> list:
+    models = load_models_config(models_config_path)
+
+    if not models:
+        if judge_model:
+            return [(judge_model, ModelConfig(name=judge_model, short_name=judge_model, provider="azure"))]
+        if judge_models:
+            return [
+                (
+                    name,
+                    ModelConfig(name=name, short_name=name, provider="azure"),
+                )
+                for name in judge_models
+            ]
+        return [("gpt-5.2", ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"))]
+
+    if judge_model:
+        judge_models = [judge_model]
+
+    def azure_keys() -> list:
+        return [
+            key
+            for key, data in models.items()
+            if isinstance(data, dict)
+            and str(data.get("provider", "huggingface")).lower() == "azure"
+        ]
+
+    if judge_models:
+        selected_keys = []
+        seen = set()
+        for model_arg in judge_models:
+            if str(model_arg).lower() == "azure":
+                for key in azure_keys():
+                    if key not in seen:
+                        selected_keys.append(key)
+                        seen.add(key)
+                continue
+            key = resolve_model_key(model_arg, models)
+            if key not in seen:
+                selected_keys.append(key)
+                seen.add(key)
+    else:
+        selected_keys = azure_keys()
+
+    resolved = []
+    for key in selected_keys:
+        data = models.get(key)
+        if not isinstance(data, dict):
+            continue
+        resolved.append((key, ModelConfig(**data)))
+
+    return resolved
 
 
 def main():
@@ -93,9 +155,14 @@ def main():
         help="Prediction files to evaluate (default: all)",
     )
     parser.add_argument(
+        "--model",
+        "--models",
         "--judge_model",
-        default="gpt-5.2",
-        help="Judge model name (default: gpt-5.2)",
+        "--judge_models",
+        nargs="+",
+        dest="judge_models",
+        default=None,
+        help="Judge model names (aliases: --models, --judge_model, --judge_models).",
     )
     parser.add_argument(
         "--models_config",
@@ -119,6 +186,8 @@ def main():
     )
     args = parser.parse_args()
 
+    # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
+
     predictions_dir = Path(args.predictions_dir)
     output_dir = Path(args.output_dir)
 
@@ -126,75 +195,107 @@ def main():
     if not prediction_files:
         raise ValueError("No prediction files found to evaluate.")
 
-    judge_cache = output_dir / "judge_cache.json"
-    resolved_api_model = resolve_judge_model(args.judge_model, Path(args.models_config))
-    judge = LLMJudge(
-        judge_model=args.judge_model,
-        api_model=resolved_api_model,
-        cache_path=judge_cache,
-        no_llm=args.no_llm,
-        prompt_version=PROMPT_VERSION,
+    judge_entries = resolve_judge_models(
+        Path(args.models_config), args.judge_models, None
     )
+    if not judge_entries:
+        raise ValueError("No judge models resolved from config.")
 
-    corrected_dir = output_dir / "corrected_datasets" / args.judge_model
-    corrected_dir.mkdir(parents=True, exist_ok=True)
-
-    results = []
-    totals = {
-        "evaluated": 0,
-        "auto_exact": 0,
-        "llm_calls": 0,
-        "cache_hits": 0,
-        "no_llm": 0,
-    }
-
-    for pred_path in prediction_files:
-        rows, stats = evaluate_prediction_file(
-            prediction_path=pred_path,
-            judge=judge,
+    for _, model_config in judge_entries:
+        judge_name = model_config.short_name
+        judge_cache = output_dir / "judge_cache.json"
+        api_model = model_config.api_model or model_config.name
+        judge = LLMJudge(
+            judge_model=judge_name,
+            api_model=api_model,
+            cache_path=judge_cache,
             no_llm=args.no_llm,
-        )
-        metrics = compute_metrics(rows)
-
-        judge_tag = f"__judge-{args.judge_model}"
-        output_name = f"{pred_path.stem}{judge_tag}.json"
-        corrected_path = corrected_dir / output_name
-        write_json(corrected_path, rows)
-
-        results.append(
-            {
-                "source_file": pred_path.name,
-                "stem": pred_path.stem,
-                "rows": rows,
-                "metrics": metrics,
-                "stats": stats,
-                "corrected_path": str(corrected_path),
-            }
+            prompt_version=PROMPT_VERSION,
+            provider=model_config.provider,
+            model_config=model_config,
         )
 
-        totals["evaluated"] += int(metrics["evaluated"])
-        totals["auto_exact"] += stats.get("auto_exact", 0)
-        totals["llm_calls"] += stats.get("llm_calls", 0)
-        totals["cache_hits"] += stats.get("cache_hits", 0)
-        totals["no_llm"] += stats.get("no_llm", 0)
+        evaluated_dir = output_dir / "evaluated_datasets" / judge_name
+        evaluated_dir.mkdir(parents=True, exist_ok=True)
 
-    summary = build_summary(
-        results=results,
-        totals=totals,
-        judge_model=args.judge_model,
-        prompt_version=PROMPT_VERSION,
-    )
+        results = []
+        totals = {
+            "evaluated": 0,
+            "auto_exact": 0,
+            "llm_calls": 0,
+            "cache_hits": 0,
+            "no_llm": 0,
+        }
 
-    summary_path = output_dir / f"summary__judge-{args.judge_model}.json"
-    write_json(summary_path, summary)
+        for pred_path in prediction_files:
+            rows, stats = evaluate_prediction_file(
+                prediction_path=pred_path,
+                judge=judge,
+                no_llm=args.no_llm,
+            )
+            metrics = compute_metrics(rows)
 
-    notebook_path = output_dir / f"summary__judge-{args.judge_model}.ipynb"
-    build_summary_notebook(summary_path, notebook_path)
+            judge_tag = f"__judge-{judge_name}"
+            output_name = f"{pred_path.stem}{judge_tag}.json"
+            evaluated_path = evaluated_dir / output_name
+            write_json(evaluated_path, rows)
 
-    print(f"Wrote {len(results)} corrected datasets to {corrected_dir}")
-    print(f"Summary JSON: {summary_path}")
-    print(f"Summary notebook: {notebook_path}")
+            results.append(
+                {
+                    "source_file": pred_path.name,
+                    "stem": pred_path.stem,
+                    "rows": rows,
+                    "metrics": metrics,
+                    "stats": stats,
+                    "evaluated_path": str(evaluated_path),
+                }
+            )
+
+            totals["evaluated"] += int(metrics["evaluated"])
+            totals["auto_exact"] += stats.get("auto_exact", 0)
+            totals["llm_calls"] += stats.get("llm_calls", 0)
+            totals["cache_hits"] += stats.get("cache_hits", 0)
+            totals["no_llm"] += stats.get("no_llm", 0)
+
+        summary = build_summary(
+            results=results,
+            totals=totals,
+            judge_model=judge_name,
+            prompt_version=PROMPT_VERSION,
+        )
+
+        summary_path = output_dir / f"summary__judge-{judge_name}.json"
+        write_json(summary_path, summary)
+
+        notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
+        build_summary_notebook(summary_path, notebook_path)
+
+        print(f"Wrote {len(results)} evaluated datasets to {evaluated_dir}")
+        print(f"Summary JSON: {summary_path}")
+        print(f"Summary notebook: {notebook_path}")
 
 
 if __name__ == "__main__":
     main()
+
+    # After processing all judges, compute inter-rater agreement if multiple judges
+    if len(judge_entries) > 1:
+        from src.judge_agreement import (
+            generate_agreement_report,
+            print_agreement_summary,
+        )
+
+        eval_datasets_dir = output_dir / "evaluated_datasets"
+        if not eval_datasets_dir.exists():
+            # Fall back to checking if judge dirs are directly in output_dir
+            eval_datasets_dir = output_dir
+
+        try:
+            agreement_report = generate_agreement_report(
+                eval_dir=eval_datasets_dir,
+                output_path=output_dir / "agreement_report.json",
+            )
+            print_agreement_summary(agreement_report)
+        except ValueError as e:
+            print(f"Skipping agreement analysis: {e}")
+

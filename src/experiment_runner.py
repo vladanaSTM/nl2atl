@@ -3,12 +3,16 @@ Main experiment runner with wandb integration.
 """
 
 import os
+import gc
 import json
+import random
 import wandb
 from datetime import datetime
 from typing import Dict, List
 from pathlib import Path
 
+import torch
+import numpy as np
 from transformers import TrainingArguments
 from trl import SFTTrainer
 from datasets import Dataset
@@ -16,7 +20,7 @@ from datasets import Dataset
 from .config import Config, ModelConfig, ExperimentCondition
 from .data_utils import load_data, split_data, augment_data
 from .model_registry import load_model, get_model_type, clear_gpu_memory
-from .evaluator import ATLEvaluator
+from .exact_match_evaluator import ExactMatchEvaluator
 from .few_shot import format_prompt
 
 
@@ -25,8 +29,11 @@ class ExperimentRunner:
 
     def __init__(self, config: Config):
         self.config = config
-        self.evaluator = ATLEvaluator()
+        self.evaluator = ExactMatchEvaluator()
         self.all_results = []
+
+        # Global seeding for reproducibility
+        self._set_global_seed(self.config.seed)
 
         # Load and split data once
         self.data = load_data(config.data_path)
@@ -40,7 +47,7 @@ class ExperimentRunner:
         # Augment training data
         self.train_data_aug = augment_data(self.train_data, config.augment_factor)
 
-        # Optional reuse of loaded models across conditions (set REUSE_MODEL_CACHE=0 to disable)
+        # Optional reuse of loaded models across conditions
         self.model_cache = {}
         self.reuse_models = os.getenv("REUSE_MODEL_CACHE", "1") != "0"
 
@@ -49,18 +56,15 @@ class ExperimentRunner:
         )
 
     def _resolve_model_key(self, model_arg: str) -> str:
-        """Resolve user-provided model argument to a config key.
-
-        Accepts config key, short_name, or full HF repo name (case-insensitive).
-        """
+        """Resolve user-provided model argument to a config key."""
         if model_arg in self.config.models:
             return model_arg
 
         def normalize(token: str) -> str:
             token = token.lower()
-            for prefix in ("azure-", "elysium-"):
+            for prefix in "azure-":
                 if token.startswith(prefix):
-                    token = token[len(prefix) :]
+                    token = token[len(prefix):]
             return token
 
         needle = model_arg.lower()
@@ -77,6 +81,27 @@ class ExperimentRunner:
 
         raise KeyError(model_arg)
 
+    def _seed_suffix(self) -> str:
+        if getattr(self.config, "seeds", None) and len(self.config.seeds) > 1:
+            return f"_seed{self.config.seed}"
+        return ""
+
+    def _build_run_name(self, model_key: str, condition: ExperimentCondition) -> str:
+        model_config = self.config.models[model_key]
+        return f"{model_config.short_name}_{condition.name}{self._seed_suffix()}"
+
+    def _get_result_path(self, run_name: str) -> Path:
+        return Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
+
+    def _set_global_seed(self, seed: int) -> None:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
     def run_single_experiment(
         self, model_key: str, condition: ExperimentCondition, save_model: bool = True
     ) -> Dict:
@@ -84,23 +109,24 @@ class ExperimentRunner:
         model_key = self._resolve_model_key(model_key)
         model_config = self.config.models[model_key]
         model_type = get_model_type(model_config.name)
-        is_elysium = model_config.provider.lower() == "elysium"
-        if condition.finetuned and is_elysium:
-            print(
-                f"Skipping {model_config.short_name} ({condition.name}): fine-tuning disabled for provider=elysium."
-            )
-            return {
-                "run_name": f"{model_config.short_name}_{condition.name}",
-                "model": model_config.short_name,
-                "condition": condition.name,
-                "finetuned": condition.finetuned,
-                "few_shot": condition.few_shot,
-                "skipped": True,
-                "skip_reason": "finetuning_disabled_for_elysium",
-            }
-        effective_finetuned = condition.finetuned
+        is_azure = model_config.provider.lower() == "azure"
 
-        run_name = f"{model_config.short_name}_{condition.name}"
+        seed_suffix = self._seed_suffix()
+
+        if condition.finetuned:
+            if is_azure:
+                raise ValueError(
+                    f"Finetuning disabled for provider=azure (model={model_config.short_name})."
+                )
+            if model_config.params_b is not None and model_config.params_b > 8:
+                raise ValueError(
+                    "Finetuning disabled for models >8B params "
+                    f"(model={model_config.short_name}, params_b={model_config.params_b})."
+                )
+        
+        effective_finetuned = condition.finetuned
+        run_name = f"{model_config.short_name}_{condition.name}{seed_suffix}"
+        
         print(f"\n{'='*60}")
         print(f"Running: {run_name}")
         print(f"{'='*60}")
@@ -114,6 +140,7 @@ class ExperimentRunner:
                 "model": model_config.name,
                 "model_short": model_config.short_name,
                 "condition": condition.name,
+                "seed": self.config.seed,
                 "finetuned": effective_finetuned,
                 "few_shot": condition.few_shot,
                 "num_epochs": self.config.num_epochs if effective_finetuned else 0,
@@ -127,138 +154,123 @@ class ExperimentRunner:
         )
 
         adapter_path = None
+        model = None
+        tokenizer = None
 
-        # Train if needed
-        if effective_finetuned:
-            adapter_path = self._train_model(model_config, model_type, run_name)
+        try:
+            # Train if needed
+            if effective_finetuned:
+                adapter_path = self._train_model(model_config, model_type, run_name)
 
-        cache_key = (model_config.name, adapter_path or "base")
-        reused = False
-        model = tokenizer = None
+            cache_key = (model_config.name, adapter_path or "base")
+            reused = False
 
-        if (
-            self.reuse_models
-            and not effective_finetuned
-            and cache_key in self.model_cache
-        ):
-            model, tokenizer = self.model_cache[cache_key]
-            reused = True
-            print("Reusing cached model from GPU memory for this condition")
-        else:
-            model, tokenizer = load_model(
-                model_config, for_training=False, load_adapter=adapter_path
-            )
-            if self.reuse_models and not effective_finetuned:
-                self.model_cache[cache_key] = (model, tokenizer)
-
-        # Evaluate
-        metrics = self.evaluator.evaluate(
-            model=model,
-            tokenizer=tokenizer,
-            test_data=self.test_data,
-            model_type=model_type,
-            few_shot=condition.few_shot,
-            num_few_shot=self.config.num_few_shot_examples,
-            verbose=True,
-        )
-
-        # Log metrics to wandb
-        wandb.log(
-            {
-                "eval/exact_match": metrics["exact_match"],
-                "eval/agent_f1": metrics["agent_f1"],
-                "eval/temporal_f1": metrics["temporal_f1"],
-                "eval/logical_f1": metrics["logical_f1"],
-                "eval/syntax_valid": metrics["syntax_valid"],
-                "eval/overall_score": metrics["overall_score"],
-            },
-            commit=False,
-        )
-
-        # Log detailed predictions as a table (Table constructor with columns + data per wandb guidance)
-        wandb.run.summary["num_predictions"] = len(self.evaluator.results)
-
-        table_columns = [
-            "Example_ID",
-            "Input",
-            "Expected_Output",
-            "Generated_Output",
-            "Exact_Match",
-            "Agent_F1",
-            "Temporal_F1",
-            "Logical_F1",
-            "Syntax_Valid",
-            "Overall_Score",
-        ]
-
-        table_rows = []
-        if not self.evaluator.results:
-            print("No predictions generated; logging empty predictions table to wandb.")
-        else:
-            for idx, result in enumerate(self.evaluator.results):
-                table_rows.append(
-                    [
-                        idx + 1,
-                        result["input"],
-                        result["expected"],
-                        result["generated"],
-                        result["scores"]["exact_match"],
-                        result["scores"]["agent_f1"],
-                        result["scores"]["temporal_f1"],
-                        result["scores"]["logical_f1"],
-                        result["scores"]["syntax_valid"],
-                        result["scores"]["overall_score"],
-                    ]
+            if (
+                self.reuse_models
+                and not effective_finetuned
+                and cache_key in self.model_cache
+            ):
+                model, tokenizer = self.model_cache[cache_key]
+                reused = True
+                print("Reusing cached model from GPU memory for this condition")
+            else:
+                model, tokenizer = load_model(
+                    model_config, for_training=False, load_adapter=adapter_path
                 )
+                if self.reuse_models and not effective_finetuned:
+                    self.model_cache[cache_key] = (model, tokenizer)
 
-        predictions_table = wandb.Table(columns=table_columns, data=table_rows)
-        wandb.log({"predictions_table": predictions_table}, commit=True)
+            # Evaluate
+            metrics = self.evaluator.evaluate(
+                model=model,
+                tokenizer=tokenizer,
+                test_data=self.test_data,
+                model_type=model_type,
+                few_shot=condition.few_shot,
+                num_few_shot=self.config.num_few_shot_examples,
+                verbose=True,
+            )
 
-        predictions_artifact = wandb.Artifact(
-            name=f"{run_name}-predictions", type="predictions"
-        )
-        predictions_artifact.add(predictions_table, "predictions")
-        wandb.log_artifact(predictions_artifact)
+            # Log metrics to wandb
+            wandb.log(
+                {"eval/exact_match": metrics["exact_match"]},
+                commit=False,
+            )
 
-        wandb.run.summary["predictions_table_rows"] = len(table_rows)
-        wandb.run.summary["predictions_table_artifact"] = predictions_artifact.name
+            # Log detailed predictions as a table
+            wandb.run.summary["num_predictions"] = len(self.evaluator.results)
 
-        # Print summary
-        print(f"\nResults for {run_name}:")
-        print(f"  Exact Match:    {metrics['exact_match']:.1%}")
-        print(f"  Agent F1:       {metrics['agent_f1']:.1%}")
-        print(f"  Temporal F1:    {metrics['temporal_f1']:.1%}")
-        print(f"  Logical F1:     {metrics['logical_f1']:.1%}")
-        print(f"  Syntax Valid:   {metrics['syntax_valid']:.1%}")
-        print(f"  Overall Score:  {metrics['overall_score']:.1%}")
+            table_columns = [
+                "Example_ID",
+                "Input",
+                "Expected_Output",
+                "Generated_Output",
+                "Difficulty",
+                "Exact_Match",
+            ]
 
-        # Save results
-        result = {
-            "run_name": run_name,
-            "model": model_config.short_name,
-            "condition": condition.name,
-            "finetuned": effective_finetuned,
-            "few_shot": condition.few_shot,
-            "metrics": metrics,
-            "detailed_results": self.evaluator.results,
-        }
+            table_rows = []
+            if not self.evaluator.results:
+                print("No predictions generated; logging empty predictions table to wandb.")
+            else:
+                for idx, result in enumerate(self.evaluator.results):
+                    table_rows.append(
+                        [
+                            idx + 1,
+                            result["input"],
+                            result["expected"],
+                            result["generated"],
+                            result.get("difficulty"),
+                            result["exact_match"],
+                        ]
+                    )
 
-        self.all_results.append(result)
+            predictions_table = wandb.Table(columns=table_columns, data=table_rows)
+            wandb.log({"predictions_table": predictions_table}, commit=True)
 
-        # Save to file
-        result_path = (
-            Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
-        )
-        result_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
+            predictions_artifact = wandb.Artifact(
+                name=f"{run_name}-predictions", type="predictions"
+            )
+            predictions_artifact.add(predictions_table, "predictions")
+            wandb.log_artifact(predictions_artifact)
 
-        # Clean up if not caching this model
-        if not (self.reuse_models and not effective_finetuned):
-            del model, tokenizer
-            clear_gpu_memory()
+            wandb.run.summary["predictions_table_rows"] = len(table_rows)
+            wandb.run.summary["predictions_table_artifact"] = predictions_artifact.name
 
-        wandb.finish()
+            # Print summary
+            print(f"\nResults for {run_name}:")
+            print(f"  Exact Match:    {metrics['exact_match']:.1%}")
+
+            # Save results
+            result = {
+                "run_name": run_name,
+                "model": model_config.short_name,
+                "condition": condition.name,
+                "seed": self.config.seed,
+                "finetuned": effective_finetuned,
+                "few_shot": condition.few_shot,
+                "metrics": metrics,
+                "detailed_results": self.evaluator.results,
+            }
+
+            self.all_results.append(result)
+
+            # Save to file
+            result_path = self._get_result_path(run_name)
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, default=str, ensure_ascii=False)
+
+        finally:
+            # Clean up if not caching this model
+            if not (self.reuse_models and not effective_finetuned):
+                if model is not None:
+                    del model
+                if tokenizer is not None:
+                    del tokenizer
+                clear_gpu_memory()
+
+            wandb.finish()
 
         return result
 
@@ -266,18 +278,22 @@ class ExperimentRunner:
         self, model_config: ModelConfig, model_type: str, run_name: str
     ) -> str:
         """Train a model and return the adapter path."""
-
-        if model_config.provider.lower() == "elysium":
-            raise ValueError("Training is disabled for Elysium/Azure models.")
+        if model_config.provider.lower() == "azure":
+            raise ValueError("Training is disabled for Azure models.")
+        if model_config.params_b is not None and model_config.params_b > 8:
+            raise ValueError(
+                "Training disabled for models >8B params "
+                f"(model={model_config.short_name}, params_b={model_config.params_b})."
+            )
 
         print(f"\nTraining {model_config.short_name}...")
 
         # Load model for training
         model, tokenizer = load_model(model_config, for_training=True)
 
-        # Optional short-run probe to test throughput/memory without full epochs
+        # Optional short-run probe
         max_steps_env = os.getenv("TRAIN_MAX_STEPS")
-        max_steps = -1  # HF/TRL expect -1 for full training, not None
+        max_steps = -1
         if max_steps_env:
             try:
                 parsed = int(max_steps_env)
@@ -320,13 +336,30 @@ class ExperimentRunner:
         output_dir = Path(self.config.models_dir) / run_name
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Resolve per-model training overrides
+        train_batch_size = (
+            model_config.train_batch_size
+            if model_config.train_batch_size is not None
+            else self.config.batch_size
+        )
+        eval_batch_size = (
+            model_config.eval_batch_size
+            if model_config.eval_batch_size is not None
+            else train_batch_size
+        )
+        grad_accum_steps = (
+            model_config.gradient_accumulation_steps
+            if model_config.gradient_accumulation_steps is not None
+            else self.config.gradient_accumulation_steps
+        )
+
         # Training arguments
         training_args = TrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=self.config.num_epochs,
-            per_device_train_batch_size=self.config.batch_size,
-            per_device_eval_batch_size=self.config.batch_size,
-            gradient_accumulation_steps=self.config.gradient_accumulation_steps,
+            per_device_train_batch_size=train_batch_size,
+            per_device_eval_batch_size=eval_batch_size,
+            gradient_accumulation_steps=grad_accum_steps,
             learning_rate=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
             warmup_ratio=self.config.warmup_ratio,
@@ -350,7 +383,9 @@ class ExperimentRunner:
             gradient_checkpointing_kwargs={"use_reentrant": False},
             max_steps=max_steps,
             dataloader_num_workers=4,
+            dataloader_pin_memory=True,
             group_by_length=True,
+            tf32=True,
         )
 
         # Trainer
@@ -369,19 +404,70 @@ class ExperimentRunner:
         trainer.save_model(str(final_path))
         tokenizer.save_pretrained(str(final_path))
 
-        # Clean up
-        del model, tokenizer, trainer
+        # ===== AGGRESSIVE CLEANUP =====
+        # Clear trainer internal references
+        if hasattr(trainer, 'model'):
+            trainer.model = None
+        if hasattr(trainer, 'model_wrapped'):
+            trainer.model_wrapped = None
+        if hasattr(trainer, 'optimizer'):
+            trainer.optimizer = None
+        if hasattr(trainer, 'lr_scheduler'):
+            trainer.lr_scheduler = None
+        if hasattr(trainer, 'accelerator'):
+            try:
+                trainer.accelerator.free_memory()
+            except Exception:
+                pass
+        
+        # Delete objects
+        del trainer
+        del train_dataset
+        del val_dataset
+        
+        # Move model to CPU before deleting (helps with some edge cases)
+        try:
+            model.cpu()
+        except Exception:
+            pass
+        
+        del model
+        del tokenizer
+        
+        # Force cleanup
         clear_gpu_memory()
+        # ===== END CLEANUP =====
 
         return str(final_path)
 
     def run_all_experiments(
-        self, models: List[str] = None, conditions: List[str] = None
+        self,
+        models: List[str] = None,
+        conditions: List[str] = None,
+        model_provider: str = "hf",
+        overwrite: bool = False,
     ):
         """Run all experiments."""
 
         if models is None:
             models = list(self.config.models.keys())
+
+        if model_provider not in {"hf", "azure", "all"}:
+            raise ValueError(
+                f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
+            )
+
+        if model_provider != "all":
+            filtered_models = []
+            for model_key in models:
+                resolved_key = self._resolve_model_key(model_key)
+                provider = self.config.models[resolved_key].provider.lower()
+                is_azure = provider == "azure"
+                if (model_provider == "azure" and is_azure) or (
+                    model_provider == "hf" and not is_azure
+                ):
+                    filtered_models.append(model_key)
+            models = filtered_models
 
         if conditions is None:
             conditions = self.config.conditions
@@ -404,10 +490,23 @@ class ExperimentRunner:
 
                 try:
                     resolved_key = self._resolve_model_key(model_key)
+                    run_name = self._build_run_name(resolved_key, condition)
+                    result_path = self._get_result_path(run_name)
+                    if result_path.exists() and not overwrite:
+                        print(
+                            f"Skipping {run_name}: results exist at {result_path}"
+                        )
+                        continue
+
+                    print(
+                        f"Running {run_name}: writing results to {result_path}"
+                    )
                     self.run_single_experiment(resolved_key, condition)
                 except Exception as e:
                     print(f"ERROR: {e}")
                     wandb.finish(exit_code=1)
+                    # Still try to clean up on error
+                    clear_gpu_memory()
                     continue
 
         # Release any cached models
@@ -418,6 +517,10 @@ class ExperimentRunner:
         if not self.model_cache:
             return
         for _, (model, tokenizer) in self.model_cache.items():
+            try:
+                model.cpu()
+            except Exception:
+                pass
             del model, tokenizer
         self.model_cache.clear()
         clear_gpu_memory()

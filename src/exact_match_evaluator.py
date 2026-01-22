@@ -1,23 +1,20 @@
 """
-Evaluation metrics and framework.
+Exact-match evaluator with output cleaning for ATL formula generation.
 """
 
 import re
-import numpy as np
 from typing import Dict, List, Any
 
 from .model_registry import generate
 from .few_shot import format_prompt
 
 
-class ATLEvaluator:
-    """Evaluator for ATL formula generation."""
+class ExactMatchEvaluator:
+    """Evaluator that normalizes model output and tracks exact-match accuracy."""
 
     def __init__(self):
         self.results = []
-        self.agent_pattern = r"<<([^>]+)>>"
         self.temporal_ops = ["G", "F", "X", "U", "W", "R"]
-        self.logical_ops = ["->", "&", "|", "!"]
 
     def clean_output(self, response: str, model_type: str) -> str:
         """Extract generated formula from model response."""
@@ -37,6 +34,7 @@ class ATLEvaluator:
                 response = response.split("<|im_start|>assistant")[-1]
             response = response.replace("<|im_end|>", "")
             response = response.replace("<|im_start|>", "")
+            response = response.replace("</s>", "")
         elif model_type == "phi3":
             if "<|assistant|>" in response:
                 response = response.split("<|assistant|>")[-1]
@@ -114,90 +112,37 @@ class ATLEvaluator:
             elif lines:
                 response = lines[0]
 
+        response = re.sub(r"(\\n)+$", "", response)
         return response.strip()
 
     def normalize(self, formula: str) -> str:
-        return re.sub(r"\s+", "", formula.strip().lower())
+        normalized = self._normalize_symbols(formula)
+        return re.sub(r"\s+", "", normalized.strip().lower())
 
-    def extract_agents(self, formula: str) -> List[str]:
-        matches = re.findall(self.agent_pattern, formula)
-        agents = []
-        for match in matches:
-            agents.extend([a.strip() for a in match.split(",")])
-        return agents
+    def _normalize_symbols(self, formula: str) -> str:
+        """Normalize Unicode/ASCII logical symbols to a common form."""
+        if not formula:
+            return formula
 
-    def extract_temporal_operators(self, formula: str) -> List[str]:
-        found = []
-        for op in self.temporal_ops:
-            pattern = rf"(?<![a-zA-Z_]){op}(?![a-zA-Z_])"
-            if re.search(pattern, formula):
-                found.append(op)
-        return found
-
-    def extract_logical_operators(self, formula: str) -> List[str]:
-        return [op for op in self.logical_ops if op in formula]
-
-    def check_syntax(self, formula: str) -> Dict[str, bool]:
-        checks = {
-            "has_agent_brackets": bool(re.search(self.agent_pattern, formula)),
-            "brackets_balanced": formula.count("(") == formula.count(")"),
-            "has_temporal_op": any(
-                re.search(rf"(?<![a-zA-Z_]){op}(?![a-zA-Z_])", formula)
-                for op in self.temporal_ops
-            ),
-            "agent_brackets_closed": formula.count("<<") == formula.count(">>"),
-        }
-        checks["all_valid"] = all(checks.values())
-        return checks
-
-    def compute_f1(self, expected_set: set, generated_set: set) -> float:
-        if not expected_set:
-            return 1.0
-        if not generated_set:
-            return 0.0
-        precision = len(expected_set & generated_set) / len(generated_set)
-        recall = len(expected_set & generated_set) / len(expected_set)
-        if precision + recall == 0:
-            return 0.0
-        return 2 * precision * recall / (precision + recall)
-
-    def compute_scores(self, expected: str, generated: str) -> Dict[str, float]:
-        scores = {}
-
-        # Exact match
-        scores["exact_match"] = float(
-            self.normalize(expected) == self.normalize(generated)
+        # Map common Unicode logical operators to ASCII equivalents
+        normalized = (
+            formula.replace("∧", "&&")
+            .replace("∨", "||")
+            .replace("¬", "!")
+            .replace("→", "->")
+            .replace("⇒", "->")
+            .replace("↔", "<->")
+            .replace("⇔", "<->")
         )
 
-        # Agent F1
-        exp_agents = set(a.lower() for a in self.extract_agents(expected))
-        gen_agents = set(a.lower() for a in self.extract_agents(generated))
-        scores["agent_f1"] = self.compute_f1(exp_agents, gen_agents)
+        # Normalize common ASCII variants to a canonical form
+        normalized = re.sub(r"\band\b", "&&", normalized, flags=re.IGNORECASE)
+        normalized = re.sub(r"\bor\b", "||", normalized, flags=re.IGNORECASE)
 
-        # Temporal F1
-        exp_temps = set(self.extract_temporal_operators(expected))
-        gen_temps = set(self.extract_temporal_operators(generated))
-        scores["temporal_f1"] = self.compute_f1(exp_temps, gen_temps)
-
-        # Logical F1
-        exp_logic = set(self.extract_logical_operators(expected))
-        gen_logic = set(self.extract_logical_operators(generated))
-        scores["logical_f1"] = self.compute_f1(exp_logic, gen_logic)
-
-        # Syntax validity
-        syntax = self.check_syntax(generated)
-        scores["syntax_valid"] = float(syntax["all_valid"])
-
-        # Overall score
-        scores["overall_score"] = (
-            0.15 * scores["exact_match"]
-            + 0.15 * scores["agent_f1"]
-            + 0.25 * scores["temporal_f1"]
-            + 0.20 * scores["logical_f1"]
-            + 0.25 * scores["syntax_valid"]
-        )
-
-        return scores
+        # Collapse double variants (e.g., '|||' or '&&&') just in case
+        normalized = re.sub(r"\|\|+", "||", normalized)
+        normalized = re.sub(r"&&+", "&&", normalized)
+        return normalized
 
     def evaluate(
         self,
@@ -234,13 +179,16 @@ class ATLEvaluator:
             generated = self.clean_output(response, model_type)
 
             # Score
-            scores = self.compute_scores(item["output"], generated)
+            exact_match = int(
+                self.normalize(item["output"]) == self.normalize(generated)
+            )
 
             result = {
                 "input": item["input"],
                 "expected": item["output"],
                 "generated": generated,
-                "scores": scores,
+                "difficulty": item.get("difficulty"),
+                "exact_match": exact_match,
             }
             self.results.append(result)
 
@@ -255,26 +203,10 @@ class ATLEvaluator:
         if n == 0:
             return {}
 
-        metrics = {
+        exact_matches = [r["exact_match"] for r in self.results]
+        exact_mean = sum(exact_matches) / n
+
+        return {
             "n_examples": n,
-            "exact_match": np.mean([r["scores"]["exact_match"] for r in self.results]),
-            "agent_f1": np.mean([r["scores"]["agent_f1"] for r in self.results]),
-            "temporal_f1": np.mean([r["scores"]["temporal_f1"] for r in self.results]),
-            "logical_f1": np.mean([r["scores"]["logical_f1"] for r in self.results]),
-            "syntax_valid": np.mean(
-                [r["scores"]["syntax_valid"] for r in self.results]
-            ),
-            "overall_score": np.mean(
-                [r["scores"]["overall_score"] for r in self.results]
-            ),
+            "exact_match": exact_mean,
         }
-
-        # Standard deviations
-        metrics["exact_match_std"] = np.std(
-            [r["scores"]["exact_match"] for r in self.results]
-        )
-        metrics["overall_score_std"] = np.std(
-            [r["scores"]["overall_score"] for r in self.results]
-        )
-
-        return metrics
