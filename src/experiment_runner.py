@@ -81,6 +81,18 @@ class ExperimentRunner:
 
         raise KeyError(model_arg)
 
+    def _seed_suffix(self) -> str:
+        if getattr(self.config, "seeds", None) and len(self.config.seeds) > 1:
+            return f"_seed{self.config.seed}"
+        return ""
+
+    def _build_run_name(self, model_key: str, condition: ExperimentCondition) -> str:
+        model_config = self.config.models[model_key]
+        return f"{model_config.short_name}_{condition.name}{self._seed_suffix()}"
+
+    def _get_result_path(self, run_name: str) -> Path:
+        return Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
+
     def _set_global_seed(self, seed: int) -> None:
         random.seed(seed)
         np.random.seed(seed)
@@ -98,10 +110,8 @@ class ExperimentRunner:
         model_config = self.config.models[model_key]
         model_type = get_model_type(model_config.name)
         is_azure = model_config.provider.lower() == "azure"
-        
-        seed_suffix = ""
-        if getattr(self.config, "seeds", None) and len(self.config.seeds) > 1:
-            seed_suffix = f"_seed{self.config.seed}"
+
+        seed_suffix = self._seed_suffix()
 
         if condition.finetuned:
             if is_azure:
@@ -246,9 +256,7 @@ class ExperimentRunner:
             self.all_results.append(result)
 
             # Save to file
-            result_path = (
-                Path(self.config.output_dir) / "model_predictions" / f"{run_name}.json"
-            )
+            result_path = self._get_result_path(run_name)
             result_path.parent.mkdir(parents=True, exist_ok=True)
             with open(result_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, default=str, ensure_ascii=False)
@@ -437,6 +445,7 @@ class ExperimentRunner:
         models: List[str] = None,
         conditions: List[str] = None,
         model_provider: str = "hf",
+        overwrite: bool = False,
     ):
         """Run all experiments."""
 
@@ -481,6 +490,17 @@ class ExperimentRunner:
 
                 try:
                     resolved_key = self._resolve_model_key(model_key)
+                    run_name = self._build_run_name(resolved_key, condition)
+                    result_path = self._get_result_path(run_name)
+                    if result_path.exists() and not overwrite:
+                        print(
+                            f"Skipping {run_name}: results exist at {result_path}"
+                        )
+                        continue
+
+                    print(
+                        f"Running {run_name}: writing results to {result_path}"
+                    )
                     self.run_single_experiment(resolved_key, condition)
                 except Exception as e:
                     print(f"ERROR: {e}")

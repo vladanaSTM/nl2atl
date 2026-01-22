@@ -63,7 +63,7 @@ def resolve_model_key(model_arg: str, models: dict) -> str:
 
     def normalize(token: str) -> str:
         token = token.lower()
-        for prefix in "azure-":
+        for prefix in ("azure-",):
             if token.startswith(prefix):
                 token = token[len(prefix) :]
         return token
@@ -111,15 +111,30 @@ def resolve_judge_models(
     if judge_model:
         judge_models = [judge_model]
 
-    if judge_models:
-        selected_keys = [resolve_model_key(m, models) for m in judge_models]
-    else:
-        selected_keys = [
+    def azure_keys() -> list:
+        return [
             key
             for key, data in models.items()
             if isinstance(data, dict)
             and str(data.get("provider", "huggingface")).lower() == "azure"
         ]
+
+    if judge_models:
+        selected_keys = []
+        seen = set()
+        for model_arg in judge_models:
+            if str(model_arg).lower() == "azure":
+                for key in azure_keys():
+                    if key not in seen:
+                        selected_keys.append(key)
+                        seen.add(key)
+                continue
+            key = resolve_model_key(model_arg, models)
+            if key not in seen:
+                selected_keys.append(key)
+                seen.add(key)
+    else:
+        selected_keys = azure_keys()
 
     resolved = []
     for key in selected_keys:
@@ -140,15 +155,14 @@ def main():
         help="Prediction files to evaluate (default: all)",
     )
     parser.add_argument(
+        "--model",
+        "--models",
         "--judge_model",
-        default=None,
-        help="Judge model name (deprecated; use --judge_models)",
-    )
-    parser.add_argument(
         "--judge_models",
         nargs="+",
+        dest="judge_models",
         default=None,
-        help="Judge model names (default: all provider=azure)",
+        help="Judge model names (aliases: --models, --judge_model, --judge_models).",
     )
     parser.add_argument(
         "--models_config",
@@ -172,6 +186,8 @@ def main():
     )
     args = parser.parse_args()
 
+    # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
+
     predictions_dir = Path(args.predictions_dir)
     output_dir = Path(args.output_dir)
 
@@ -180,7 +196,7 @@ def main():
         raise ValueError("No prediction files found to evaluate.")
 
     judge_entries = resolve_judge_models(
-        Path(args.models_config), args.judge_models, args.judge_model
+        Path(args.models_config), args.judge_models, None
     )
     if not judge_entries:
         raise ValueError("No judge models resolved from config.")

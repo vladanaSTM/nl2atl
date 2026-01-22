@@ -637,20 +637,6 @@ def build_summary_notebook(summary_path: Path, output_path: Path):
                 "cell_type": "code",
                 "metadata": {"language": "python"},
                 "source": [
-                    "# F1 by model file\n",
-                    "plt.figure(figsize=(10, 4))\n",
-                    "plt.bar(df['source_file'], df['f1'])\n",
-                    "plt.xticks(rotation=45, ha='right')\n",
-                    "plt.ylabel('F1')\n",
-                    "plt.title('F1 by Model File')\n",
-                    "plt.tight_layout()\n",
-                    "plt.show()\n",
-                ],
-            },
-            {
-                "cell_type": "code",
-                "metadata": {"language": "python"},
-                "source": [
                     "# Correct vs Incorrect bar chart for best model\n",
                     "best = summary['ranking'][0]['source_file'] if summary['ranking'] else None\n",
                     "if best is not None:\n",

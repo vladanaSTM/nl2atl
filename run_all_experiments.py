@@ -66,6 +66,12 @@ def main():
         default="hf",
         help="Which model provider to run (default: hf).",
     )
+    parser.add_argument(
+        "--overwrite",
+        "--force",
+        action="store_true",
+        help="Run all experiments even if output files already exist.",
+    )
     parser.add_argument("--models_config", default="configs/models.yaml")
     parser.add_argument("--experiments_config", default="configs/experiments.yaml")
     args = parser.parse_args()
@@ -82,6 +88,7 @@ def main():
             models=args.models,
             conditions=args.conditions,
             model_provider=args.model_provider,
+            overwrite=args.overwrite,
         )
         all_results.extend(runner.all_results)
     else:
@@ -96,6 +103,7 @@ def main():
                 models=args.models,
                 conditions=args.conditions,
                 model_provider=args.model_provider,
+                overwrite=args.overwrite,
             )
             all_results.extend(runner.all_results)
 
