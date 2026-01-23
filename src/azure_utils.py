@@ -28,6 +28,7 @@ class AzureConfig:
     api_key: str
     endpoint: str
     api_version: Optional[str] = None
+    api_model: Optional[str] = None
     use_cache: bool = True
     verify_ssl: bool = False
 
@@ -38,6 +39,7 @@ class AzureConfig:
         api_key = os.getenv("AZURE_API_KEY")
         endpoint = os.getenv("AZURE_INFER_ENDPOINT")
         api_version = os.getenv("AZURE_API_VERSION")
+        api_model = os.getenv("AZURE_INFER_MODEL")
         use_cache = os.getenv("AZURE_USE_CACHE", "true").lower() == "true"
         verify_ssl_env = os.getenv("AZURE_VERIFY_SSL", "false").lower()
         verify_ssl = verify_ssl_env in ("1", "true", "yes")
@@ -51,6 +53,7 @@ class AzureConfig:
             api_key=api_key,
             endpoint=endpoint,
             api_version=api_version,
+            api_model=api_model,
             use_cache=use_cache,
             verify_ssl=verify_ssl,
         )
