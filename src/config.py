@@ -2,22 +2,26 @@
 Configuration management for experiments.
 """
 
-import yaml
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-
-def load_yaml(path: str) -> dict:
-    with open(path, "r") as f:
-        return yaml.safe_load(f)
+from .infra.io import load_yaml
+from .constants import (
+    Provider,
+    DEFAULT_DATA_PATH,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_MODELS_DIR,
+)
 
 
 @dataclass
 class ModelConfig:
+    """Configuration for a single model."""
+
     name: str
     short_name: str
-    provider: str = "huggingface"  # huggingface or azure
-    api_model: Optional[str] = None  # Optional override for remote model id
+    provider: str = Provider.HUGGINGFACE
+    api_model: Optional[str] = None
     max_seq_length: int = 512
     load_in_4bit: bool = True
     lora_r: int = 64
@@ -28,9 +32,16 @@ class ModelConfig:
     target_modules: List[str] = field(default_factory=list)
     params_b: Optional[float] = None
 
+    @property
+    def is_azure(self) -> bool:
+        """Check if this model uses Azure provider."""
+        return self.provider.lower() == Provider.AZURE
+
 
 @dataclass
 class ExperimentCondition:
+    """Defines an experimental condition."""
+
     name: str
     finetuned: bool
     few_shot: bool
@@ -38,10 +49,12 @@ class ExperimentCondition:
 
 @dataclass
 class Config:
+    """Main configuration container."""
+
     # Paths
-    data_path: str = "./data/dataset.json"
-    output_dir: str = "./outputs"
-    models_dir: str = "./models"
+    data_path: str = DEFAULT_DATA_PATH
+    output_dir: str = DEFAULT_OUTPUT_DIR
+    models_dir: str = DEFAULT_MODELS_DIR
 
     # Data settings
     test_size: Optional[float] = None
@@ -63,21 +76,21 @@ class Config:
     # Few-shot settings
     num_few_shot_examples: int = 5
 
-    # Wandb settings
+    # W&B settings
     wandb_project: str = "atl-formula-generation"
     wandb_entity: Optional[str] = None
 
-    # Model configs
+    # Model and experiment configs
     models: Dict[str, ModelConfig] = field(default_factory=dict)
-
-    # Experiment conditions
     conditions: List[ExperimentCondition] = field(default_factory=list)
 
     @classmethod
     def from_yaml(cls, models_path: str, experiments_path: str) -> "Config":
+        """Load configuration from YAML files."""
         models_cfg = load_yaml(models_path)
         exp_cfg = load_yaml(experiments_path)
 
+        # Extract experiment settings
         exp_settings = exp_cfg.get("experiment", {})
         seed = exp_settings.get("seed")
         seeds = exp_settings.get("seeds") or []
@@ -86,6 +99,7 @@ class Config:
         if seeds:
             seed = seeds[0]
 
+        # Build config
         config = cls(
             data_path=exp_cfg["data"]["path"],
             test_size=exp_cfg["data"]["test_size"],
@@ -109,33 +123,45 @@ class Config:
         )
 
         # Load models
-        for model_key, model_data in models_cfg["models"].items():
+        for model_key, model_data in models_cfg.get("models", {}).items():
             config.models[model_key] = ModelConfig(**model_data)
 
         # Load conditions
-        for cond in exp_cfg["conditions"]:
+        for cond in exp_cfg.get("conditions", []):
             config.conditions.append(ExperimentCondition(**cond))
 
-        missing = []
-        if config.seed is None:
-            missing.append("experiment.seed")
-        if config.test_size is None:
-            missing.append("data.test_size")
-        if config.val_size is None:
-            missing.append("data.val_size")
-        if config.augment_factor is None:
-            missing.append("data.augment_factor")
-        if missing:
-            raise ValueError(
-                "Missing required config values in experiments.yaml: "
-                + ", ".join(missing)
-            )
+        # Validate required fields
+        config._validate()
 
         return config
 
+    def _validate(self) -> None:
+        """Validate that required configuration values are present."""
+        missing = []
+        if self.seed is None:
+            missing.append("experiment.seed")
+        if self.test_size is None:
+            missing.append("data.test_size")
+        if self.val_size is None:
+            missing.append("data.val_size")
+        if self.augment_factor is None:
+            missing.append("data.augment_factor")
+
+        if missing:
+            raise ValueError(
+                f"Missing required config values in experiments.yaml: {', '.join(missing)}"
+            )
+
     def resolve_seeds(self) -> List[int]:
+        """Get the list of seeds to run experiments with."""
         if self.seeds:
             return list(self.seeds)
-        if self.num_seeds and self.num_seeds > 1:
+        if self.num_seeds > 1:
             return [self.seed + i for i in range(self.num_seeds)]
         return [self.seed]
+
+    def get_model(self, model_key: str) -> ModelConfig:
+        """Get a model configuration by key."""
+        if model_key not in self.models:
+            raise KeyError(f"Model '{model_key}' not found in configuration")
+        return self.models[model_key]

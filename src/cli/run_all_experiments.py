@@ -9,8 +9,8 @@ from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
 
-from src.config import Config
-from src.experiment_runner import ExperimentRunner
+from ..config import Config
+from ..experiment import ExperimentRunner
 
 
 def aggregate_seed_results(results):

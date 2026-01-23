@@ -1,18 +1,14 @@
 #!/usr/bin/env python
 """
 Compute inter-rater agreement between LLM judges.
-
-Usage:
-    python run_judge_agreement.py
-    python run_judge_agreement.py --eval_dir outputs/LLM-evaluation/evaluated_datasets
-    python run_judge_agreement.py --judges llama-70b gpt-4o
 """
 
 import argparse
 from pathlib import Path
 
-from src.judge_agreement import (
+from ..evaluation.judge_agreement import (
     generate_agreement_report,
+    generate_agreement_report_with_human,
     print_agreement_summary,
 )
 
@@ -40,10 +36,16 @@ def main():
         help="Specific judges to compare (default: all found in eval_dir)",
     )
     parser.add_argument(
-        "--include_disagreements",
-        action="store_true",
-        default=True,
-        help="Include sample disagreements in report",
+        "--human_annotations",
+        type=Path,
+        default=None,
+        help="Optional human annotations JSON to include as a judge",
+    )
+    parser.add_argument(
+        "--no_disagreements",
+        action="store_false",
+        dest="include_disagreements",
+        help="Exclude sample disagreements from the report",
     )
     parser.add_argument(
         "--max_disagreements",
@@ -59,12 +61,23 @@ def main():
     if not args.eval_dir.exists():
         raise FileNotFoundError(f"Evaluation directory not found: {args.eval_dir}")
 
-    report = generate_agreement_report(
-        eval_dir=args.eval_dir,
-        output_path=args.output,
-        include_disagreements=args.include_disagreements,
-        max_disagreements=args.max_disagreements,
-    )
+    if args.human_annotations:
+        report = generate_agreement_report_with_human(
+            eval_dir=args.eval_dir,
+            human_annotations_path=args.human_annotations,
+            output_path=args.output,
+            judges=args.judges,
+            include_disagreements=args.include_disagreements,
+            max_disagreements=args.max_disagreements,
+        )
+    else:
+        report = generate_agreement_report(
+            eval_dir=args.eval_dir,
+            output_path=args.output,
+            judges=args.judges,
+            include_disagreements=args.include_disagreements,
+            max_disagreements=args.max_disagreements,
+        )
 
     print_agreement_summary(report)
 

@@ -3,8 +3,9 @@
 Run a single experiment.
 """
 import argparse
-from src.config import Config, ExperimentCondition
-from src.experiment_runner import ExperimentRunner
+
+from ..config import Config, ExperimentCondition
+from ..experiment import ExperimentRunner
 
 
 def main():
@@ -22,7 +23,10 @@ def main():
     config = Config.from_yaml(args.models_config, args.experiments_config)
 
     # Create condition
-    condition_name = f"{'finetuned' if args.finetuned else 'baseline'}_{'few_shot' if args.few_shot else 'zero_shot'}"
+    condition_name = (
+        f"{'finetuned' if args.finetuned else 'baseline'}_"
+        f"{'few_shot' if args.few_shot else 'zero_shot'}"
+    )
     condition = ExperimentCondition(
         name=condition_name, finetuned=args.finetuned, few_shot=args.few_shot
     )

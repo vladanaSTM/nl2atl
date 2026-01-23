@@ -7,17 +7,18 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from src.config import ModelConfig, load_yaml
+from ..config import ModelConfig
+from ..infra.io import load_yaml, save_json, load_json
 
-from src.llm_judge import (
+from ..evaluation.llm_judge import (
     LLMJudge,
     PROMPT_VERSION,
     build_summary,
     build_summary_notebook,
     compute_metrics,
     evaluate_prediction_file,
-    write_json,
 )
+from ..models.utils import resolve_model_key
 
 
 def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
@@ -57,37 +58,6 @@ def load_models_config(models_config_path: Path) -> dict:
     return models if isinstance(models, dict) else {}
 
 
-def resolve_model_key(model_arg: str, models: dict) -> str:
-    if model_arg in models:
-        return model_arg
-
-    def normalize(token: str) -> str:
-        token = token.lower()
-        for prefix in ("azure-",):
-            if token.startswith(prefix):
-                token = token[len(prefix) :]
-        return token
-
-    needle = model_arg.lower()
-    normalized_needle = normalize(model_arg)
-    for key, data in models.items():
-        if not isinstance(data, dict):
-            continue
-        short_name = str(data.get("short_name", ""))
-        name = str(data.get("name", ""))
-        if (
-            key.lower() == needle
-            or short_name.lower() == needle
-            or name.lower() == needle
-            or normalize(key) == normalized_needle
-            or normalize(short_name) == normalized_needle
-            or normalize(name) == normalized_needle
-        ):
-            return key
-
-    raise KeyError(model_arg)
-
-
 def resolve_judge_models(
     models_config_path: Path,
     judge_models: Optional[list],
@@ -97,7 +67,14 @@ def resolve_judge_models(
 
     if not models:
         if judge_model:
-            return [(judge_model, ModelConfig(name=judge_model, short_name=judge_model, provider="azure"))]
+            return [
+                (
+                    judge_model,
+                    ModelConfig(
+                        name=judge_model, short_name=judge_model, provider="azure"
+                    ),
+                )
+            ]
         if judge_models:
             return [
                 (
@@ -106,7 +83,12 @@ def resolve_judge_models(
                 )
                 for name in judge_models
             ]
-        return [("gpt-5.2", ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"))]
+        return [
+            (
+                "gpt-5.2",
+                ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
+            )
+        ]
 
     if judge_model:
         judge_models = [judge_model]
@@ -129,7 +111,12 @@ def resolve_judge_models(
                         selected_keys.append(key)
                         seen.add(key)
                 continue
-            key = resolve_model_key(model_arg, models)
+            key = resolve_model_key(
+                model_arg,
+                models,
+                require_mapping_entries=True,
+                match_key_lower=True,
+            )
             if key not in seen:
                 selected_keys.append(key)
                 seen.add(key)
@@ -144,6 +131,53 @@ def resolve_judge_models(
         resolved.append((key, ModelConfig(**data)))
 
     return resolved
+
+
+def compute_stats_from_rows(rows: list) -> dict:
+    stats = {
+        "unmatched": 0,
+        "auto_exact": 0,
+        "llm_calls": 0,
+        "no_llm": 0,
+    }
+
+    for row in rows:
+        decision_method = row.get("decision_method")
+        if decision_method == "unmatched":
+            stats["unmatched"] += 1
+        elif decision_method == "exact":
+            stats["auto_exact"] += 1
+        elif decision_method == "llm":
+            stats["llm_calls"] += 1
+        elif decision_method == "no_llm":
+            stats["no_llm"] += 1
+
+    return stats
+
+
+def extract_prediction_metadata(prediction_data: object) -> dict:
+    if not isinstance(prediction_data, dict):
+        return {}
+
+    metadata = prediction_data.get("metadata")
+    if isinstance(metadata, dict):
+        return dict(metadata)
+
+    return {
+        key: value
+        for key, value in prediction_data.items()
+        if key not in {"predictions", "detailed_results"}
+    }
+
+
+def extract_evaluated_rows(evaluated_data: object) -> list:
+    if isinstance(evaluated_data, list):
+        return evaluated_data
+    if isinstance(evaluated_data, dict):
+        rows = evaluated_data.get("detailed_results")
+        if isinstance(rows, list):
+            return rows
+    return []
 
 
 def main():
@@ -184,6 +218,12 @@ def main():
         action="store_true",
         help="Disable LLM judging; only exact-match normalization is used",
     )
+    parser.add_argument(
+        "--overwrite",
+        "--force",
+        action="store_true",
+        help="Re-evaluate datasets even if evaluated outputs already exist.",
+    )
     args = parser.parse_args()
 
     # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
@@ -203,12 +243,10 @@ def main():
 
     for _, model_config in judge_entries:
         judge_name = model_config.short_name
-        judge_cache = output_dir / "judge_cache.json"
         api_model = model_config.api_model or model_config.name
         judge = LLMJudge(
             judge_model=judge_name,
             api_model=api_model,
-            cache_path=judge_cache,
             no_llm=args.no_llm,
             prompt_version=PROMPT_VERSION,
             provider=model_config.provider,
@@ -223,22 +261,52 @@ def main():
             "evaluated": 0,
             "auto_exact": 0,
             "llm_calls": 0,
-            "cache_hits": 0,
             "no_llm": 0,
         }
 
         for pred_path in prediction_files:
+            judge_tag = f"__judge-{judge_name}"
+            output_name = f"{pred_path.stem}{judge_tag}.json"
+            evaluated_path = evaluated_dir / output_name
+
+            if evaluated_path.exists() and not args.overwrite:
+                existing_data = load_json(evaluated_path)
+                rows = extract_evaluated_rows(existing_data)
+                metrics = compute_metrics(rows)
+                stats = compute_stats_from_rows(rows)
+
+                results.append(
+                    {
+                        "source_file": pred_path.name,
+                        "stem": pred_path.stem,
+                        "rows": rows,
+                        "metrics": metrics,
+                        "stats": stats,
+                        "evaluated_path": str(evaluated_path),
+                    }
+                )
+
+                totals["evaluated"] += int(metrics["evaluated"])
+                totals["auto_exact"] += stats.get("auto_exact", 0)
+                totals["llm_calls"] += stats.get("llm_calls", 0)
+                totals["no_llm"] += stats.get("no_llm", 0)
+                continue
+
+            prediction_data = load_json(pred_path)
+            metadata = extract_prediction_metadata(prediction_data)
             rows, stats = evaluate_prediction_file(
                 prediction_path=pred_path,
                 judge=judge,
                 no_llm=args.no_llm,
             )
             metrics = compute_metrics(rows)
-
-            judge_tag = f"__judge-{judge_name}"
-            output_name = f"{pred_path.stem}{judge_tag}.json"
-            evaluated_path = evaluated_dir / output_name
-            write_json(evaluated_path, rows)
+            evaluated_payload = {
+                **metadata,
+                "judge_model": judge_name,
+                "source_file": pred_path.name,
+                "detailed_results": rows,
+            }
+            save_json(evaluated_payload, evaluated_path)
 
             results.append(
                 {
@@ -254,7 +322,6 @@ def main():
             totals["evaluated"] += int(metrics["evaluated"])
             totals["auto_exact"] += stats.get("auto_exact", 0)
             totals["llm_calls"] += stats.get("llm_calls", 0)
-            totals["cache_hits"] += stats.get("cache_hits", 0)
             totals["no_llm"] += stats.get("no_llm", 0)
 
         summary = build_summary(
@@ -265,7 +332,7 @@ def main():
         )
 
         summary_path = output_dir / f"summary__judge-{judge_name}.json"
-        write_json(summary_path, summary)
+        save_json(summary, summary_path)
 
         notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
         build_summary_notebook(summary_path, notebook_path)
@@ -274,13 +341,9 @@ def main():
         print(f"Summary JSON: {summary_path}")
         print(f"Summary notebook: {notebook_path}")
 
-
-if __name__ == "__main__":
-    main()
-
     # After processing all judges, compute inter-rater agreement if multiple judges
     if len(judge_entries) > 1:
-        from src.judge_agreement import (
+        from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
         )
@@ -299,3 +362,6 @@ if __name__ == "__main__":
         except ValueError as e:
             print(f"Skipping agreement analysis: {e}")
 
+
+if __name__ == "__main__":
+    main()
