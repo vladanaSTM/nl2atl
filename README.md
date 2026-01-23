@@ -1,26 +1,35 @@
 # NL2ATL
 
-NL2ATL is a research codebase for natural language to ATL (Alternating-time Temporal Logic) formula generation, evaluation, and difficulty classification.
+Natural language to ATL (Alternating-Time Temporal Logic) formula generation, evaluation, and difficulty classification for the NL2ATL research project.
+
+## Quick Start
+
+- Create an environment, install dependencies, and enable the `nl2atl` CLI.
+- Configure `.env` for Azure inference (optional if you only use local HuggingFace models).
+- Run an experiment and (optionally) evaluate outputs with the LLM judge.
 
 ## Features
 
-- Run baseline and fine-tuned experiments
-- Evaluate predictions with exact match and LLM-as-a-judge
-- Measure inter-rater agreement across judges
-- Classify dataset difficulty with a rule-based scorer
+- **Experiments** — Run baseline and fine-tuned generation experiments.
+- **Evaluation** — Exact-match scoring and LLM-as-a-judge evaluation.
+- **Analysis** — Inter-rater agreement across judge models.
+- **Classification** — Rule-based dataset difficulty scoring.
 
 ## Project Structure
 
-- src/ — core library
-- src/cli/ — CLI entry points
-- configs/ — experiment and model configuration files
-- data/ — datasets
-- outputs/ — predictions and evaluation outputs
-- tests/ — unit tests
+```
+src/           Core library
+src/cli/       CLI entry points
+configs/       Experiment and model configurations
+data/          Datasets
+outputs/       Predictions and evaluation results
+tests/         Unit tests
+docs/          Documentation
+```
 
-## Setup
+## Installation
 
-1. Create a virtual environment and install dependencies:
+Create a virtual environment and install:
 
 ```bash
 python -m venv .venv
@@ -28,62 +37,84 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-2. Configure environment variables (for Azure judging):
-
-- AZURE_API_KEY
-- AZURE_INFER_ENDPOINT
-- AZURE_API_VERSION (optional)
-- AZURE_USE_CACHE (optional)
-- AZURE_VERIFY_SSL (optional)
-
-## Consolidated CLI
-
-Use the consolidated CLI entrypoint:
-
-```bash
-python nl2atl.py <command> [args]
-```
-
-Or install the console script:
+For development (enables `nl2atl` command):
 
 ```bash
 pip install -e .
-nl2atl <command> [args]
 ```
 
-Available commands:
+## Configuration
 
-- run-all
-- run-single
-- llm-judge
-- judge-agreement
-- classify-difficulty
-
-Examples:
+Copy the example environment file and add your credentials:
 
 ```bash
-python nl2atl.py run-all --models qwen-3b --conditions baseline_zero_shot
-python nl2atl.py run-single --model qwen-3b --few_shot
-python nl2atl.py llm-judge --datasets all
-python nl2atl.py judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
-python nl2atl.py classify-difficulty --input data/dataset.json --verbose
+cp .env.example .env
 ```
 
-## Legacy Scripts
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AZURE_API_KEY` | No | Azure API key for judge/inference models |
+| `AZURE_INFER_ENDPOINT` | No | Azure inference endpoint |
+| `AZURE_INFER_MODEL` | No | Default Azure deployment/model name |
+| `AZURE_API_VERSION` | No | API version (defaults to `2024-08-01-preview`) |
+| `AZURE_USE_CACHE` | No | Enable Azure response caching (default: true) |
+| `AZURE_VERIFY_SSL` | No | SSL verification (default: false) |
+| `HUGGINGFACE_TOKEN` | No | Token for gated/private HF models |
+| `WANDB_API_KEY` | No | W&B API key for experiment logging |
 
-The original top-level scripts are kept as thin wrappers and still work:
+## Usage
 
-- run_all_experiments.py
-- run_single_experiment.py
-- run_llm_judge.py
-- run_judge_agreement.py
-- classify_difficulty.py
+### CLI Commands
 
-## Notes on GPU Dependencies
+```bash
+nl2atl <command> [options]
+# or: python nl2atl.py <command> [options]
+```
 
-Some commands import GPU libraries (e.g., torch). The consolidated CLI now lazy-loads subcommands, so non-GPU tasks like classification and judge agreement do not require torch to be importable. If you hit CUDA/NCCL errors, run only the specific subcommand you need.
+| Command | Description |
+|---------|-------------|
+| `run-all` | Run experiments across multiple models/conditions |
+| `run-single` | Run a single model/condition experiment |
+| `llm-judge` | Evaluate prediction files with LLM judge |
+| `judge-agreement` | Compute inter-rater agreement metrics |
+| `classify-difficulty` | Score dataset difficulty |
 
-## Tests
+### Examples
+
+```bash
+# Run experiments
+nl2atl run-all --models qwen-3b --conditions baseline_zero_shot
+nl2atl run-single --model qwen-3b --few_shot
+
+# Evaluate predictions
+nl2atl llm-judge --datasets all
+nl2atl llm-judge --datasets all --overwrite  # re-evaluate existing outputs
+nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
+
+# Classify difficulty
+nl2atl classify-difficulty --input data/dataset.json --verbose
+```
+
+### Subcommand Modules
+
+Subcommand handlers live under `src/cli/` and can be invoked directly:
+
+```bash
+python -m src.cli.run_all_experiments
+python -m src.cli.run_single_experiment
+python -m src.cli.run_llm_judge
+python -m src.cli.run_judge_agreement
+python -m src.cli.classify_difficulty
+```
+
+## Outputs
+
+- Predictions: `outputs/model_predictions/<run_name>.json`
+- LLM judge results: `outputs/LLM-evaluation/evaluated_datasets/<judge>/<file>.json`
+- LLM judge summary: `outputs/LLM-evaluation/summary__judge-<judge>.json`
+- Agreement report: `outputs/LLM-evaluation/agreement_report.json`
+
+## Testing
 
 ```bash
 pytest -q
@@ -91,4 +122,11 @@ pytest -q
 
 ## Documentation
 
-Start with [docs/index.md](docs/index.md).
+For detailed documentation including architecture, design decisions, and API reference, see the **[full documentation](docs/index.md)**.
+
+## Notes
+
+- **GPU dependencies**: The CLI lazy-loads subcommands, so non-GPU tasks (difficulty classification, judge agreement) do not require CUDA. If you encounter GPU issues, run only the subcommand you need.
+- **Model caching**: Set `REUSE_MODEL_CACHE=0` to disable HF model reuse between runs.
+- **Training probes**: Set `TRAIN_MAX_STEPS` to run a short training loop.
+- **LLM judge outputs**: Existing evaluated datasets are skipped unless `--overwrite/--force` is used.
