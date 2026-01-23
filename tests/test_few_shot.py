@@ -1,4 +1,4 @@
-from src import few_shot
+from src.models import few_shot
 
 
 def test_get_few_shot_examples_excludes_inputs():

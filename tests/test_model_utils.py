@@ -1,6 +1,6 @@
 import pytest
 
-from src import model_utils
+from src.models import utils as model_utils
 
 
 def test_normalize_and_resolve():

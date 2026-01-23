@@ -1,4 +1,4 @@
-from src.llm_judge import (
+from src.evaluation.llm_judge import (
     normalize_text,
     extract_prediction_items,
     compute_metrics,

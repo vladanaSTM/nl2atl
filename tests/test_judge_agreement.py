@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 import numpy as np
 
-from src import judge_agreement
+from src.evaluation import judge_agreement
 
 
 def test_create_item_key_stable():
