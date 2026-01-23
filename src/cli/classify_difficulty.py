@@ -3,7 +3,7 @@
 CLI entry point for difficulty classification.
 """
 
-from ..classify_difficulty import main
+from ..evaluation.difficulty import main
 
 
 if __name__ == "__main__":

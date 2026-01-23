@@ -6,7 +6,7 @@ Compute inter-rater agreement between LLM judges.
 import argparse
 from pathlib import Path
 
-from ..judge_agreement import (
+from ..evaluation.judge_agreement import (
     generate_agreement_report,
     print_agreement_summary,
 )

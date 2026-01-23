@@ -263,7 +263,7 @@ def main():
 
     # After processing all judges, compute inter-rater agreement if multiple judges
     if len(judge_entries) > 1:
-        from ..judge_agreement import (
+        from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
         )

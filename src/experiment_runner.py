@@ -17,7 +17,7 @@ from trl import SFTTrainer
 from .config import Config, ModelConfig, ExperimentCondition
 from .constants import Provider
 from .data_utils import load_data, split_data, augment_data
-from .exact_match_evaluator import ExactMatchEvaluator
+from .evaluation.exact_match import ExactMatchEvaluator
 from .few_shot import format_prompt
 from .io_utils import save_json
 from .model_registry import load_model, get_model_type, clear_gpu_memory
