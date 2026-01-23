@@ -6,7 +6,7 @@ from typing import Dict, Any, Optional, List
 import wandb
 
 from ..config import ModelConfig, ExperimentCondition, Config
-from ..io_utils import save_json
+from ..infra.io import save_json
 
 
 class ExperimentReporter:

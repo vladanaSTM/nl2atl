@@ -1,19 +1,10 @@
-"""
-Environment helpers.
+"""Deprecated: Import from src.infra.env instead."""
 
-Deprecated: Azure configuration helpers moved to src.azure_utils.AzureConfig.
-"""
+from src.infra.env import *  # noqa
+import warnings
 
-import os
-
-from dotenv import load_dotenv
-
-_ENV_LOADED = False
-
-
-def load_env() -> None:
-    """Load environment variables from .env once."""
-    global _ENV_LOADED
-    if not _ENV_LOADED:
-        load_dotenv()
-        _ENV_LOADED = True
+warnings.warn(
+    "Importing from src.env_utils is deprecated. " "Use src.infra.env instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)

@@ -8,13 +8,13 @@ import os
 from typing import Optional, Tuple, Any
 
 import torch
-from ..env_utils import load_env
+from ..infra.env import load_env
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, PeftModel
 
 from ..config import ModelConfig
 from ..constants import Provider, ModelType
-from ..azure_utils import AzureClient, AzureConfig
+from ..infra.azure import AzureClient, AzureConfig
 
 # Ensure environment variables are loaded
 load_env()

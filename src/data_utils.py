@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple
 
 from sklearn.model_selection import train_test_split
 
-from .io_utils import load_json, save_json
+from .infra.io import load_json, save_json
 
 
 def load_data(filepath: str) -> List[Dict]:

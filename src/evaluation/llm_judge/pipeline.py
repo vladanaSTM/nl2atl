@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..base import BaseEvaluator
 from ...config import ModelConfig
-from ...io_utils import load_json, save_json
-from ...azure_utils import AzureConfig
+from ...infra.io import load_json, save_json
+from ...infra.azure import AzureConfig
 
 from .cache import JudgeCache
 from .client import AzureJudgeClient, LocalJudgeClient, JudgeClient, get_client

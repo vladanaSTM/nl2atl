@@ -5,7 +5,7 @@ Configuration management for experiments.
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .io_utils import load_yaml
+from .infra.io import load_yaml
 from .constants import (
     Provider,
     DEFAULT_DATA_PATH,

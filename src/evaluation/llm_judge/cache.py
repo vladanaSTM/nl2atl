@@ -4,7 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from ...io_utils import load_json_safe, save_json
+from ...infra.io import load_json_safe, save_json
 
 
 class JudgeCache:

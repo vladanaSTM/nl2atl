@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ..io_utils import load_json, save_json
+from ..infra.io import load_json, save_json
 
 
 def create_item_key(item: dict) -> str:

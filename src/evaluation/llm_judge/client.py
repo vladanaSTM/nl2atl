@@ -2,7 +2,7 @@
 
 from typing import Protocol, List, Any
 
-from ...azure_utils import AzureClient, AzureConfig
+from ...infra.azure import AzureClient, AzureConfig
 from ...config import ModelConfig
 
 
