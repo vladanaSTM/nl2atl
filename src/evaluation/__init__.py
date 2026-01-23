@@ -9,6 +9,8 @@ __all__ = [
     "ExactMatchEvaluator",
     "DifficultyClassifier",
     "generate_agreement_report",
+    "LLMJudgeEvaluator",
+    "run_llm_judge",
 ]
 
 
@@ -17,4 +19,10 @@ def __getattr__(name: str):
         from .exact_match import ExactMatchEvaluator
 
         return ExactMatchEvaluator
+    if name in {"LLMJudgeEvaluator", "run_llm_judge"}:
+        from .llm_judge import LLMJudgeEvaluator, run_llm_judge
+
+        return {"LLMJudgeEvaluator": LLMJudgeEvaluator, "run_llm_judge": run_llm_judge}[
+            name
+        ]
     raise AttributeError(f"module {__name__} has no attribute {name}")

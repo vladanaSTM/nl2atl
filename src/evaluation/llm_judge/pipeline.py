@@ -432,6 +432,36 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
     save_json(notebook, output_path)
 
 
+def run_llm_judge(
+    prediction_path: Path,
+    judge_model: str,
+    cache_path: Path,
+    *,
+    no_llm: bool = False,
+    prompt_version: str = PROMPT_VERSION,
+    api_model: Optional[str] = None,
+    provider: Optional[str] = None,
+    model_config: Optional[ModelConfig] = None,
+) -> Dict[str, Any]:
+    """Convenience wrapper to evaluate a single prediction file."""
+    judge = LLMJudge(
+        judge_model=judge_model,
+        cache_path=cache_path,
+        no_llm=no_llm,
+        prompt_version=prompt_version,
+        api_model=api_model,
+        provider=provider,
+        model_config=model_config,
+    )
+    rows, stats = evaluate_prediction_file(Path(prediction_path), judge, no_llm=no_llm)
+    metrics = compute_metrics(rows)
+    return {
+        "rows": rows,
+        "stats": stats,
+        "metrics": metrics,
+    }
+
+
 __all__ = [
     "LLMJudge",
     "LLMJudgeEvaluator",
@@ -445,4 +475,5 @@ __all__ = [
     "build_summary",
     "build_summary_notebook",
     "PROMPT_VERSION",
+    "run_llm_judge",
 ]

@@ -9,6 +9,7 @@ from .pipeline import (
     evaluate_prediction_file,
     build_summary,
     build_summary_notebook,
+    run_llm_judge,
 )
 from .client import JudgeClient, AzureJudgeClient, LocalJudgeClient, get_client
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
@@ -42,4 +43,5 @@ __all__ = [
     "evaluate_prediction_file",
     "build_summary",
     "build_summary_notebook",
+    "run_llm_judge",
 ]
