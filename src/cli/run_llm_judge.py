@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..config import ModelConfig
-from ..infra.io import load_yaml, save_json
+from ..infra.io import load_yaml, save_json, load_json
 
 from ..evaluation.llm_judge import (
     LLMJudge,
@@ -133,6 +133,53 @@ def resolve_judge_models(
     return resolved
 
 
+def compute_stats_from_rows(rows: list) -> dict:
+    stats = {
+        "unmatched": 0,
+        "auto_exact": 0,
+        "llm_calls": 0,
+        "no_llm": 0,
+    }
+
+    for row in rows:
+        decision_method = row.get("decision_method")
+        if decision_method == "unmatched":
+            stats["unmatched"] += 1
+        elif decision_method == "exact":
+            stats["auto_exact"] += 1
+        elif decision_method == "llm":
+            stats["llm_calls"] += 1
+        elif decision_method == "no_llm":
+            stats["no_llm"] += 1
+
+    return stats
+
+
+def extract_prediction_metadata(prediction_data: object) -> dict:
+    if not isinstance(prediction_data, dict):
+        return {}
+
+    metadata = prediction_data.get("metadata")
+    if isinstance(metadata, dict):
+        return dict(metadata)
+
+    return {
+        key: value
+        for key, value in prediction_data.items()
+        if key not in {"predictions", "detailed_results"}
+    }
+
+
+def extract_evaluated_rows(evaluated_data: object) -> list:
+    if isinstance(evaluated_data, list):
+        return evaluated_data
+    if isinstance(evaluated_data, dict):
+        rows = evaluated_data.get("detailed_results")
+        if isinstance(rows, list):
+            return rows
+    return []
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -171,6 +218,12 @@ def main():
         action="store_true",
         help="Disable LLM judging; only exact-match normalization is used",
     )
+    parser.add_argument(
+        "--overwrite",
+        "--force",
+        action="store_true",
+        help="Re-evaluate datasets even if evaluated outputs already exist.",
+    )
     args = parser.parse_args()
 
     # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
@@ -190,12 +243,10 @@ def main():
 
     for _, model_config in judge_entries:
         judge_name = model_config.short_name
-        judge_cache = output_dir / "judge_cache.json"
         api_model = model_config.api_model or model_config.name
         judge = LLMJudge(
             judge_model=judge_name,
             api_model=api_model,
-            cache_path=judge_cache,
             no_llm=args.no_llm,
             prompt_version=PROMPT_VERSION,
             provider=model_config.provider,
@@ -210,22 +261,52 @@ def main():
             "evaluated": 0,
             "auto_exact": 0,
             "llm_calls": 0,
-            "cache_hits": 0,
             "no_llm": 0,
         }
 
         for pred_path in prediction_files:
+            judge_tag = f"__judge-{judge_name}"
+            output_name = f"{pred_path.stem}{judge_tag}.json"
+            evaluated_path = evaluated_dir / output_name
+
+            if evaluated_path.exists() and not args.overwrite:
+                existing_data = load_json(evaluated_path)
+                rows = extract_evaluated_rows(existing_data)
+                metrics = compute_metrics(rows)
+                stats = compute_stats_from_rows(rows)
+
+                results.append(
+                    {
+                        "source_file": pred_path.name,
+                        "stem": pred_path.stem,
+                        "rows": rows,
+                        "metrics": metrics,
+                        "stats": stats,
+                        "evaluated_path": str(evaluated_path),
+                    }
+                )
+
+                totals["evaluated"] += int(metrics["evaluated"])
+                totals["auto_exact"] += stats.get("auto_exact", 0)
+                totals["llm_calls"] += stats.get("llm_calls", 0)
+                totals["no_llm"] += stats.get("no_llm", 0)
+                continue
+
+            prediction_data = load_json(pred_path)
+            metadata = extract_prediction_metadata(prediction_data)
             rows, stats = evaluate_prediction_file(
                 prediction_path=pred_path,
                 judge=judge,
                 no_llm=args.no_llm,
             )
             metrics = compute_metrics(rows)
-
-            judge_tag = f"__judge-{judge_name}"
-            output_name = f"{pred_path.stem}{judge_tag}.json"
-            evaluated_path = evaluated_dir / output_name
-            save_json(rows, evaluated_path)
+            evaluated_payload = {
+                **metadata,
+                "judge_model": judge_name,
+                "source_file": pred_path.name,
+                "detailed_results": rows,
+            }
+            save_json(evaluated_payload, evaluated_path)
 
             results.append(
                 {
@@ -241,7 +322,6 @@ def main():
             totals["evaluated"] += int(metrics["evaluated"])
             totals["auto_exact"] += stats.get("auto_exact", 0)
             totals["llm_calls"] += stats.get("llm_calls", 0)
-            totals["cache_hits"] += stats.get("cache_hits", 0)
             totals["no_llm"] += stats.get("no_llm", 0)
 
         summary = build_summary(

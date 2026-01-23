@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from itertools import combinations
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 
 import numpy as np
 
@@ -54,10 +54,100 @@ def load_evaluated_files(eval_dir: Path) -> Dict[str, Dict[str, List[dict]]]:
                 if isinstance(data, list):
                     source_file = json_file.stem.split("__judge-")[0]
                     results[judge_name][source_file] = data
+                elif isinstance(data, dict):
+                    items = data.get("detailed_results")
+                    if isinstance(items, list):
+                        source_file = (
+                            data.get("run_name")
+                            or data.get("source_file")
+                            or data.get("predictions_file")
+                            or json_file.stem.split("__judge-")[0]
+                        )
+                        results[judge_name][source_file] = items
             except Exception as e:
                 print(f"Warning: Could not load {json_file}: {e}")
 
     return results
+
+
+def load_human_annotations(path: Path) -> Tuple[Dict[str, Any], List[dict]]:
+    """Load human annotations from JSON.
+
+    Accepted formats:
+    - List of items
+    - Dict with an annotations/items/data/predictions field
+    """
+    data = load_json(path)
+
+    if isinstance(data, list):
+        return {}, data
+
+    if isinstance(data, dict):
+        items = (
+            data.get("annotations")
+            or data.get("items")
+            or data.get("data")
+            or data.get("predictions")
+        )
+        if isinstance(items, list):
+            return data, items
+
+    raise ValueError(
+        "Human annotations must be a list or a dict with an annotations/items/data/predictions list."
+    )
+
+
+def normalize_human_annotations(
+    items: List[dict], source_file: str
+) -> Dict[str, Dict[str, List[dict]]]:
+    """Normalize human annotations into judge_results structure."""
+    normalized: List[dict] = []
+
+    def normalize_correct(value: Any) -> str:
+        if isinstance(value, bool):
+            return "yes" if value else "no"
+        if value is None:
+            return "no"
+        val = str(value).strip().lower()
+        return "yes" if val in {"yes", "y", "true", "1"} else "no"
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "input": item.get("input") or item.get("nl") or "",
+                "gold": item.get("gold")
+                or item.get("expected")
+                or item.get("reference")
+                or item.get("output")
+                or "",
+                "prediction": item.get("prediction")
+                or item.get("generated")
+                or item.get("output_pred")
+                or "",
+                "correct": normalize_correct(item.get("correct")),
+                "decision_method": "human",
+                "source_file": source_file,
+            }
+        )
+
+    return {"human": {source_file: normalized}}
+
+
+def merge_judge_results(
+    base: Dict[str, Dict[str, List[dict]]],
+    extra: Dict[str, Dict[str, List[dict]]],
+) -> Dict[str, Dict[str, List[dict]]]:
+    """Merge two judge_results structures."""
+    merged = dict(base)
+    for judge, sources in extra.items():
+        if judge not in merged:
+            merged[judge] = dict(sources)
+            continue
+        for source, items in sources.items():
+            merged[judge].setdefault(source, []).extend(items)
+    return merged
 
 
 def align_judgments(
@@ -475,16 +565,97 @@ def compute_detailed_disagreement_stats(
     }
 
 
-def generate_agreement_report(
-    eval_dir: Path,
+def compute_human_comparison(
+    aligned: Dict[str, Dict[str, str]],
+    judges: List[str],
+    human_label: str = "human",
+) -> Optional[dict]:
+    """Compute accuracy of LLM judges (and their coalitions) against humans."""
+    if human_label not in judges:
+        return None
+
+    llm_judges = [j for j in judges if j != human_label]
+    if not llm_judges:
+        return None
+
+    per_judge = {}
+    for judge in llm_judges:
+        common = [
+            key
+            for key, ratings in aligned.items()
+            if human_label in ratings and judge in ratings
+        ]
+        if not common:
+            per_judge[judge] = {"n_common": 0, "accuracy": None}
+            continue
+        correct = sum(
+            1 for key in common if aligned[key][judge] == aligned[key][human_label]
+        )
+        per_judge[judge] = {
+            "n_common": len(common),
+            "accuracy": round(correct / len(common), 4),
+        }
+
+    # Majority vote among LLM judges (ties excluded)
+    majority_total = 0
+    majority_correct = 0
+    majority_ties = 0
+    unanimous_total = 0
+    unanimous_correct = 0
+
+    for key, ratings in aligned.items():
+        if human_label not in ratings:
+            continue
+
+        llm_votes = [ratings[j] for j in llm_judges if j in ratings]
+        if len(llm_votes) >= 2:
+            yes_count = llm_votes.count("yes")
+            no_count = llm_votes.count("no")
+            if yes_count == no_count:
+                majority_ties += 1
+            else:
+                majority = "yes" if yes_count > no_count else "no"
+                majority_total += 1
+                if majority == ratings[human_label]:
+                    majority_correct += 1
+
+        if len(llm_votes) == len(llm_judges) and llm_votes:
+            if len(set(llm_votes)) == 1:
+                unanimous_total += 1
+                if llm_votes[0] == ratings[human_label]:
+                    unanimous_correct += 1
+
+    majority_accuracy = (
+        round(majority_correct / majority_total, 4) if majority_total else None
+    )
+    unanimous_accuracy = (
+        round(unanimous_correct / unanimous_total, 4) if unanimous_total else None
+    )
+
+    return {
+        "human_label": human_label,
+        "llm_judges": llm_judges,
+        "per_judge": per_judge,
+        "majority_vote": {
+            "n_items": majority_total,
+            "accuracy": majority_accuracy,
+            "ties": majority_ties,
+        },
+        "unanimous_vote": {
+            "n_items": unanimous_total,
+            "accuracy": unanimous_accuracy,
+        },
+    }
+
+
+def _generate_agreement_report(
+    judge_results: Dict[str, Dict[str, List[dict]]],
     output_path: Optional[Path] = None,
     judges: Optional[List[str]] = None,
     include_disagreements: bool = True,
     max_disagreements: int = 50,
 ) -> dict:
-    """Generate a complete inter-rater agreement report."""
-    judge_results = load_evaluated_files(eval_dir)
-
+    """Generate a complete inter-rater agreement report from judge results."""
     if judges:
         missing = [j for j in judges if j not in judge_results]
         if missing:
@@ -513,6 +684,7 @@ def generate_agreement_report(
     )  # Note: uses ALL items
     agreement_breakdown = compute_agreement_breakdown(common_aligned, judges)
     disagreement_stats = compute_detailed_disagreement_stats(common_aligned, judges)
+    human_comparison = compute_human_comparison(common_aligned, judges)
 
     all_disagreements = find_disagreements(common_aligned, item_details, judges)
     disagreements = []
@@ -540,6 +712,7 @@ def generate_agreement_report(
         "krippendorff_alpha": krippendorff_result,
         "agreement_breakdown": agreement_breakdown,
         "disagreement_stats": disagreement_stats,
+        "human_comparison": human_comparison,
         "pairwise_cohen_kappa": {
             f"{j1}_vs_{j2}": data for (j1, j2), data in pairwise.items()
         },
@@ -565,6 +738,54 @@ def generate_agreement_report(
         print(f"Agreement report saved to: {output_path}")
 
     return report
+
+
+def generate_agreement_report(
+    eval_dir: Path,
+    output_path: Optional[Path] = None,
+    judges: Optional[List[str]] = None,
+    include_disagreements: bool = True,
+    max_disagreements: int = 50,
+) -> dict:
+    """Generate a complete inter-rater agreement report."""
+    judge_results = load_evaluated_files(eval_dir)
+    return _generate_agreement_report(
+        judge_results=judge_results,
+        output_path=output_path,
+        judges=judges,
+        include_disagreements=include_disagreements,
+        max_disagreements=max_disagreements,
+    )
+
+
+def generate_agreement_report_with_human(
+    eval_dir: Path,
+    human_annotations_path: Path,
+    output_path: Optional[Path] = None,
+    judges: Optional[List[str]] = None,
+    include_disagreements: bool = True,
+    max_disagreements: int = 50,
+) -> dict:
+    """Generate agreement report including human annotations."""
+    judge_results = load_evaluated_files(eval_dir)
+
+    metadata, items = load_human_annotations(human_annotations_path)
+    source_file = (
+        metadata.get("run_name")
+        or metadata.get("source_file")
+        or metadata.get("predictions_file")
+        or human_annotations_path.stem
+    )
+    human_results = normalize_human_annotations(items, source_file)
+    merged = merge_judge_results(judge_results, human_results)
+
+    return _generate_agreement_report(
+        judge_results=merged,
+        output_path=output_path,
+        judges=judges,
+        include_disagreements=include_disagreements,
+        max_disagreements=max_disagreements,
+    )
 
 
 def print_agreement_summary(report: dict) -> None:

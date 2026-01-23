@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ..evaluation.judge_agreement import (
     generate_agreement_report,
+    generate_agreement_report_with_human,
     print_agreement_summary,
 )
 
@@ -35,6 +36,12 @@ def main():
         help="Specific judges to compare (default: all found in eval_dir)",
     )
     parser.add_argument(
+        "--human_annotations",
+        type=Path,
+        default=None,
+        help="Optional human annotations JSON to include as a judge",
+    )
+    parser.add_argument(
         "--no_disagreements",
         action="store_false",
         dest="include_disagreements",
@@ -54,13 +61,23 @@ def main():
     if not args.eval_dir.exists():
         raise FileNotFoundError(f"Evaluation directory not found: {args.eval_dir}")
 
-    report = generate_agreement_report(
-        eval_dir=args.eval_dir,
-        output_path=args.output,
-        judges=args.judges,
-        include_disagreements=args.include_disagreements,
-        max_disagreements=args.max_disagreements,
-    )
+    if args.human_annotations:
+        report = generate_agreement_report_with_human(
+            eval_dir=args.eval_dir,
+            human_annotations_path=args.human_annotations,
+            output_path=args.output,
+            judges=args.judges,
+            include_disagreements=args.include_disagreements,
+            max_disagreements=args.max_disagreements,
+        )
+    else:
+        report = generate_agreement_report(
+            eval_dir=args.eval_dir,
+            output_path=args.output,
+            judges=args.judges,
+            include_disagreements=args.include_disagreements,
+            max_disagreements=args.max_disagreements,
+        )
 
     print_agreement_summary(report)
 

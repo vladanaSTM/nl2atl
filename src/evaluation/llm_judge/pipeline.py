@@ -1,7 +1,6 @@
 """Main LLM judge evaluation pipeline."""
 
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -10,7 +9,6 @@ from ...config import ModelConfig
 from ...infra.io import load_json, save_json
 from ...infra.azure import AzureConfig
 
-from .cache import JudgeCache
 from .client import AzureJudgeClient, LocalJudgeClient, JudgeClient, get_client
 from .metrics import (
     compute_metrics,
@@ -37,7 +35,6 @@ class LLMJudge:
     def __init__(
         self,
         judge_model: str,
-        cache_path: Path,
         no_llm: bool = False,
         prompt_version: str = PROMPT_VERSION,
         api_model: Optional[str] = None,
@@ -49,7 +46,6 @@ class LLMJudge:
         self.api_model = api_model or judge_model
         self.no_llm = no_llm
         self.prompt_version = prompt_version
-        self.cache = JudgeCache(Path(cache_path))
         self.provider = (
             provider or (model_config.provider if model_config else "azure")
         ).lower()
@@ -74,15 +70,6 @@ class LLMJudge:
         else:
             raise ValueError(f"Unsupported judge provider: {self.provider}")
 
-    def _cache_key(self, input_text: str, gold: str, prediction: str) -> str:
-        return self.cache.get_cache_key(
-            input_text=input_text,
-            gold=gold,
-            prediction=prediction,
-            judge_model=self.judge_model,
-            prompt_version=self.prompt_version,
-        )
-
     def _build_prompt(self, input_text: str, gold: str, prediction: str) -> str:
         return format_judge_prompt(
             input_text=input_text,
@@ -104,33 +91,12 @@ class LLMJudge:
                 decision_method="no_llm",
             )
 
-        cache_key = self._cache_key(input_text, gold, prediction)
-        cached = self.cache.get(cache_key)
-        if cached:
-            return JudgeDecision(
-                correct=cached.get("correct", "no"),
-                reasoning=cached.get("reasoning", "Cached response."),
-                decision_method=cached.get("decision_method", "llm"),
-            )
-
         if not self.client:
             raise RuntimeError("LLM client is not configured.")
 
         prompt = self._build_prompt(input_text, gold, prediction)
         raw = self.client.complete(prompt, max_new_tokens=256)
         correct, reasoning = self._parse_response(raw)
-
-        self.cache.set(
-            cache_key,
-            {
-                "correct": correct,
-                "reasoning": reasoning,
-                "judge_model": self.judge_model,
-                "prompt_version": self.prompt_version,
-                "decision_method": "llm",
-                "cached_at": datetime.utcnow().isoformat() + "Z",
-            },
-        )
 
         return JudgeDecision(
             correct=correct, reasoning=reasoning, decision_method="llm"
@@ -143,14 +109,12 @@ class LLMJudgeEvaluator(BaseEvaluator):
     def __init__(
         self,
         client: JudgeClient,
-        cache: Optional[JudgeCache] = None,
         prompt_config: Optional[JudgePromptConfig] = None,
         judge_model: str = "llm",
         prompt_version: str = PROMPT_VERSION,
         no_llm: bool = False,
     ):
         self.client = client
-        self.cache = cache
         self.prompt_config = prompt_config
         self.judge_model = judge_model
         self.prompt_version = prompt_version
@@ -182,26 +146,6 @@ class LLMJudgeEvaluator(BaseEvaluator):
                 "decision_method": "no_llm",
             }
 
-        cache_key = None
-        if self.cache:
-            cache_key = self.cache.get_cache_key(
-                input_text=input_text,
-                gold=gold_text,
-                prediction=pred_text,
-                judge_model=self.judge_model,
-                prompt_version=self.prompt_version,
-            )
-            cached = self.cache.get(cache_key)
-            if cached:
-                return {
-                    "input": input_text,
-                    "gold": gold_text,
-                    "prediction": pred_text,
-                    "correct": cached.get("correct", "no"),
-                    "reasoning": cached.get("reasoning", "Cached response."),
-                    "decision_method": cached.get("decision_method", "llm"),
-                }
-
         prompt = format_judge_prompt(
             input_text=input_text,
             gold=gold_text,
@@ -219,19 +163,6 @@ class LLMJudgeEvaluator(BaseEvaluator):
             "reasoning": verdict.reasoning or "No reasoning provided.",
             "decision_method": "llm",
         }
-
-        if self.cache and cache_key:
-            self.cache.set(
-                cache_key,
-                {
-                    "correct": verdict.decision,
-                    "reasoning": verdict.reasoning,
-                    "judge_model": self.judge_model,
-                    "prompt_version": self.prompt_version,
-                    "decision_method": "llm",
-                    "cached_at": datetime.utcnow().isoformat() + "Z",
-                },
-            )
 
         return result
 
@@ -257,8 +188,12 @@ def normalize_text(text: Optional[str]) -> str:
 
 def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Optional[str]]]:
     """Extract prediction items from various input formats."""
-    if isinstance(prediction_data, dict) and "detailed_results" in prediction_data:
-        items = prediction_data.get("detailed_results", [])
+    if isinstance(prediction_data, dict):
+        items = prediction_data.get("detailed_results") or prediction_data.get(
+            "predictions"
+        )
+        if not isinstance(items, list):
+            items = []
     elif isinstance(prediction_data, list):
         items = prediction_data
     else:
@@ -302,7 +237,6 @@ def evaluate_prediction_file(
         "unmatched": 0,
         "auto_exact": 0,
         "llm_calls": 0,
-        "cache_hits": 0,
         "no_llm": 0,
     }
     rows = []
@@ -343,8 +277,6 @@ def evaluate_prediction_file(
             decision = judge.judge(input_text, gold, prediction)
             if decision.decision_method == "llm":
                 stats["llm_calls"] += 1
-            else:
-                stats["cache_hits"] += 1
 
         rows.append(
             {
@@ -353,8 +285,6 @@ def evaluate_prediction_file(
                 "prediction": prediction,
                 "correct": decision.correct,
                 "reasoning": decision.reasoning,
-                "judge_model": judge.judge_model,
-                "source_file": prediction_path.name,
                 "decision_method": decision.decision_method,
             }
         )
@@ -435,7 +365,6 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
 def run_llm_judge(
     prediction_path: Path,
     judge_model: str,
-    cache_path: Path,
     *,
     no_llm: bool = False,
     prompt_version: str = PROMPT_VERSION,
@@ -446,7 +375,6 @@ def run_llm_judge(
     """Convenience wrapper to evaluate a single prediction file."""
     judge = LLMJudge(
         judge_model=judge_model,
-        cache_path=cache_path,
         no_llm=no_llm,
         prompt_version=prompt_version,
         api_model=api_model,
