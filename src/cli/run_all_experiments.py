@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from ..config import Config
-from ..experiment_runner import ExperimentRunner
+from ..experiment import ExperimentRunner
 
 
 def aggregate_seed_results(results):

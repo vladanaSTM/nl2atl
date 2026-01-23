@@ -5,7 +5,7 @@ Run a single experiment.
 import argparse
 
 from ..config import Config, ExperimentCondition
-from ..experiment_runner import ExperimentRunner
+from ..experiment import ExperimentRunner
 
 
 def main():
