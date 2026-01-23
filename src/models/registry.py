@@ -274,13 +274,34 @@ def load_model(
     return _load_hf_model(model_config, for_training, load_adapter)
 
 
-def generate(model: Any, tokenizer: Any, prompt: str, max_new_tokens: int = 256) -> str:
-    """Generate output from model."""
+def generate(
+    model: Any,
+    tokenizer: Any,
+    prompt: str,
+    max_new_tokens: int = 256,
+    return_usage: bool = False,
+) -> Union[str, GenerationResult]:
+    """
+    Generate output from model.
+
+    Args:
+        model: Model instance (HF model or Azure client)
+        tokenizer: Tokenizer (None for Azure)
+        prompt: Input prompt
+        max_new_tokens: Maximum tokens to generate
+        return_usage: If True, return GenerationResult with token counts
+
+    Returns:
+        Generated text string, or GenerationResult if return_usage=True
+    """
     # Azure models expose a simple generate() API
     if hasattr(model, "provider") and model.provider == "azure":
-        return model.generate(prompt, max_new_tokens=max_new_tokens)
+        return model.generate(
+            prompt, max_new_tokens=max_new_tokens, return_usage=return_usage
+        )
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_length = inputs.input_ids.shape[1]  # Track input length
 
     # Phi-3 sometimes has cache issues; disable for safety
     model_type = getattr(getattr(model, "config", None), "model_type", "")
@@ -297,4 +318,16 @@ def generate(model: Any, tokenizer: Any, prompt: str, max_new_tokens: int = 256)
             use_cache=use_cache,
         )
 
-    return tokenizer.decode(outputs[0], skip_special_tokens=False)
+    text = tokenizer.decode(outputs[0], skip_special_tokens=False)
+
+    # ============== Return usage info if requested ==============
+    if return_usage:
+        output_length = outputs.shape[1] - input_length
+        usage = {
+            "tokens_input": input_length,
+            "tokens_output": output_length,
+            "tokens_total": input_length + output_length,
+        }
+        return GenerationResult(text=text, usage=usage)
+
+    return text

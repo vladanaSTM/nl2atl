@@ -3,19 +3,23 @@ Exact-match evaluator with output cleaning for ATL formula generation.
 """
 
 import re
+import time
 from typing import Dict, List, Any, Optional, Iterable, Tuple
 
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
-from ..models.registry import generate
+from ..models.registry import generate, GenerationResult
 from ..models.few_shot import format_prompt
 
 
 class ExactMatchEvaluator(BaseEvaluator):
     """Evaluator that normalizes model output and tracks exact-match accuracy."""
 
-    def __init__(self):
-        self.results: List[Dict] = []
+
+def __init__(self):
+    self.results: List[Dict] = []
+    self.total_tokens_input: int = 0
+    self.total_tokens_output: int = 0
 
     def _has_temporal_operator(self, text: str) -> bool:
         """Check if text contains any temporal operator."""
@@ -182,13 +186,18 @@ class ExactMatchEvaluator(BaseEvaluator):
         exact_match = int(
             self.normalize(prediction_text) == self.normalize(reference_text)
         )
-        return {
+        result = {
+            "id": prediction.get("id") or reference.get("id"),
             "input": prediction.get("input") or reference.get("input"),
             "expected": reference_text,
             "generated": prediction_text,
             "difficulty": prediction.get("difficulty") or reference.get("difficulty"),
             "exact_match": exact_match,
         }
+        # Preserve latency if it was already computed
+        if "latency_ms" in prediction:
+            result["latency_ms"] = prediction["latency_ms"]
+        return result
 
     def evaluate(
         self,
@@ -225,80 +234,124 @@ class ExactMatchEvaluator(BaseEvaluator):
 
         return self.aggregate_metrics()
 
-    def evaluate_model(
-        self,
-        model: Any,
-        tokenizer: Any,
-        test_data: List[Dict],
-        model_type: str,
-        few_shot: bool = False,
-        num_few_shot: int = 5,
-        verbose: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        Run evaluation on test data.
 
-        Args:
-            model: Loaded model
-            tokenizer: Tokenizer (None for Azure models)
-            test_data: List of test items
-            model_type: Model family type
-            few_shot: Whether to use few-shot prompting
-            num_few_shot: Number of few-shot examples
-            verbose: Whether to print progress
+def evaluate_model(
+    self,
+    model: Any,
+    tokenizer: Any,
+    test_data: List[Dict],
+    model_type: str,
+    few_shot: bool = False,
+    num_few_shot: int = 5,
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """
+    Run evaluation on test data.
 
-        Returns:
-            Dictionary of metrics
-        """
-        self.results = []
+    Args:
+        model: Loaded model
+        tokenizer: Tokenizer (None for Azure models)
+        test_data: List of test items
+        model_type: Model family type
+        few_shot: Whether to use few-shot prompting
+        num_few_shot: Number of few-shot examples
+        verbose: Whether to print progress
 
-        if verbose:
-            print(f"\nEvaluating {len(test_data)} examples...")
-            print(f"Few-shot: {few_shot}, Model type: {model_type}")
+    Returns:
+        Dictionary of metrics
+    """
+    self.results = []
+    # Reset token counters
+    self.total_tokens_input = 0
+    self.total_tokens_output = 0
 
-        excluded_inputs = [item["input"] for item in test_data] if few_shot else None
+    # Determine if this is an Azure model (tokenizer is None)
+    is_azure = tokenizer is None
 
-        for i, item in enumerate(test_data):
-            prompt = format_prompt(
-                input_text=item["input"],
-                few_shot=few_shot,
-                num_examples=num_few_shot,
-                model_type=model_type,
-                exclude_inputs=excluded_inputs,
-                tokenizer=tokenizer,
-            )
+    if verbose:
+        print(f"\nEvaluating {len(test_data)} examples...")
+        print(f"Few-shot: {few_shot}, Model type: {model_type}")
 
-            response = generate(model, tokenizer, prompt)
-            generated = self.clean_output(response, model_type)
+    excluded_inputs = [item["input"] for item in test_data] if few_shot else None
 
-            exact_match = int(
-                self.normalize(item["output"]) == self.normalize(generated)
-            )
+    for i, item in enumerate(test_data):
+        # Start timing
+        import time
 
-            self.results.append(
-                {
-                    "input": item["input"],
-                    "expected": item["output"],
-                    "generated": generated,
-                    "difficulty": item.get("difficulty"),
-                    "exact_match": exact_match,
-                }
-            )
+        start_time = time.perf_counter()
 
-            if verbose and (i + 1) % 10 == 0:
-                print(f"  Processed {i + 1}/{len(test_data)}")
+        prompt = format_prompt(
+            input_text=item["input"],
+            few_shot=few_shot,
+            num_examples=num_few_shot,
+            model_type=model_type,
+            exclude_inputs=excluded_inputs,
+            tokenizer=tokenizer,
+        )
 
-        return self.aggregate_metrics()
+        # Get response with usage info
+        result = generate(model, tokenizer, prompt, return_usage=True)
 
-    def aggregate_metrics(self) -> Dict[str, Any]:
-        """Compute aggregate metrics."""
-        n = len(self.results)
-        if n == 0:
-            return {"n_examples": 0, "exact_match": 0.0}
+        if isinstance(result, GenerationResult):
+            response = result.text
+            tokens_input = result.tokens_input
+            tokens_output = result.tokens_output
+            self.total_tokens_input += tokens_input
+            self.total_tokens_output += tokens_output
+        else:
+            # Fallback if generate returns string (shouldn't happen with return_usage=True)
+            response = result
+            tokens_input = None
+            tokens_output = None
 
-        exact_matches = sum(r["exact_match"] for r in self.results)
+        generated = self.clean_output(response, model_type)
 
-        return {
-            "n_examples": n,
-            "exact_match": exact_matches / n,
+        # Calculate latency
+        latency_ms = (time.perf_counter() - start_time) * 1000
+
+        exact_match = int(self.normalize(item["output"]) == self.normalize(generated))
+
+        # Build result dict
+        result_dict = {
+            "id": item.get("id", i),
+            "input": item["input"],
+            "expected": item["output"],
+            "generated": generated,
+            "difficulty": item.get("difficulty"),
+            "exact_match": exact_match,
+            "latency_ms": round(latency_ms, 2),
         }
+
+        # Add token counts
+        if tokens_input is not None:
+            result_dict["tokens_input"] = tokens_input
+            result_dict["tokens_output"] = tokens_output
+
+        self.results.append(result_dict)
+
+        if verbose and (i + 1) % 10 == 0:
+            print(f"  Processed {i + 1}/{len(test_data)}")
+
+    return self.aggregate_metrics()
+
+
+def aggregate_metrics(self) -> Dict[str, Any]:
+    """Compute aggregate metrics."""
+    n = len(self.results)
+    if n == 0:
+        return {"n_examples": 0, "exact_match": 0.0}
+
+    exact_matches = sum(r["exact_match"] for r in self.results)
+
+    metrics = {
+        "n_examples": n,
+        "exact_match": exact_matches / n,
+    }
+
+    # Add token usage if tracked
+    if self.total_tokens_input > 0:
+        metrics["total_tokens_input"] = self.total_tokens_input
+        metrics["total_tokens_output"] = self.total_tokens_output
+        metrics["total_tokens"] = self.total_tokens_input + self.total_tokens_output
+
+    return metrics

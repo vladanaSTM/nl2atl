@@ -2,6 +2,7 @@
 
 import os
 import random
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
@@ -285,6 +286,9 @@ class ExperimentRunner:
         print(f"Running: {run_name}")
         print(f"{'='*60}")
 
+        # ============== Start experiment timer ==============
+        self.reporter.start_timer()
+
         self.reporter.init_wandb_run(
             self.config, run_name, model_config, condition, effective_finetuned
         )
@@ -302,7 +306,7 @@ class ExperimentRunner:
                 model_config, adapter_path, effective_finetuned
             )
 
-            # Evaluate
+            # Evaluate (with latency tracking)
             metrics = self.evaluator.evaluate(
                 model=model,
                 tokenizer=tokenizer,
@@ -313,21 +317,41 @@ class ExperimentRunner:
                 verbose=True,
             )
 
+            # ============== Stop timer before building metadata ==============
+            self.reporter.stop_timer()
+
+            # ============== Get results with latency info ==============
+            detailed_results = self.evaluator.results
+
+            # ============== Build comprehensive metadata ==============
+            metadata = self.reporter.build_run_metadata(
+                config=self.config,
+                run_name=run_name,
+                model_config=model_config,
+                condition=condition,
+                effective_finetuned=effective_finetuned,
+                dataset_path=str(self.config.data_path),
+                total_samples=len(self.test_data),
+                results=detailed_results,
+            )
+
+            # ============== Add metrics to metadata ==============
+            metadata["metrics"] = metrics
+
             self.reporter.log_metrics(metrics)
-            self.reporter.log_predictions_table(self.evaluator.results, run_name)
+            self.reporter.log_predictions_table(detailed_results, run_name)
 
             print(f"\nResults for {run_name}:")
             print(f"  Exact Match: {metrics['exact_match']:.1%}")
+            if "latency_mean_ms" in metadata:
+                print(f"  Mean Latency: {metadata['latency_mean_ms']:.1f}ms")
+            if metadata.get("duration_seconds"):
+                print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
 
+            # ============== Restructured result with metadata ==============
             result = {
-                "run_name": run_name,
-                "model": model_config.short_name,
-                "condition": condition.name,
-                "seed": self.config.seed,
-                "finetuned": effective_finetuned,
-                "few_shot": condition.few_shot,
-                "metrics": metrics,
-                "detailed_results": self.evaluator.results,
+                "metadata": metadata,
+                "predictions": detailed_results,
             }
 
             self.all_results.append(result)

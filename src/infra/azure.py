@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union, Dict, Any  # <-- ADD Union, Dict, Any
 
 import requests
 from .env import load_env
@@ -17,6 +17,27 @@ load_env()
 
 # Silence warnings when SSL verification is intentionally disabled
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+
+
+# ============== Add GenerationResult dataclass ==============
+@dataclass
+class GenerationResult:
+    """Result from model generation including usage stats."""
+
+    text: str
+    usage: Optional[Dict[str, int]] = None
+
+    @property
+    def tokens_input(self) -> int:
+        return self.usage.get("tokens_input", 0) if self.usage else 0
+
+    @property
+    def tokens_output(self) -> int:
+        return self.usage.get("tokens_output", 0) if self.usage else 0
+
+    @property
+    def tokens_total(self) -> int:
+        return self.usage.get("tokens_total", 0) if self.usage else 0
 
 
 @dataclass
@@ -127,8 +148,23 @@ class AzureClient:
         base_url = f"{self.endpoint}/openai/deployments/{self.model}/chat/completions"
         return f"{base_url}?api-version={self.api_version}"
 
-    def generate(self, prompt: str, max_new_tokens: int = 256) -> str:
-        """Generate a response from the Azure OpenAI API."""
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 256,
+        return_usage: bool = False,  # <-- NEW parameter
+    ) -> Union[str, GenerationResult]:  # <-- UPDATE return type
+        """
+        Generate a response from the Azure OpenAI API.
+
+        Args:
+            prompt: Input prompt
+            max_new_tokens: Maximum tokens to generate
+            return_usage: If True, return GenerationResult with token counts
+
+        Returns:
+            Generated text string, or GenerationResult if return_usage=True
+        """
         url = self._build_url()
         payload = {
             "model": self.model,
@@ -163,17 +199,33 @@ class AzureClient:
         try:
             data = response.json()
         except json.JSONDecodeError:
+            if return_usage:
+                return GenerationResult(text=response.text, usage=None)
             return response.text
 
+        # ============== Extract usage information ==============
+        usage = None
+        if "usage" in data:
+            usage = {
+                "tokens_input": data["usage"].get("prompt_tokens", 0),
+                "tokens_output": data["usage"].get("completion_tokens", 0),
+                "tokens_total": data["usage"].get("total_tokens", 0),
+            }
+
         # Parse OpenAI-style response
+        content = None
         choices = data.get("choices", [])
         if choices:
             first = choices[0]
             message = first.get("message", {})
             content = message.get("content")
-            if content:
-                return content
-            if "text" in first and first["text"]:
-                return first["text"]
+            if not content and "text" in first and first["text"]:
+                content = first["text"]
 
-        return json.dumps(data)
+        if content is None:
+            content = json.dumps(data)
+
+        # ============== Return based on return_usage flag ==============
+        if return_usage:
+            return GenerationResult(text=content, usage=usage)
+        return content

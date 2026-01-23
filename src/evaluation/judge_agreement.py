@@ -249,7 +249,7 @@ def compute_krippendorff_alpha(
 ) -> dict:
     """
     Compute Krippendorff's Alpha for nominal data.
-    
+
     Unlike Fleiss' Kappa, this handles missing data naturally
     (items don't need to be rated by all judges).
     """
@@ -258,74 +258,74 @@ def compute_krippendorff_alpha(
     items = list(aligned.keys())
     n_items = len(items)
     n_judges = len(judges)
-    
+
     if n_items == 0:
         return {"alpha": None, "n_items": 0, "n_judges": n_judges}
-    
+
     # Map categories to integers
     categories = {"yes": 0, "no": 1}
-    
+
     # Create data matrix (judges × items), NaN for missing
     data = np.full((n_judges, n_items), np.nan)
     for j_idx, judge in enumerate(judges):
         for i_idx, item_key in enumerate(items):
             if judge in aligned[item_key]:
                 data[j_idx, i_idx] = categories[aligned[item_key][judge]]
-    
+
     # Count valid ratings per item
     n_ratings = np.sum(~np.isnan(data), axis=0)
-    
+
     # Filter items with < 2 ratings
     valid_cols = n_ratings >= 2
     if not np.any(valid_cols):
         return {"alpha": None, "n_items": 0, "n_judges": n_judges}
-    
+
     data = data[:, valid_cols]
     n_items_valid = data.shape[1]
-    
+
     # Compute observed disagreement (Do)
     # For nominal data: disagreement = proportion of pairs that differ
     Do = 0.0
     total_pairs = 0
-    
+
     for col in range(n_items_valid):
         ratings = data[:, col]
         valid_ratings = ratings[~np.isnan(ratings)]
         n = len(valid_ratings)
         if n < 2:
             continue
-        
+
         # Count disagreeing pairs
         for i in range(n):
             for j in range(i + 1, n):
                 total_pairs += 1
                 if valid_ratings[i] != valid_ratings[j]:
                     Do += 1
-    
+
     if total_pairs == 0:
         return {"alpha": 1.0, "n_items": n_items_valid, "n_judges": n_judges}
-    
+
     Do /= total_pairs
-    
+
     # Compute expected disagreement (De)
     # Based on overall category frequencies
     all_ratings = data[~np.isnan(data)]
     n_total = len(all_ratings)
-    
+
     if n_total < 2:
         return {"alpha": None, "n_items": n_items_valid, "n_judges": n_judges}
-    
+
     freq = np.array([np.sum(all_ratings == c) for c in categories.values()])
-    
+
     # Expected disagreement for nominal data
     De = 1.0 - np.sum(freq * (freq - 1)) / (n_total * (n_total - 1))
-    
+
     # Krippendorff's Alpha
     if De == 0:
         alpha = 1.0
     else:
         alpha = 1.0 - Do / De
-    
+
     return {
         "alpha": round(float(alpha), 4),
         "n_items": n_items_valid,
@@ -508,7 +508,9 @@ def generate_agreement_report(
     pairwise = compute_pairwise_kappa(common_aligned, judges)
     fleiss_result = compute_overall_fleiss(common_aligned, judges)
     per_source = compute_per_source_agreement(common_aligned, judges)
-    krippendorff_result = compute_krippendorff_alpha(aligned, judges)  # Note: uses ALL items
+    krippendorff_result = compute_krippendorff_alpha(
+        aligned, judges
+    )  # Note: uses ALL items
     agreement_breakdown = compute_agreement_breakdown(common_aligned, judges)
     disagreement_stats = compute_detailed_disagreement_stats(common_aligned, judges)
 
