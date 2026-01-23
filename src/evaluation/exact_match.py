@@ -7,8 +7,8 @@ from typing import Dict, List, Any, Optional, Iterable, Tuple
 
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
-from ..model_registry import generate
-from ..few_shot import format_prompt
+from ..models.registry import generate
+from ..models.few_shot import format_prompt
 
 
 class ExactMatchEvaluator(BaseEvaluator):

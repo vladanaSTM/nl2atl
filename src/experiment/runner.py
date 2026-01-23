@@ -14,9 +14,9 @@ from trl import SFTTrainer
 from ..config import Config, ModelConfig, ExperimentCondition
 from ..constants import Provider
 from ..evaluation.exact_match import ExactMatchEvaluator
-from ..few_shot import format_prompt
-from ..model_registry import load_model, get_model_type, clear_gpu_memory
-from ..model_utils import resolve_model_key
+from ..models.few_shot import format_prompt
+from ..models.registry import load_model, get_model_type, clear_gpu_memory
+from ..models.utils import resolve_model_key
 
 from .data_manager import ExperimentDataManager
 from .reporter import ExperimentReporter

@@ -8,7 +8,7 @@ from ...config import ModelConfig
 
 def _get_model_registry():
     """Lazy import to avoid heavy dependencies during module import."""
-    from ... import model_registry
+    from ...models import registry as model_registry
 
     return model_registry
 

@@ -18,7 +18,7 @@ from ..evaluation.llm_judge import (
     compute_metrics,
     evaluate_prediction_file,
 )
-from ..model_utils import resolve_model_key
+from ..models.utils import resolve_model_key
 
 
 def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
