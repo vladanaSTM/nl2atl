@@ -10,7 +10,7 @@ from typing import Optional
 from ..config import ModelConfig
 from ..io_utils import load_yaml, save_json
 
-from ..llm_judge import (
+from ..evaluation.llm_judge import (
     LLMJudge,
     PROMPT_VERSION,
     build_summary,
