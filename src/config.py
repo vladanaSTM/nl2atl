@@ -31,6 +31,9 @@ class ModelConfig:
     gradient_accumulation_steps: Optional[int] = None
     target_modules: List[str] = field(default_factory=list)
     params_b: Optional[float] = None
+    price_input_per_1k: Optional[float] = None
+    price_output_per_1k: Optional[float] = None
+    gpu_hour_usd: Optional[float] = None
 
     @property
     def is_azure(self) -> bool:

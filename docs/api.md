@@ -143,6 +143,13 @@ Wraps `classify_difficulty()` and `process_dataset()`.
 
 Generates Cohen’s κ, Fleiss’ κ, and Krippendorff’s α reports from evaluated datasets.
 
+### `src.evaluation.model_efficiency`
+
+Key functions:
+
+- `build_efficiency_report(...)`
+- `build_efficiency_notebook(...)`
+
 ### `src.evaluation.judge_agreement.generate_agreement_report_with_human`
 
 Same as `generate_agreement_report`, but merges a human annotation JSON as an additional judge.

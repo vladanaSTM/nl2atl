@@ -1,4 +1,5 @@
 import random
+
 from src import data_utils
 
 
@@ -30,3 +31,26 @@ def test_augment_data_no_change_when_factor_one():
     data = [{"input": "The system will always stay safe", "output": "<<S>>G safe"}]
     augmented = data_utils.augment_data(data, augment_factor=1)
     assert augmented == data
+
+
+def test_split_data_stratified_counts():
+    data = []
+    for i in range(10):
+        data.append({"input": f"easy {i}", "output": "<<A>>F p", "difficulty": "easy"})
+        data.append({"input": f"hard {i}", "output": "<<A>>G p", "difficulty": "hard"})
+
+    train, val, test = data_utils.split_data(
+        data, test_size=0.2, val_size=0.5, seed=123
+    )
+
+    assert len(train) == 16
+    assert len(val) == 2
+    assert len(test) == 2
+    assert len(train) + len(val) + len(test) == len(data)
+
+
+def test_apply_paraphrase_changes_phrase():
+    random.seed(7)
+    text = "The system can guarantee that eventually p"
+    paraphrased = data_utils._apply_paraphrase(text)
+    assert paraphrased != text

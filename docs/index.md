@@ -12,7 +12,7 @@ NL2ATL is a Python framework developed to support the research presented in:
 >
 > University of Naples Federico II & Telecom Paris
 
-The framework enables automatic translation of natural language requirements involving strategic reasoning into well-formed ATL formulas (coalitions + temporal operators). It provides tooling for experiments, evaluation, and dataset difficulty classification.
+The framework enables automatic translation of natural language requirements involving strategic reasoning into well-formed ATL formulas (coalitions + temporal operators). It provides tooling for experiments, evaluation, dataset difficulty classification, and model efficiency reporting (cost/latency/accuracy trade-offs) that supports paper-ready comparisons.
 
 ## Motivation
 
@@ -54,6 +54,7 @@ Formal verification of Multi-Agent Systems (MAS) relies on logical formalisms ca
 
 - **Strategic Logic Support**: Native handling of ATL coalition modalities and temporal operators.
 - **Multiple Evaluation Methods**: Exact-match scoring and LLM-as-a-judge evaluation.
+- **Efficiency Analysis**: Composite, normalized comparisons of cost, latency, and accuracy.
 - **Reproducibility**: Experiment tracking with W&B integration and seed aggregation.
 - **Extensible Design**: Modular model registry, evaluators, and CLI subcommands.
 

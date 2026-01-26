@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from typing import Optional, Union, Dict, Any  # <-- ADD Union, Dict, Any
 
 import requests
+
+try:
+    import tiktoken
+except Exception:
+    tiktoken = None
 from .env import load_env
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -26,6 +31,7 @@ class GenerationResult:
 
     text: str
     usage: Optional[Dict[str, int]] = None
+    usage_estimated: bool = False
 
     @property
     def tokens_input(self) -> int:
@@ -38,6 +44,33 @@ class GenerationResult:
     @property
     def tokens_total(self) -> int:
         return self.usage.get("tokens_total", 0) if self.usage else 0
+
+
+def _get_encoding(model: str):
+    if tiktoken is None:
+        return None
+    try:
+        return tiktoken.encoding_for_model(model)
+    except Exception:
+        for name in ("o200k_base", "cl100k_base"):
+            try:
+                return tiktoken.get_encoding(name)
+            except Exception:
+                continue
+    return None
+
+
+def _estimate_token_count(text: str, model: str) -> int:
+    if not text:
+        return 0
+    encoding = _get_encoding(model)
+    if encoding is not None:
+        try:
+            return len(encoding.encode(text))
+        except Exception:
+            pass
+    # Rough fallback: ~4 chars per token
+    return max(1, int(len(text) / 4))
 
 
 @dataclass
@@ -205,11 +238,13 @@ class AzureClient:
 
         # ============== Extract usage information ==============
         usage = None
-        if "usage" in data:
+        usage_estimated = False
+        usage_data = data.get("usage")
+        if isinstance(usage_data, dict):
             usage = {
-                "tokens_input": data["usage"].get("prompt_tokens", 0),
-                "tokens_output": data["usage"].get("completion_tokens", 0),
-                "tokens_total": data["usage"].get("total_tokens", 0),
+                "tokens_input": usage_data.get("prompt_tokens", 0),
+                "tokens_output": usage_data.get("completion_tokens", 0),
+                "tokens_total": usage_data.get("total_tokens", 0),
             }
 
         # Parse OpenAI-style response
@@ -227,5 +262,18 @@ class AzureClient:
 
         # ============== Return based on return_usage flag ==============
         if return_usage:
-            return GenerationResult(text=content, usage=usage)
+            if usage is None:
+                tokens_input = _estimate_token_count(prompt, self.model)
+                tokens_output = _estimate_token_count(content, self.model)
+                usage = {
+                    "tokens_input": tokens_input,
+                    "tokens_output": tokens_output,
+                    "tokens_total": tokens_input + tokens_output,
+                }
+                usage_estimated = True
+            return GenerationResult(
+                text=content,
+                usage=usage,
+                usage_estimated=usage_estimated,
+            )
         return content

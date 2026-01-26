@@ -315,6 +315,8 @@ class ExperimentRunner:
                 few_shot=condition.few_shot,
                 num_few_shot=self.config.num_few_shot_examples,
                 verbose=True,
+                price_input_per_1k=model_config.price_input_per_1k,
+                price_output_per_1k=model_config.price_output_per_1k,
             )
 
             # ============== Stop timer before building metadata ==============

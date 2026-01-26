@@ -5,7 +5,7 @@ Inter-rater agreement metrics (Cohen's Kappa, Fleiss' Kappa) for LLM judges.
 import hashlib
 import json
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -702,7 +702,7 @@ def _generate_agreement_report(
         }
 
     report = {
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "judges": judges,
         "n_judges": len(judges),
         "total_unique_items": len(aligned),

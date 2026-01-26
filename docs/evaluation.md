@@ -1,12 +1,13 @@
 # Evaluation Guide
 
-NL2ATL provides exact-match evaluation, LLM-as-a-judge evaluation, and inter-rater agreement metrics.
+NL2ATL provides exact-match evaluation, LLM-as-a-judge evaluation, inter-rater agreement metrics, and model efficiency reporting.
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [LLM-as-a-Judge](#llm-as-a-judge)
 - [Exact Match](#exact-match)
+- [Model Efficiency Report](#model-efficiency-report)
 - [Judge Agreement](#judge-agreement)
 - [Human Annotations (Optional)](#human-annotations-optional)
 - [Extending Evaluation](#extending-evaluation)
@@ -115,6 +116,68 @@ The evaluator returns:
   "total_tokens": 14690
 }
 ```
+
+---
+
+## Model Efficiency Report
+
+The efficiency report aggregates accuracy, latency, and cost across models and
+derives normalized composite scores. This is useful because it
+quantifies trade-offs between quality and resource usage, enabling clear
+comparisons of “best overall,” “cheapest,” and “fastest” models.
+
+### Running the report
+
+```bash
+nl2atl model-efficiency --predictions_dir outputs/model_predictions
+```
+
+### Outputs
+
+- `outputs/LLM-evaluation/efficiency_report.json`
+- `outputs/LLM-evaluation/efficiency_report.ipynb`
+
+### Metrics and rankings
+
+The report includes:
+
+- Accuracy (LLM-judge accuracy when available, else exact-match).
+- Average cost and total cost (USD).
+- Latency statistics and throughput.
+- Composite efficiency score: normalized weighted sum of accuracy, cost, and latency.
+- Rankings for cheapest, fastest, most accurate, and best composite score.
+
+### USD cost calculation
+
+Costs are derived from token usage and the per‑1k pricing in `configs/models.yaml`:
+
+- Azure models: token usage comes from the Azure API (or is estimated via tiktoken when usage
+  is unavailable). Prices match the official Azure OpenAI and Azure AI Foundry Models pricing page. Costs are computed as
+  $\text{cost\_input} = \frac{\text{tokens\_input}}{1000} \times \text{price\_input\_per\_1k}$ and
+  $\text{cost\_output} = \frac{\text{tokens\_output}}{1000} \times \text{price\_output\_per\_1k}$.
+  The total cost is $\text{cost\_input} + \text{cost\_output}$.
+- GPU/local models: you can either provide per‑token prices (`price_input_per_1k`,
+  `price_output_per_1k`) or a GPU hourly rate (`gpu_hour_usd`) in `configs/models.yaml`.
+  When `gpu_hour_usd` is available, the report derives total USD cost and
+  per‑1k‑token cost using:
+  $\text{tokens\_per\_hour} = \frac{\text{tokens\_total}}{\text{hours\_used}}$ and
+  $\text{cost\_per\_1k\_tokens} = \frac{\text{gpu\_hour\_usd}}{\text{tokens\_per\_hour}} \times 1000$.
+  If none of these fields are set, cost‑based rankings are skipped for those models.
+
+If you don't know your GPU cost, you can estimate it:
+
+1) **GPU amortization per hour**:
+  $\text{gpu\_amort\_hour} = \frac{\text{gpu\_price\_usd}}{\text{lifespan\_years} \times 365 \times 24 \times \text{utilization}}$
+  (use public MSRP or a public cloud on‑demand hourly price for an A100 as a proxy).
+2) **Power cost per hour**:
+  $\text{power\_hour} = \frac{\text{avg\_watts}}{1000} \times \text{electricity\_usd\_per\_kwh}$
+  (average watts from `nvidia-smi` and electricity rate from public utility data).
+3) **Overhead**: add 10–30% for shared infrastructure if you want a conservative estimate.
+
+Then set:
+$$
+  ext{gpu\_hour\_usd} = \text{gpu\_amort\_hour} + \text{power\_hour} + \text{overhead\_hour}
+$$
 
 ---
 

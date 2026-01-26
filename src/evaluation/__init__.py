@@ -11,6 +11,7 @@ __all__ = [
     "generate_agreement_report",
     "LLMJudgeEvaluator",
     "run_llm_judge",
+    "build_efficiency_report",
 ]
 
 
@@ -25,4 +26,8 @@ def __getattr__(name: str):
         return {"LLMJudgeEvaluator": LLMJudgeEvaluator, "run_llm_judge": run_llm_judge}[
             name
         ]
+    if name == "build_efficiency_report":
+        from .model_efficiency import build_efficiency_report
+
+        return build_efficiency_report
     raise AttributeError(f"module {__name__} has no attribute {name}")
