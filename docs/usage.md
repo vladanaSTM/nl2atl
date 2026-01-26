@@ -115,6 +115,24 @@ Key options:
 - `--output`: path to write the updated dataset
 - `--formula-weight`, `--nl-weight`, `--threshold`: scoring parameters
 
+### Model Efficiency Report
+
+```bash
+nl2atl model-efficiency --predictions_dir outputs/model_predictions
+```
+
+Key options:
+
+- `--judge_summary`: path to `summary__judge-<judge>.json` (optional)
+- `--judge_model`: choose a judge summary by model name (optional)
+- `--weight_accuracy`, `--weight_cost`, `--weight_latency`: efficiency score weights
+- `--top_k`: size of ranking lists
+- `--no_notebook`: skip notebook output
+
+Use this report to present paper-ready trade-offs between accuracy, latency, and cost.
+
+For Azure models, per‑token prices match the official Azure OpenAI pricing page. For local A100 runs, set `gpu_hour_usd` in configs/models.yaml to enable cost‑based rankings.
+
 ---
 
 ## Typical Workflow
@@ -148,6 +166,8 @@ outputs/
     │   └── <judge>/
     │       └── <prediction>__judge-<judge>.json
     ├── summary__judge-<judge>.json
+  ├── efficiency_report.json
+  ├── efficiency_report.ipynb
     └── agreement_report.json
 ```
 
@@ -173,6 +193,12 @@ outputs/
     "batch_size": 10,
     "num_few_shot": 0,
     "latency_mean_ms": 520.1,
+    "latency_min_ms": 410.2,
+    "latency_max_ms": 980.4,
+    "latency_total_ms": 46809.0,
+    "latency_p50_ms": 505.6,
+    "latency_p95_ms": 910.3,
+    "latency_p99_ms": 970.8,
     "timestamp_start": "2026-01-23T11:10:01Z",
     "timestamp_end": "2026-01-23T11:22:40Z",
     "duration_seconds": 759.4

@@ -62,7 +62,23 @@ This produces `outputs/LLM-evaluation/agreement_report.json`.
 
 ---
 
-## 5. Explore the Dataset
+## 5. Compare Model Efficiency
+
+```bash
+nl2atl model-efficiency --predictions_dir outputs/model_predictions
+```
+
+This produces:
+
+- `outputs/LLM-evaluation/efficiency_report.json`
+- `outputs/LLM-evaluation/efficiency_report.ipynb`
+
+The report is useful because it summarizes accuracy–cost–latency
+trade-offs in a single, comparable view.
+
+---
+
+## 6. Explore the Dataset
 
 ```python
 from src.infra.io import load_json

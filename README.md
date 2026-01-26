@@ -13,6 +13,7 @@ Natural language to ATL (Alternating-Time Temporal Logic) formula generation, ev
 - **Experiments** — Run baseline and fine-tuned generation experiments.
 - **Evaluation** — Exact-match scoring and LLM-as-a-judge evaluation.
 - **Analysis** — Inter-rater agreement across judge models.
+- **Efficiency** — Cost/latency/accuracy trade-off reporting for paper-ready comparisons.
 - **Classification** — Rule-based dataset difficulty scoring.
 
 ## Project Structure
@@ -77,6 +78,7 @@ nl2atl <command> [options]
 | `run-single` | Run a single model/condition experiment |
 | `llm-judge` | Evaluate prediction files with LLM judge |
 | `judge-agreement` | Compute inter-rater agreement metrics |
+| `model-efficiency` | Compare accuracy, cost, and latency across models |
 | `classify-difficulty` | Score dataset difficulty |
 
 ### Examples
@@ -91,6 +93,9 @@ nl2atl llm-judge --datasets all
 nl2atl llm-judge --datasets all --overwrite  # re-evaluate existing outputs
 nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
 
+# Compare model efficiency
+nl2atl model-efficiency --predictions_dir outputs/model_predictions
+
 # Classify difficulty
 nl2atl classify-difficulty --input data/dataset.json --verbose
 ```
@@ -104,6 +109,7 @@ python -m src.cli.run_all_experiments
 python -m src.cli.run_single_experiment
 python -m src.cli.run_llm_judge
 python -m src.cli.run_judge_agreement
+python -m src.cli.run_model_efficiency
 python -m src.cli.classify_difficulty
 ```
 
@@ -112,6 +118,8 @@ python -m src.cli.classify_difficulty
 - Predictions: `outputs/model_predictions/<run_name>.json`
 - LLM judge results: `outputs/LLM-evaluation/evaluated_datasets/<judge>/<file>.json`
 - LLM judge summary: `outputs/LLM-evaluation/summary__judge-<judge>.json`
+- Model efficiency report: `outputs/LLM-evaluation/efficiency_report.json`
+- Model efficiency notebook: `outputs/LLM-evaluation/efficiency_report.ipynb`
 - Agreement report: `outputs/LLM-evaluation/agreement_report.json`
 
 ## Testing

@@ -119,6 +119,7 @@ src/
 │   ├── exact_match.py      # Exact-match evaluation
 │   ├── difficulty.py       # Difficulty classification
 │   ├── judge_agreement.py  # Inter-rater metrics
+│   ├── model_efficiency.py # Cost/latency/accuracy trade-off report
 │   └── llm_judge/          # LLM-as-a-Judge Pipeline
 │       ├── client.py       # LLM client wrappers
 │       ├── prompts.py      # Prompt templates
@@ -147,6 +148,13 @@ Experiments write JSON files in `outputs/model_predictions/` with:
 ### LLM Judge Outputs
 
 The LLM judge writes evaluated datasets to `outputs/LLM-evaluation/evaluated_datasets/<judge>/` and a summary JSON plus an optional notebook.
+
+### Model Efficiency Outputs
+
+The efficiency report aggregates metrics from prediction files and (optionally) LLM judge summaries, producing:
+
+- `outputs/LLM-evaluation/efficiency_report.json`
+- `outputs/LLM-evaluation/efficiency_report.ipynb`
 
 ## Extensibility Points
 

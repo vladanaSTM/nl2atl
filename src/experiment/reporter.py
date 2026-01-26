@@ -34,6 +34,27 @@ def get_utc_timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _percentile(values: List[float], percentile: float) -> Optional[float]:
+    """Compute percentile with linear interpolation."""
+    if not values:
+        return None
+    if percentile <= 0:
+        return float(min(values))
+    if percentile >= 100:
+        return float(max(values))
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    if n == 1:
+        return float(sorted_vals[0])
+    position = (percentile / 100.0) * (n - 1)
+    lower = int(position)
+    upper = min(lower + 1, n - 1)
+    if lower == upper:
+        return float(sorted_vals[lower])
+    weight = position - lower
+    return float(sorted_vals[lower] * (1 - weight) + sorted_vals[upper] * weight)
+
+
 class ExperimentTimer:
     """Context manager for timing experiments."""
 
@@ -113,6 +134,7 @@ class ExperimentReporter:
             "git_commit": self._git_commit,
             "price_input_per_1k": model_config.price_input_per_1k,
             "price_output_per_1k": model_config.price_output_per_1k,
+            "gpu_hour_usd": model_config.gpu_hour_usd,
             "price_input_per_token": (
                 model_config.price_input_per_1k / 1000.0
                 if model_config.price_input_per_1k is not None
@@ -144,11 +166,17 @@ class ExperimentReporter:
         latencies = [r["latency_ms"] for r in results if "latency_ms" in r]
         latency_stats = {}
         if latencies:
+            p50 = _percentile(latencies, 50)
+            p95 = _percentile(latencies, 95)
+            p99 = _percentile(latencies, 99)
             latency_stats = {
                 "latency_mean_ms": round(sum(latencies) / len(latencies), 2),
                 "latency_min_ms": round(min(latencies), 2),
                 "latency_max_ms": round(max(latencies), 2),
                 "latency_total_ms": round(sum(latencies), 2),
+                "latency_p50_ms": round(p50, 2) if p50 is not None else None,
+                "latency_p95_ms": round(p95, 2) if p95 is not None else None,
+                "latency_p99_ms": round(p99, 2) if p99 is not None else None,
             }
 
         cost_stats = {}
@@ -273,7 +301,15 @@ class ExperimentReporter:
             wandb.log({"eval/exact_match": metrics["exact_match"]}, commit=False)
 
         # Log latency metrics if present
-        for key in ["latency_mean_ms", "latency_total_ms"]:
+        for key in [
+            "latency_mean_ms",
+            "latency_min_ms",
+            "latency_max_ms",
+            "latency_total_ms",
+            "latency_p50_ms",
+            "latency_p95_ms",
+            "latency_p99_ms",
+        ]:
             if key in metrics:
                 wandb.log({f"perf/{key}": metrics[key]}, commit=False)
 

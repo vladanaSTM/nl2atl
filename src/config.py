@@ -33,6 +33,7 @@ class ModelConfig:
     params_b: Optional[float] = None
     price_input_per_1k: Optional[float] = None
     price_output_per_1k: Optional[float] = None
+    gpu_hour_usd: Optional[float] = None
 
     @property
     def is_azure(self) -> bool:

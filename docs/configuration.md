@@ -137,7 +137,15 @@ models:
     gradient_accumulation_steps: int?
     target_modules: [string]
     params_b: float?
+    price_input_per_1k: float?
+    price_output_per_1k: float?
+    gpu_hour_usd: float?
 ```
+
+  Notes:
+
+  - For Azure models, set `price_input_per_1k` and `price_output_per_1k` using the official Azure OpenAI pricing page.
+  - For local GPU runs (e.g., A100), set `gpu_hour_usd` to your estimated per‑GPU hourly cost; the efficiency report will derive per‑1k‑token costs.
 
 ---
 
