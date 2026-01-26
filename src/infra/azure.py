@@ -205,11 +205,12 @@ class AzureClient:
 
         # ============== Extract usage information ==============
         usage = None
-        if "usage" in data:
+        usage_data = data.get("usage")
+        if isinstance(usage_data, dict):
             usage = {
-                "tokens_input": data["usage"].get("prompt_tokens", 0),
-                "tokens_output": data["usage"].get("completion_tokens", 0),
-                "tokens_total": data["usage"].get("total_tokens", 0),
+                "tokens_input": usage_data.get("prompt_tokens", 0),
+                "tokens_output": usage_data.get("completion_tokens", 0),
+                "tokens_total": usage_data.get("total_tokens", 0),
             }
 
         # Parse OpenAI-style response
