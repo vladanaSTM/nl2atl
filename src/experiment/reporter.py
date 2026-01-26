@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from decimal import Decimal, ROUND_HALF_UP
 import time
 
 import wandb
@@ -110,6 +111,18 @@ class ExperimentReporter:
             "batch_size": config.batch_size,
             "num_few_shot": config.num_few_shot_examples if condition.few_shot else 0,
             "git_commit": self._git_commit,
+            "price_input_per_1k": model_config.price_input_per_1k,
+            "price_output_per_1k": model_config.price_output_per_1k,
+            "price_input_per_token": (
+                model_config.price_input_per_1k / 1000.0
+                if model_config.price_input_per_1k is not None
+                else None
+            ),
+            "price_output_per_token": (
+                model_config.price_output_per_1k / 1000.0
+                if model_config.price_output_per_1k is not None
+                else None
+            ),
         }
 
     def build_run_metadata(
@@ -138,6 +151,40 @@ class ExperimentReporter:
                 "latency_total_ms": round(sum(latencies), 2),
             }
 
+        cost_stats = {}
+        total_cost = sum(Decimal(str(r.get("cost_usd", 0))) for r in results)
+        if total_cost > 0:
+            q = Decimal("0.000001")
+            n_dec = Decimal(len(results)) if results else Decimal("1")
+            cost_stats = {
+                "cost_total_usd": float(total_cost.quantize(q, rounding=ROUND_HALF_UP)),
+                "cost_input_usd": float(
+                    sum(
+                        Decimal(str(r.get("cost_input_usd", 0))) for r in results
+                    ).quantize(q, rounding=ROUND_HALF_UP)
+                ),
+                "cost_output_usd": float(
+                    sum(
+                        Decimal(str(r.get("cost_output_usd", 0))) for r in results
+                    ).quantize(q, rounding=ROUND_HALF_UP)
+                ),
+                "avg_cost_usd": float(
+                    (total_cost / n_dec).quantize(q, rounding=ROUND_HALF_UP)
+                ),
+                "avg_cost_input_usd": float(
+                    (
+                        sum(Decimal(str(r.get("cost_input_usd", 0))) for r in results)
+                        / n_dec
+                    ).quantize(q, rounding=ROUND_HALF_UP)
+                ),
+                "avg_cost_output_usd": float(
+                    (
+                        sum(Decimal(str(r.get("cost_output_usd", 0))) for r in results)
+                        / n_dec
+                    ).quantize(q, rounding=ROUND_HALF_UP)
+                ),
+            }
+
         metadata = {
             "run_id": run_name,
             "git_commit": self._git_commit,
@@ -149,6 +196,7 @@ class ExperimentReporter:
                 config, model_config, condition, effective_finetuned
             ),
             **latency_stats,
+            **cost_stats,
         }
 
         # Add timing info if available
@@ -228,6 +276,17 @@ class ExperimentReporter:
         for key in ["latency_mean_ms", "latency_total_ms"]:
             if key in metrics:
                 wandb.log({f"perf/{key}": metrics[key]}, commit=False)
+
+        for key in [
+            "total_cost_usd",
+            "total_cost_input_usd",
+            "total_cost_output_usd",
+            "avg_cost_usd",
+            "avg_cost_input_usd",
+            "avg_cost_output_usd",
+        ]:
+            if key in metrics:
+                wandb.log({f"cost/{key}": metrics[key]}, commit=False)
 
     def get_result_path(self, run_name: str) -> Path:
         """Get path for saving results."""
