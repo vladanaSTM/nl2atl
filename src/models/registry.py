@@ -5,7 +5,7 @@ Model loading, management, and generation utilities.
 import ctypes
 import gc
 import os
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Union
 
 import torch
 from ..infra.env import load_env
@@ -14,7 +14,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 
 from ..config import ModelConfig
 from ..constants import Provider, ModelType
-from ..infra.azure import AzureClient, AzureConfig
+from ..infra.azure import AzureClient, AzureConfig, GenerationResult
 
 # Ensure environment variables are loaded
 load_env()
