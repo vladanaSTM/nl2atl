@@ -58,3 +58,52 @@ def test_load_evaluated_files(tmp_path):
     assert "judge1" in results
     assert "model" in results["judge1"]
     assert results["judge1"]["model"][0]["input"] == "x"
+
+
+def test_normalize_human_annotations_and_merge():
+    items = [
+        {"input": "x", "gold": "g", "prediction": "p", "correct": True},
+        {"input": "y", "gold": "g", "prediction": "p", "correct": "no"},
+    ]
+    normalized = judge_agreement.normalize_human_annotations(items, "source")
+    assert "human" in normalized
+    assert normalized["human"]["source"][0]["correct"] == "yes"
+
+    base = {
+        "judge1": {
+            "source": [{"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}]
+        }
+    }
+    merged = judge_agreement.merge_judge_results(base, normalized)
+    assert "judge1" in merged and "human" in merged
+
+
+def test_pairwise_and_fleiss_kappa():
+    aligned = {
+        "item1": {"j1": "yes", "j2": "no"},
+        "item2": {"j1": "yes", "j2": "yes"},
+    }
+    pairwise = judge_agreement.compute_pairwise_kappa(aligned, ["j1", "j2"])
+    assert ("j1", "j2") in pairwise
+
+    fleiss = judge_agreement.compute_overall_fleiss(aligned, ["j1", "j2"])
+    assert fleiss["n_items"] == 2
+
+    alpha = judge_agreement.compute_krippendorff_alpha(aligned, ["j1", "j2"])
+    assert "alpha" in alpha
+
+
+def test_generate_agreement_report_basic(tmp_path):
+    eval_dir = tmp_path / "evaluated"
+    judge1 = eval_dir / "judge1"
+    judge2 = eval_dir / "judge2"
+    judge1.mkdir(parents=True)
+    judge2.mkdir(parents=True)
+
+    payload = [{"input": "x", "gold": "g", "prediction": "p", "correct": "yes"}]
+    (judge1 / "model__judge-judge1.json").write_text(json.dumps(payload))
+    (judge2 / "model__judge-judge2.json").write_text(json.dumps(payload))
+
+    report = judge_agreement.generate_agreement_report(eval_dir)
+    assert report["n_judges"] == 2
+    assert report["items_with_multiple_judges"] == 1
