@@ -1,145 +1,62 @@
-# API Reference
+# API Service
 
-This document summarizes the public API surface based on the current source code.
+NL2ATL exposes a lightweight FastAPI service for NL→ATL generation.
 
-## Table of Contents
+## Start the server
 
-- [Configuration](#configuration)
-- [Constants](#constants)
-- [Experiment Module](#experiment-module)
-- [Models Module](#models-module)
-- [Evaluation Module](#evaluation-module)
-- [Infrastructure Module](#infrastructure-module)
+Run from the repo root so config paths resolve:
 
----
-
-## Configuration
-
-### `src.config.ModelConfig`
-
-Dataclass describing a model entry from `configs/models.yaml`.
-
-Key fields: `name`, `short_name`, `provider`, `api_model`, `max_seq_length`, `load_in_4bit`, `lora_r`, `lora_alpha`, `train_batch_size`, `eval_batch_size`, `gradient_accumulation_steps`, `target_modules`, `params_b`.
-
-Property: `is_azure` returns true when `provider` is `azure`.
-
-### `src.config.ExperimentCondition`
-
-Dataclass for experiment conditions:
-
-- `name`
-- `finetuned`
-- `few_shot`
-
-### `src.config.Config`
-
-Main configuration container. Load with:
-
-```python
-Config.from_yaml(models_path: str, experiments_path: str) -> Config
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ```
 
-Utility methods:
+If you run elsewhere, set absolute paths:
 
-- `resolve_seeds()`
-- `get_model(model_key: str)`
-
----
-
-## Constants
-
-`src.constants` includes:
-
-- `Provider` and `ModelType` enums
-- `TEMPORAL_OPERATORS`
-- `DEFAULT_*` paths
-- `AZURE_PREFIX`
-
----
-
-## Experiment Module
-
-### `src.experiment.ExperimentRunner`
-
-Orchestrates model training (optional), inference, and evaluation.
-
-Key methods:
-
-- `run_single_experiment(model_key: str, condition: ExperimentCondition, save_model: bool = True)`
-- `run_all_experiments(models: Optional[List[str]], conditions: Optional[List[str]], model_provider: str, overwrite: bool)`
-- `run()`
-
-### `src.experiment.ExperimentDataManager`
-
-Handles data loading/splitting/augmentation.
-
-```python
-ExperimentDataManager(
-    data_path: Path,
-    test_size: float,
-    val_size: float,
-    seed: int,
-    augment_factor: int,
-)
+```bash
+NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
 ```
 
-Key methods: `load_dataset()`, `split_dataset()`, `augment_training_data()`, `prepare_data()`.
+## Endpoints
 
-### `src.experiment.ExperimentReporter`
+### Health
 
-Responsible for saving results and W&B logging.
+```bash
+curl http://localhost:8081/health
+```
 
-Key methods: `init_wandb_run()`, `build_run_metadata()`, `save_result()`, `log_metrics()`, `log_predictions_table()`, `finalize()`.
+### Generate
 
----
+```bash
+curl -X POST http://localhost:8081/generate \
+    -H "Content-Type: application/json" \
+    -d '{
+        "description": "Agent A can eventually reach goal",
+        "model": "qwen-3b",
+        "few_shot": true,
+        "max_new_tokens": 128
+    }'
+```
 
-## Models Module
+## Request fields
 
-### `src.models.registry`
+- `description` (string, required): NL requirement
+- `model` (string, optional): model key from `configs/models.yaml`
+- `few_shot` (bool, optional): enable few‑shot prompt
+- `num_few_shot` (int, optional): override few‑shot count
+- `adapter` (string, optional): LoRA adapter name/path (HuggingFace only)
+- `max_new_tokens` (int, optional): generation limit
+- `return_raw` (bool, optional): include raw output
 
-Public functions (also re-exported by `src.models`):
+## Response fields
 
-- `load_model(model_config, for_training=False, load_adapter=None)`
-- `get_model_type(model_name: str)`
-- `clear_gpu_memory()`
-- `generate(model, tokenizer, prompt, max_new_tokens=256, return_usage=False)`
+- `formula`: generated ATL formula
+- `model_key`: resolved model key
+- `model_name`: resolved model name
+- `provider`: `huggingface` or `azure`
+- `latency_ms`: end‑to‑end latency
 
-### `src.models.utils`
-
-- `normalize_model_token(token, prefixes=(AZURE_PREFIX,))`
-- `resolve_model_key(model_arg, models, require_mapping_entries=False, match_key_lower=True)`
-
-### `src.models.few_shot`
-
-- `get_few_shot_examples(n=5, seed=None, exclude_inputs=None)`
-- `get_system_prompt(few_shot=False, num_examples=5, seed=42, exclude_inputs=None)`
-- `format_prompt(input_text, output_text=None, few_shot=False, num_examples=5, model_type=ModelType.QWEN, exclude_inputs=None, tokenizer=None)`
-
----
-
-## Evaluation Module
-
-### `src.evaluation.BaseEvaluator`
-
-Abstract base class with:
-
-- `evaluate(predictions, references)`
-- `evaluate_single(prediction, reference)`
-
-### `src.evaluation.ExactMatchEvaluator`
-
-Evaluates and normalizes ATL outputs.
-
-Key methods:
-
-- `evaluate(...)` (model-based or predictions-based)
-- `evaluate_predictions(predictions, references)`
-
-### `src.evaluation.DifficultyClassifier`
-
-Wraps `classify_difficulty()` and `process_dataset()`.
-
-### `src.evaluation.generate_agreement_report`
+For UI wiring, see [integrations/genvitamin.md](integrations/genvitamin.md).
 
 Generates Cohen’s κ, Fleiss’ κ, and Krippendorff’s α reports from evaluated datasets.
 

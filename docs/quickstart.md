@@ -1,84 +1,92 @@
 # Quick Start
 
-Get up and running with NL2ATL in a few minutes.
+This guide runs a minimal end‑to‑end workflow: generate predictions, evaluate them, and inspect outputs.
 
-## Prerequisites
+## Prerequisite
 
-Ensure you have completed the [Installation](installation.md) steps.
+Complete [installation.md](installation.md) first.
 
----
+## Step 1 — Run experiments (SLURM recommended)
 
-## 1. Run a Single Experiment
+For multi‑model/seed sweeps, use SLURM arrays. Benefits include parallel GPU usage, scheduler‑managed
+resources, and fault isolation.
+
+```bash
+nl2atl run-array --count
+nl2atl run-array --list-tasks
+```
+
+Then submit the array job using the helper script:
+
+```bash
+sbatch scripts/slurm/submit_array.sh
+```
+
+This runs one $(seed, model, condition)$ per array task and writes predictions to
+`outputs/model_predictions/`.
+
+## Step 2 — Local fallback (single node)
+
+Use this when SLURM is unavailable or for quick checks.
+
+### Run a single experiment
 
 ```bash
 nl2atl run-single --model qwen-3b --few_shot
 ```
 
-This runs the default dataset split and writes predictions to:
+Output:
 
-```
-outputs/model_predictions/<run_name>.json
-```
+- Predictions file in `outputs/model_predictions/<run_name>.json`
 
----
-
-## 2. Run All Experiments
+### Run a sweep of experiments
 
 ```bash
 nl2atl run-all --models qwen-3b --conditions baseline_zero_shot
 ```
 
-This iterates over the selected models and conditions from `configs/experiments.yaml`.
+This uses `configs/experiments.yaml` to expand model/condition combinations.
 
----
-
-## 3. Evaluate Predictions with LLM Judge
+## Step 3 — Evaluate with the LLM judge
 
 ```bash
 nl2atl llm-judge --datasets all
 ```
 
-Re-run existing evaluations with:
+To re‑evaluate existing outputs:
 
 ```bash
 nl2atl llm-judge --datasets all --overwrite
 ```
 
-Results are written under:
+Output:
 
-```
-outputs/LLM-evaluation/evaluated_datasets/<judge>/
-```
+- `outputs/LLM-evaluation/evaluated_datasets/<judge>/`
 
----
-
-## 4. Compute Judge Agreement
+## Step 4 — Compute judge agreement
 
 ```bash
 nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
 ```
 
-This produces `outputs/LLM-evaluation/agreement_report.json`.
+Output:
 
----
+- `outputs/LLM-evaluation/agreement_report.json`
 
-## 5. Compare Model Efficiency
+## Step 5 — Compare model efficiency
 
 ```bash
 nl2atl model-efficiency --predictions_dir outputs/model_predictions
 ```
 
-This produces:
+Outputs:
 
 - `outputs/LLM-evaluation/efficiency_report.json`
 - `outputs/LLM-evaluation/efficiency_report.ipynb`
 
-The report is useful because it summarizes accuracy–cost–latency
-trade-offs in a single, comparable view.
+These reports summarize accuracy–cost–latency trade‑offs.
 
----
-
-## 6. Explore the Dataset
+## Step 6 — Inspect the dataset
 
 ```python
 from src.infra.io import load_json
@@ -89,28 +97,22 @@ print(sample["input"])
 print(sample["output"])
 ```
 
----
-
-## 7. (Optional) Run the API Service
-
-Start the NL2ATL API (from the repo root so configs resolve):
+## Step 7 — Optional: run the API service
 
 ```bash
 uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ```
 
-If you start from another working directory:
+If running from another directory, set absolute config paths:
 
 ```bash
 NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
 NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
 ```
 
----
+## Next steps
 
-## Next Steps
-
-- [Usage Guide](usage.md) — Full CLI documentation
-- [Dataset](dataset.md) — Dataset structure and format
-- [Evaluation](evaluation.md) — Evaluation methods and metrics
-- [Configuration](configuration.md) — Customizing experiments
+- CLI details: [usage.md](usage.md)
+- Experiment configuration: [configuration.md](configuration.md)
+- Dataset schema: [dataset.md](dataset.md)
+- Evaluation methods: [evaluation.md](evaluation.md)

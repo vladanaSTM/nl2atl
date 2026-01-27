@@ -1,68 +1,21 @@
 # Dataset
 
-This document describes the NL2ATL dataset structure, content, and usage.
-
-## Table of Contents
-
-- [Overview](#overview)
-- [Difficulty Labels](#difficulty-labels)
-- [Data Format](#data-format)
-- [Examples](#examples)
-- [Using the Dataset](#using-the-dataset)
-
----
+This document describes the NL2ATL dataset structure, schema, and how to use it in experiments.
 
 ## Overview
 
-The dataset is stored in [data/dataset.json](../data/dataset.json) as a JSON list. Each item is a natural-language input paired with an ATL formula.
+The dataset is stored in [data/dataset.json](../data/dataset.json) as a JSON list. Each item contains a
+natural‑language requirement and its reference ATL formula.
 
-### Key Statistics
+Key properties:
 
-| Metric | Value |
-|--------|-------|
-| Total Samples | 298 |
-| Difficulty Labels | easy, hard |
-| Language | English |
-| Logic | ATL |
+- Language: English
+- Logic: ATL
+- Labels: `easy` or `hard` (present in the released dataset)
 
----
+## Schema
 
-## Difficulty Labels
-
-Difficulty is stored as `easy` or `hard`. The rule-based classifier in `src/evaluation/difficulty.py` can overwrite or recompute these labels and add a `difficulty_scores` field.
-
----
-
-## Data Format
-
-### File Structure
-
-```json
-[
-  {
-    "id": "ex01",
-    "input": "The user can guarantee that sooner or later the ticket will be printed.",
-    "output": "<<User>>F ticket_printed",
-    "difficulty": "easy"
-  }
-]
-```
-
-### Field Descriptions
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | string | Unique sample identifier |
-| `input` | string | Natural language requirement |
-| `output` | string | Reference ATL formula |
-| `difficulty` | string | Difficulty label (`easy` or `hard`) |
-| `difficulty_scores` | object | Optional per-sample score breakdown (after classification) |
-
----
-
-## Examples
-
-### Easy Example
+Each dataset item follows this structure:
 
 ```json
 {
@@ -73,7 +26,42 @@ Difficulty is stored as `easy` or `hard`. The rule-based classifier in `src/eval
 }
 ```
 
-### Hard Example
+Field meanings:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | Unique identifier |
+| `input` | string | Natural‑language requirement |
+| `output` | string | Reference ATL formula |
+| `difficulty` | string | `easy` or `hard` |
+| `difficulty_scores` | object | Optional score breakdown (only present if you run the classifier) |
+
+## Difficulty labels
+
+Difficulty labels are produced by the rule‑based classifier in
+[src/evaluation/difficulty.py](../src/evaluation/difficulty.py). You can recompute labels (and optionally
+add `difficulty_scores`) with:
+
+```bash
+nl2atl classify-difficulty --input data/dataset.json --verbose
+```
+
+See [difficulty_classification.md](difficulty_classification.md) for the scoring model.
+
+## Examples
+
+### Easy example
+
+```json
+{
+  "id": "ex01",
+  "input": "The user can guarantee that sooner or later the ticket will be printed.",
+  "output": "<<User>>F ticket_printed",
+  "difficulty": "easy"
+}
+```
+
+### Hard example
 
 ```json
 {
@@ -84,21 +72,19 @@ Difficulty is stored as `easy` or `hard`. The rule-based classifier in `src/eval
 }
 ```
 
----
+## Using the dataset
 
-## Using the Dataset
-
-### Loading in Python
+### Load from Python
 
 ```python
 from src.infra.io import load_json
 
 dataset = load_json("data/dataset.json")
 for sample in dataset:
-    print(sample["input"], sample["output"], sample["difficulty"])
+    print(sample["input"], sample["output"], sample.get("difficulty"))
 ```
 
-### Train/Val/Test Split
+### Split into train, validation, test
 
 ```python
 from pathlib import Path
@@ -113,3 +99,6 @@ manager = ExperimentDataManager(
 )
 train_aug, val, test, full = manager.prepare_data()
 ```
+
+  The split is stratified by `difficulty` when available. Augmentation uses simple paraphrasing and
+  returns training examples that only include `input` and `output` fields.

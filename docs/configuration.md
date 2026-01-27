@@ -1,30 +1,21 @@
-# Configuration Guide
+# Configuration guide
 
-NL2ATL uses YAML configuration files for experiments and models.
+NL2ATL is configured through two YAML files and an optional `.env` file for secrets. This guide explains
+the structure, defaults, and how to override values safely.
 
-## Table of Contents
-
-- [Configuration Files](#configuration-files)
-- [Experiment Configuration](#experiment-configuration)
-- [Model Configuration](#model-configuration)
-- [Environment Variables](#environment-variables)
-- [Validation](#validation)
-
----
-
-## Configuration Files
+## Files you edit
 
 | File | Purpose |
-|------|---------|
-| `configs/experiments.yaml` | Experiment settings, data, training, and conditions |
-| `configs/models.yaml` | Model definitions (HF and Azure) |
-| `.env` | Environment variables and secrets |
+|---|---|
+| `configs/experiments.yaml` | Data splits, training, and experiment conditions |
+| `configs/models.yaml` | Model registry for Hugging Face and Azure models |
+| `.env` | Secrets and API keys |
 
----
+## experiments.yaml
 
-## Experiment Configuration
+This file controls dataset splits, training defaults, and experimental conditions.
 
-### `configs/experiments.yaml`
+Example:
 
 ```yaml
 experiment:
@@ -69,19 +60,17 @@ wandb:
   entity: "nl2atl"
 ```
 
-### Notes
+Key behaviors:
 
-- If `experiment.seeds` is provided, it overrides `seed` and enables multi-seed runs.
-- `num_seeds` generates seeds as `[seed, seed+1, ...]` when `seeds` is empty.
-- Data splitting uses stratified sampling by `difficulty`.
+- If `experiment.seeds` is provided, it overrides `seed` and `num_seeds`.
+- If only `seed` and `num_seeds` are set, seeds are generated as `seed, seed+1, ...`.
+- Splits are stratified by `difficulty` when present in the dataset.
 
----
+## models.yaml
 
-## Model Configuration
+This file registers models and their training or inference settings.
 
-### `configs/models.yaml`
-
-Each model entry maps to the `ModelConfig` dataclass.
+Example:
 
 ```yaml
 models:
@@ -119,7 +108,7 @@ models:
     target_modules: []
 ```
 
-### Model Schema Reference
+### Model schema
 
 ```yaml
 models:
@@ -142,16 +131,14 @@ models:
     gpu_hour_usd: float?
 ```
 
-  Notes:
+Pricing notes:
 
-  - For Azure models, set `price_input_per_1k` and `price_output_per_1k` using the official Azure OpenAI pricing page.
-  - For local GPU runs (e.g., A100), set `gpu_hour_usd` to your estimated per‑GPU hourly cost; the efficiency report will derive per‑1k‑token costs.
+- For Azure models, set `price_input_per_1k` and `price_output_per_1k` using the official Azure pricing.
+- For local GPU runs, set `gpu_hour_usd` to estimate cost in the efficiency report.
 
----
+## Environment variables
 
-## Environment Variables
-
-Create a `.env` file (see `.env.example`):
+Create `.env` from `.env.example` and set only what you need:
 
 ```bash
 AZURE_API_KEY=...
@@ -166,7 +153,7 @@ WANDB_API_KEY=...
 
 ### API service variables
 
-These are only needed when you run the API server:
+Required only when using the API server:
 
 ```bash
 NL2ATL_DEFAULT_MODEL=...
@@ -174,9 +161,7 @@ NL2ATL_MODELS_CONFIG=configs/models.yaml
 NL2ATL_EXPERIMENTS_CONFIG=configs/experiments.yaml
 ```
 
-If you start the API from another working directory, use absolute paths for the config files.
-
----
+If you start the API from another directory, use absolute paths.
 
 ## Validation
 

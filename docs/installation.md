@@ -1,150 +1,106 @@
 # Installation
 
-This guide covers setting up NL2ATL for development and research use.
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Development Setup](#development-setup)
-- [Troubleshooting](#troubleshooting)
-
----
+This guide sets up NL2ATL for research use and development. It assumes a clean Python environment.
 
 ## Prerequisites
 
-- Python 3.10 or higher
+- Python 3.10+
 - Git
-- (Optional) Azure OpenAI access for Azure-hosted models
-- (Optional) Weights & Biases account for experiment tracking
+- Optional accounts:
+  - Azure OpenAI (for Azure‑hosted inference and judge models)
+  - Weights & Biases (for experiment tracking)
+  - Hugging Face token (for gated models)
 
----
-
-## Quick Start
-
-### 1. Clone the Repository
+## Step 1 — Clone the repository
 
 ```bash
-git clone https://github.com/[your-org]/nl2atl.git
+git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
 ```
 
-### 2. Create Virtual Environment
+## Step 2 — Create and activate a virtual environment
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows (PowerShell): .venv\Scripts\Activate.ps1
+source .venv/bin/activate
 ```
 
-### 3. Install Dependencies
+Windows PowerShell:
+
+```bash
+.venv\Scripts\Activate.ps1
+```
+
+## Step 3 — Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Configure Environment
+For development (enables the `nl2atl` CLI as an editable install):
 
-Create a `.env` file in the project root (copy from `.env.example`):
+```bash
+pip install -e .
+```
+
+## Step 4 — Configure environment variables
+
+Copy the example file:
 
 ```bash
 cp .env.example .env
 ```
 
-Required variables only if you use Azure models:
+Set only what you need. Common variables:
 
-```bash
-AZURE_API_KEY=your-api-key
-AZURE_INFER_ENDPOINT=https://your-endpoint.openai.azure.com/
-AZURE_INFER_MODEL=your-deployment-name
-```
+- Azure (only if you use Azure models):
+  - `AZURE_API_KEY`
+  - `AZURE_INFER_ENDPOINT`
+  - `AZURE_INFER_MODEL`
+- Optional:
+  - `HUGGINGFACE_TOKEN` (gated HF models)
+  - `WANDB_API_KEY` (experiment tracking)
+  - `NL2ATL_DEFAULT_MODEL` (default model key)
+  - `NL2ATL_MODELS_CONFIG`, `NL2ATL_EXPERIMENTS_CONFIG` (API server config paths)
 
-Optional variables:
+See [configuration.md](configuration.md) for the complete list and examples.
 
-```bash
-AZURE_API_VERSION=2024-08-01-preview
-AZURE_USE_CACHE=true
-AZURE_VERIFY_SSL=false
-HUGGINGFACE_TOKEN=your-hf-token
-WANDB_API_KEY=your-wandb-key
-NL2ATL_DEFAULT_MODEL=gpt-5.2
-NL2ATL_MODELS_CONFIG=configs/models.yaml
-NL2ATL_EXPERIMENTS_CONFIG=configs/experiments.yaml
-```
-
-### 5. Verify Installation
+## Step 5 — Verify the installation
 
 ```bash
 python nl2atl.py --help
 ```
 
-### 6. (Optional) Run the NL2ATL API Service
+You should see the consolidated CLI with commands like `run-all`, `run-single`, and `classify-difficulty`.
 
-If you want to integrate NL2ATL with external UIs (e.g., VITAMIN), run the API server:
+## Step 6 — Optional: run the NL2ATL API service
+
+Use this if you integrate NL2ATL into external UIs (e.g., genVITAMIN):
 
 ```bash
 uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ```
 
-If you start NL2ATL from another working directory, set absolute paths so configs resolve:
+If you run from a different working directory, set absolute config paths:
 
 ```bash
 NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
 NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
 ```
 
-Expected output (command list may vary by version):
-
-```
-usage: nl2atl [-h] {classify-difficulty,judge-agreement,llm-judge,run-all,run-single} ...
-
-NL2ATL consolidated CLI
-
-positional arguments:
-  command
-  args
-
-optional arguments:
-  -h, --help  show this help message and exit
-```
-
----
-
-## Configuration
-
-See [Configuration Guide](configuration.md) for detailed configuration options.
-
----
-
-## Development Setup
-
-NL2ATL uses the same `requirements.txt` for both development and research usage. For local development, install in editable mode:
-
-```bash
-pip install -e .
-```
-
-Run tests:
+## Tests
 
 ```bash
 pytest -q
 ```
 
----
-
 ## Troubleshooting
 
-### Common Issues
+| Issue | Fix |
+|------|-----|
+| `ModuleNotFoundError: No module named 'src'` | Run from repo root or set `PYTHONPATH=.` |
+| Azure auth errors | Check `.env` credentials and endpoint URL |
+| CUDA out of memory | Reduce batch size in `configs/experiments.yaml` or use 4‑bit loading |
+| Tokenizer load errors | Ensure `HUGGINGFACE_TOKEN` is set for gated models |
 
-| Issue | Solution |
-|-------|----------|
-| `ModuleNotFoundError: No module named 'src'` | Run from project root or set `PYTHONPATH=.` |
-| Azure authentication errors | Verify `.env` credentials and endpoint URL |
-| CUDA out of memory | Reduce batch size in `configs/experiments.yaml` or use 4-bit loading |
-| Tokenizer loading errors | Ensure `HUGGINGFACE_TOKEN` is set for gated models |
-
-### Getting Help
-
-- Open an issue on GitHub
-- Check existing issues for similar problems
-- See [Development Guide](development.md) for contributing
+If issues persist, see [development.md](development.md) for contribution and debugging guidance.
