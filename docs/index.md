@@ -35,6 +35,7 @@ Formal verification of Multi-Agent Systems (MAS) relies on logical formalisms ca
 | [Usage Guide](usage.md) | CLI commands and experiment workflows |
 | [Configuration](configuration.md) | Config file formats and options |
 | [Dataset](dataset.md) | Dataset structure and format |
+| [genVITAMIN Integration](integrations/genvitamin.md) | Wire NL2ATL into genVITAMIN GUI |
 
 ### Technical Reference
 

@@ -247,3 +247,98 @@ outputs/
   ]
 }
 ```
+
+---
+
+## API Service (UI Integration)
+
+NL2ATL exposes a lightweight FastAPI endpoint for NL→ATL generation.
+
+### Start the server
+
+Start from the repo root so configs resolve correctly:
+
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+```
+
+If you start NL2ATL from another working directory, set absolute paths:
+
+```bash
+NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
+```
+
+### Health check
+
+```bash
+curl http://localhost:8081/health
+```
+
+### Generate endpoint
+
+```bash
+curl -X POST http://localhost:8081/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Agent A can eventually reach goal",
+    "model": "gpt-5.2",
+    "few_shot": true,
+    "max_new_tokens": 128
+  }'
+```
+
+### Common API parameters
+
+- `model`: model key or name from configs/models.yaml (optional)
+- `few_shot`: enable few-shot prompting (default false)
+- `num_few_shot`: override number of few-shot examples
+- `adapter`: LoRA adapter name or path (HuggingFace only)
+- `max_new_tokens`: maximum generated tokens
+- `return_raw`: include raw model output in response
+
+### Example request
+
+```bash
+curl -X POST http://localhost:8081/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Agent A can eventually reach goal",
+    "model": "gpt-5.2",
+    "few_shot": true,
+    "adapter": "my-finetuned-adapter",
+    "max_new_tokens": 128
+  }'
+```
+
+### Response fields
+
+- `formula`: Generated ATL formula
+- `model_key`: Resolved model key from configs
+- `model_name`: Underlying model name
+- `provider`: `hf` or `azure`
+- `latency_ms`: End-to-end generation latency
+
+### Finetuned adapter option
+
+If you have a LoRA adapter saved under the NL2ATL models directory (default `./models`), you can pass it via the API:
+
+- `adapter`: adapter name or path. If relative, it is resolved against the models directory from `configs/experiments.yaml` (`models_dir`).
+
+Example (adapter under `./models/my-adapter`):
+
+```bash
+curl -X POST http://localhost:8081/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "Agent A can eventually reach goal",
+    "model": "qwen-7b",
+    "few_shot": true,
+    "adapter": "my-adapter",
+    "max_new_tokens": 128
+  }'
+```
+
+Adapters are supported only for HuggingFace models.
+
+For genVITAMIN wiring instructions, see [docs/integrations/genvitamin.md](integrations/genvitamin.md).

@@ -91,6 +91,23 @@ print(sample["output"])
 
 ---
 
+## 7. (Optional) Run the API Service
+
+Start the NL2ATL API (from the repo root so configs resolve):
+
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+```
+
+If you start from another working directory:
+
+```bash
+NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
+```
+
+---
+
 ## Next Steps
 
 - [Usage Guide](usage.md) — Full CLI documentation
