@@ -34,6 +34,7 @@ nl2atl --help
 | `judge-agreement` | Inter-rater agreement | Comparing multiple judges or humans |
 | `model-efficiency` | Cost-latency-accuracy analysis | Model selection and comparison |
 | `classify-difficulty` | Dataset difficulty labeling | Understanding dataset complexity |
+| `slurm` | SLURM helper commands | Submit jobs and check queue status |
 
 ### Global Options
 
@@ -62,12 +63,9 @@ nl2atl run-single --model MODEL_KEY [OPTIONS]
 | `--model` | string | required | Model key from `models.yaml` |
 | `--finetuned` | flag | false | Use fine-tuned adapter |
 | `--few_shot` | flag | false | Enable few-shot prompting |
-| `--num_few_shot` | int | 5 | Number of few-shot examples |
-| `--seed` | int | 42 | Random seed |
-| `--adapter` | string | - | Specific adapter path |
-| `--max_new_tokens` | int | 128 | Max generation length |
-| `--batch_size` | int | 8 | Inference batch size |
-| `--overwrite` | flag | false | Overwrite existing output |
+| `--seed` | int | from config | Override the seed from `configs/experiments.yaml` |
+| `--models_config` | path | configs/models.yaml | Models configuration file |
+| `--experiments_config` | path | configs/experiments.yaml | Experiments configuration file |
 
 #### Examples
 
@@ -81,11 +79,6 @@ nl2atl run-single --model qwen-3b
 nl2atl run-single --model qwen-3b --few_shot
 ```
 
-**Custom few-shot count:**
-```bash
-nl2atl run-single --model qwen-3b --few_shot --num_few_shot 10
-```
-
 **Fine-tuned model:**
 ```bash
 nl2atl run-single --model qwen-3b --finetuned
@@ -96,26 +89,16 @@ nl2atl run-single --model qwen-3b --finetuned
 nl2atl run-single --model qwen-3b --finetuned --few_shot
 ```
 
-**Custom adapter path:**
-```bash
-nl2atl run-single --model qwen-3b --adapter models/qwen-3b_custom/final
-```
-
 **Specific seed for reproducibility:**
 ```bash
 nl2atl run-single --model qwen-3b --few_shot --seed 123
-```
-
-**Force re-run existing experiment:**
-```bash
-nl2atl run-single --model qwen-3b --few_shot --overwrite
 ```
 
 #### Output
 
 Predictions saved to:
 ```
-outputs/model_predictions/<model>_<condition>_seed<seed>.json
+outputs/model_predictions/<model>_<condition>.json
 ```
 
 Example output:
@@ -155,11 +138,11 @@ nl2atl run-all [OPTIONS]
 |--------|------|---------|-------------|
 | `--models` | list | all | Model keys to test (space-separated) |
 | `--conditions` | list | all | Condition names (space-separated) |
-| `--seeds` | list | [42] | Seeds to use |
-| `--model_provider` | string | all | Filter by provider (`hf`, `azure`, `all`) |
+| `--seed` | int | - | Override a single seed from config |
+| `--seeds` | list | from config | Override seeds with an explicit list |
+| `--model_provider` | string | hf | Filter by provider (`hf`, `azure`, `all`) |
 | `--overwrite` | flag | false | Overwrite existing outputs |
 | `--force` | flag | false | Alias for `--overwrite` |
-| `--parallel` | int | 1 | Number of parallel workers |
 
 #### Examples
 
@@ -196,11 +179,6 @@ nl2atl run-all --model_provider azure
 **Re-run everything:**
 ```bash
 nl2atl run-all --overwrite
-```
-
-**Parallel execution (local):**
-```bash
-nl2atl run-all --models qwen-3b llama-8b --parallel 2
 ```
 
 #### Output
@@ -253,10 +231,16 @@ This is typically called by SLURM, not manually.
 
 #### SLURM Submission
 
-Use the provided submission script:
+Use the CLI helper (recommended):
 
 ```bash
-sbatch scripts/slurm/submit_array.sh
+nl2atl slurm array --models qwen-3b --conditions baseline_zero_shot
+```
+
+Or use the legacy submission script:
+
+```bash
+sbatch slurm_scripts/submit_array.sh
 ```
 
 **Edit `submit_array.sh` to customize:**
@@ -315,15 +299,18 @@ nl2atl llm-judge --datasets DATASETS [OPTIONS]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--datasets` | list | required | Prediction files or `all` |
-| `--judge_model` | string | gpt-5.2 | Judge model key |
-| `--judge_models` | list | - | Multiple judges (overrides `--judge_model`) |
+| `--datasets` | list | all | Prediction files or `all` |
+| `--judge_models` | list | from config | Judge model keys (aliases: `--model`, `--models`, `--judge_model`) |
+| `--models_config` | path | configs/models.yaml | Models configuration file |
+| `--hf_min_params_b` | float | - | Only include HF judges with params_b >= value |
+| `--hf_only` | flag | false | Restrict judges to Hugging Face models |
 | `--predictions_dir` | path | outputs/model_predictions | Predictions directory |
 | `--output_dir` | path | outputs/LLM-evaluation | Output directory |
 | `--overwrite` | flag | false | Re-evaluate existing files |
 | `--force` | flag | false | Alias for `--overwrite` |
 | `--no_llm` | flag | false | Skip LLM, use exact match only |
-| `--batch_size` | int | 10 | Batch size for LLM calls |
+
+**Default judge selection**: If you don’t pass `--judge_models`, NL2ATL uses all Azure models defined in `configs/models.yaml`. If no models config is available, it falls back to `gpt-5.2`.
 
 #### Examples
 
@@ -342,14 +329,14 @@ nl2atl llm-judge --datasets qwen-3b_baseline_few_shot_seed42.json
 nl2atl llm-judge --datasets qwen-3b_baseline_few_shot.json llama-8b_baseline_zero_shot.json
 ```
 
-**Use different judge:**
+**Use a specific judge:**
 ```bash
-nl2atl llm-judge --datasets all --judge_model gpt-4
+nl2atl llm-judge --datasets all --judge_models gpt-5.2
 ```
 
 **Multiple judges:**
 ```bash
-nl2atl llm-judge --datasets all --judge_models gpt-4 gpt-5.2 claude-3.5
+nl2atl llm-judge --datasets all --judge_models gpt-5.2 gpt-4.1
 ```
 
 **Re-evaluate existing:**
@@ -370,8 +357,8 @@ outputs/LLM-evaluation/
 ├── evaluated_datasets/
 │   ├── gpt-5.2/
 │   │   └── qwen-3b_baseline_few_shot__judge-gpt-5.2.json
-│   └── gpt-4/
-│       └── qwen-3b_baseline_few_shot__judge-gpt-4.json
+│   └── gpt-4.1/
+│       └── qwen-3b_baseline_few_shot__judge-gpt-4.1.json
 └── summary__judge-gpt-5.2.json
 ```
 
@@ -419,13 +406,12 @@ nl2atl judge-agreement --eval_dir EVAL_DIR [OPTIONS]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--eval_dir` | path | required | Directory with evaluated datasets |
-| `--output_path` | path | outputs/LLM-evaluation/agreement_report.json | Output file |
+| `--eval_dir` | path | outputs/LLM-evaluation/evaluated_datasets | Directory with evaluated datasets |
+| `--output` | path | eval_dir/../agreement_report.json | Output file |
 | `--judges` | list | all | Specific judge folders to include |
 | `--human_annotations` | path | - | Human annotations file |
-| `--include_disagreements` | flag | true | Include disagreement examples |
 | `--no_disagreements` | flag | false | Exclude disagreement examples |
-| `--max_disagreements` | int | 20 | Max disagreements to include |
+| `--max_disagreements` | int | 50 | Max disagreements to include |
 
 #### Examples
 
@@ -438,7 +424,7 @@ nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
 ```bash
 nl2atl judge-agreement \
   --eval_dir outputs/LLM-evaluation/evaluated_datasets \
-  --judges gpt-4 gpt-5.2
+  --judges gpt-4.1 gpt-5.2
 ```
 
 **Include human annotations:**
@@ -473,16 +459,16 @@ Agreement report with:
 Example output:
 ```json
 {
-  "judges": ["gpt-4", "gpt-5.2", "human"],
+  "judges": ["gpt-4.1", "gpt-5.2", "human"],
   "total_items": 90,
   "pairwise_agreements": {
-    "gpt-4 vs gpt-5.2": {
+    "gpt-4.1 vs gpt-5.2": {
       "cohens_kappa": 0.856,
       "agreement_rate": 0.911,
       "n_agreements": 82,
       "n_disagreements": 8
     },
-    "gpt-4 vs human": {
+    "gpt-4.1 vs human": {
       "cohens_kappa": 0.792,
       "agreement_rate": 0.878
     }
@@ -496,7 +482,7 @@ Example output:
       "gold": "...",
       "prediction": "...",
       "judges": {
-        "gpt-4": "yes",
+        "gpt-4.1": "yes",
         "gpt-5.2": "no",
         "human": "yes"
       }
@@ -523,15 +509,18 @@ nl2atl model-efficiency --predictions_dir PRED_DIR [OPTIONS]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--predictions_dir` | path | required | Predictions directory |
-| `--output_path` | path | outputs/LLM-evaluation/efficiency_report.json | Output file |
+| `--datasets` | list | all | Prediction files to analyze |
+| `--predictions_dir` | path | outputs/model_predictions | Predictions directory |
+| `--llm_eval_dir` | path | outputs/LLM-evaluation | LLM evaluation directory |
 | `--judge_summary` | path | - | Judge summary file (for LLM accuracy) |
 | `--judge_model` | string | - | Auto-find judge summary by model |
-| `--weight_accuracy` | float | 0.4 | Accuracy weight in composite score |
-| `--weight_cost` | float | 0.3 | Cost weight in composite score |
-| `--weight_latency` | float | 0.3 | Latency weight in composite score |
-| `--top_k` | int | 10 | Size of ranking lists |
+| `--output` | path | <llm_eval_dir>/efficiency_report.json | Output file |
+| `--notebook` | path | <llm_eval_dir>/efficiency_report.ipynb | Notebook output path |
 | `--no_notebook` | flag | false | Skip notebook generation |
+| `--top_k` | int | 5 | Size of ranking lists |
+| `--weight_accuracy` | float | 0.5 | Accuracy weight in composite score |
+| `--weight_cost` | float | 0.25 | Cost weight in composite score |
+| `--weight_latency` | float | 0.25 | Latency weight in composite score |
 
 #### Examples
 
@@ -778,10 +767,10 @@ outputs/
     │   ├── gpt-5.2/
     │   │   ├── qwen-3b_baseline_zero_shot__judge-gpt-5.2.json
     │   │   └── ...
-    │   └── gpt-4/
+    │   └── gpt-4.1/
     │       └── ...
     ├── summary__judge-gpt-5.2.json
-    ├── summary__judge-gpt-4.json
+    ├── summary__judge-gpt-4.1.json
     ├── efficiency_report.json
     ├── efficiency_report.ipynb
     └── agreement_report.json
@@ -819,24 +808,24 @@ nl2atl run-single --model qwen-3b  # not "qwen3b" or "Qwen-3B"
    ```yaml
    load_in_4bit: true
    ```
-2. Reduce batch size:
-   ```bash
-   nl2atl run-single --model qwen-3b --batch_size 4
-   ```
+2. Reduce batch size in configs:
+  - `configs/experiments.yaml` → `training.batch_size`
+  - Or per-model overrides in `configs/models.yaml`
 3. Use smaller model or Azure API
 
-#### "Predictions file already exists"
+#### "Predictions file already exists" (run-all / run-array)
 
 **Problem**: Output file exists, won't overwrite
 
 **Solution**:
 ```bash
 # Force overwrite
-nl2atl run-single --model qwen-3b --overwrite
+nl2atl run-all --models qwen-3b --overwrite
 
 # Or delete manually
 rm outputs/model_predictions/qwen-3b_baseline_zero_shot_seed42.json
 ```
+**Note**: `run-single` overwrites its output file; rename the JSON if you want to keep multiple versions.
 
 #### "Azure authentication failed"
 
@@ -920,7 +909,7 @@ python -m src.cli.run_single_experiment --model qwen-3b --few_shot
 python -m src.cli.run_all_experiments --models qwen-3b
 
 # LLM judge
-python -m src.cli.llm_judge --datasets all
+python -m src.cli.run_llm_judge --datasets all
 ```
 
 ---

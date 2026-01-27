@@ -32,19 +32,12 @@ First, confirm the CLI is properly installed:
 nl2atl --help
 ```
 
-Expected output:
+Expected output (abbreviated):
 ```
-Usage: nl2atl [OPTIONS] COMMAND [ARGS]...
+usage: nl2atl [-h] {classify-difficulty,judge-agreement,llm-judge,model-efficiency,run-all,run-array,run-single,slurm} ...
+```
 
-Commands:
-  run-all              Run multiple experiments
-  run-single           Run a single experiment
-  run-array            Run SLURM array task
-  llm-judge            Evaluate with LLM judge
-  judge-agreement      Compute inter-rater agreement
-  model-efficiency     Generate efficiency report
-  classify-difficulty  Label dataset difficulty
-```
+You should see the listed commands, including `run-all`, `run-single`, `run-array`, `llm-judge`, `judge-agreement`, `model-efficiency`, `classify-difficulty`, and `slurm`.
 
 If you see this, you're ready to proceed! 🎉
 
@@ -88,7 +81,7 @@ Difficulty: easy
 - **Output**: Ground-truth ATL formula
 - **Difficulty**: Classification based on complexity
 
-The dataset has 300 examples split 70/30 for train/test with stratified sampling by difficulty.
+The dataset has 300 examples. With the current `configs/experiments.yaml` defaults (`test_size: 0.30`, `val_size: 0.6667`), the split is 70% train, 20% validation, and 10% test (stratified by difficulty).
 
 ---
 
@@ -112,21 +105,17 @@ nl2atl run-single --model qwen-3b --few_shot
 **Expected output:**
 ```
 Loading model: Qwen/Qwen2.5-3B-Instruct
-Preparing dataset...
-  Train: 210 examples
-  Validation: 0 examples (validation disabled)
-  Test: 90 examples
+Data loaded: Train=2100, Val=60, Test=30
 
 Running inference on test set...
-Progress: 90/90 [100%] ⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿ 2:15
+  Processed 10/30
+  Processed 20/30
+  Processed 30/30
 
-Results:
-  Total samples: 90
-  Successful: 90
-  Failed: 0
-  Exact match accuracy: 0.82
-  Mean latency: 520.1 ms
-  P95 latency: 910.5 ms
+Results for qwen-3b_baseline_few_shot:
+  Exact Match: 82.0%
+  Mean Latency: 520.1ms
+  Total Duration: 135.0s
 
 Predictions saved to: outputs/model_predictions/qwen-3b_baseline_few_shot.json
 ```
@@ -178,9 +167,12 @@ Latency: 412.7 ms
   "metadata": {
     "run_id": "qwen-3b_baseline_few_shot",
     "model": "Qwen/Qwen2.5-3B-Instruct",
-    "total_samples": 90,
-    "exact_match_accuracy": 0.82,
-    "latency_mean_ms": 520.1
+    "total_samples": 30,
+    "latency_mean_ms": 520.1,
+    "metrics": {
+      "n_examples": 30,
+      "exact_match": 0.82
+    }
   },
   "predictions": [
     {
@@ -213,16 +205,16 @@ nl2atl llm-judge --datasets qwen-3b_baseline_few_shot.json
 3. LLM responds with `{"correct": "yes"|"no", "reasoning": "..."}`
 4. Computes LLM-judge accuracy and saves detailed results
 
-**Expected output:**
+**Expected output (numbers will vary):**
 ```
 Evaluating qwen-3b_baseline_few_shot.json with judge gpt-5.2
-Progress: 90/90 [100%] ⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿ 1:30
+Progress: 30/30 [100%] ⠿⠿⠿⠿⠿⠿⠿⠿⠿⠿ 0:30
 
 Results:
-  Exact matches (skipped LLM): 74/90 (82.2%)
-  LLM evaluated: 16/90 (17.8%)
-  LLM correct: 8/16 (50.0%)
-  Total correct: 82/90 (91.1%)
+  Exact matches (skipped LLM): 24/30 (80.0%)
+  LLM evaluated: 6/30 (20.0%)
+  LLM correct: 3/6 (50.0%)
+  Total correct: 27/30 (90.0%)
 
 Saved to: outputs/LLM-evaluation/evaluated_datasets/gpt-5.2/
          qwen-3b_baseline_few_shot__judge-gpt-5.2.json
@@ -273,7 +265,7 @@ nl2atl model-efficiency --predictions_dir outputs/model_predictions
 {
   "overall_stats": {
     "total_runs": 2,
-    "total_formulas": 180,
+    "total_formulas": 60,
     "models_tested": ["qwen-3b"]
   },
   "rankings": {
@@ -400,7 +392,7 @@ Congratulations! You've:
 
 ### For Understanding ATL
 
-1. **Learn ATL syntax** → [ATL Primer](atl-primer.md)
+1. **Learn ATL syntax** → [ATL Primer](atl_primer.md)
 2. **Explore dataset** → [Dataset Guide](dataset.md)
 3. **Understand difficulty** → [Difficulty Classification](difficulty_classification.md)
 

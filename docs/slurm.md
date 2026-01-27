@@ -48,7 +48,7 @@ Use `--dry-run` to print the generated script without submitting.
 
 ### 3) (Optional) Use the legacy scripts
 
-If you prefer static scripts, you can still use [scripts/slurm/submit_array.sh](../scripts/slurm/submit_array.sh)
+If you prefer static scripts, you can still use [slurm_scripts/submit_array.sh](../slurm_scripts/submit_array.sh)
 and adapt it to your cluster.
 
 ### 4) Monitor jobs
