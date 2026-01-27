@@ -15,6 +15,7 @@
 +
 +import json
 +import logging
++import re
 +import urllib.error
 +import urllib.request
 +from typing import Optional
@@ -34,10 +35,12 @@
 +    """Call NL2ATL API if configured, otherwise return None."""
 +    base_url = settings.NL2ATL_URL
 +    if not base_url:
++        logger.info("NL2ATL_URL not set; skipping NL2ATL")
 +        return None
 +
 +    # NL2ATL currently generates ATL only
 +    if logic != "ATL":
++        logger.info(f"NL2ATL supports ATL only; got {logic}")
 +        return None
 +
 +    payload = {
@@ -68,6 +71,11 @@
 +    except (urllib.error.URLError, json.JSONDecodeError) as exc:
 +        logger.warning(f"NL2ATL call failed: {exc}")
 +        return None
++
++
++def _normalize_coalition_syntax(formula: str) -> str:
++    """Normalize NL2ATL coalition syntax for genVITAMIN."""
++    return re.sub(r"<<\\s*([^>]+?)\\s*>>", r"<\\1>", formula)
 @@
  async def generate_formula(request: GenerateFormulaRequest):
 @@
@@ -90,4 +98,32 @@
 +            formula = await ai_service.generate_formula(
 +                description=request.description, logic=request.logic_type.value
 +            )
+@@
+-        logger.info(f"Returning generated formula: {formula_part[:50]}...")
+-        return GenerateFormulaResponse(
++        formula_part = _normalize_coalition_syntax(formula_part)
++
++        logger.info(f"Returning generated formula: {formula_part[:50]}...")
++        return GenerateFormulaResponse(
+*** End Patch
+
+*** Begin Patch
+*** Update File: genVITAMIN/api/core/config.py
+@@
+	# Response Streaming Configuration
+	STREAM_WORD_DELAY: float = (
+	    0.05  # Delay between words in fallback streaming (seconds)
+	)
+	STREAM_ERROR_DELAY: float = 0.02  # Delay for error messages (seconds)
+
++    # NL2ATL Integration (optional)
++    NL2ATL_URL: Optional[str] = None
++    NL2ATL_MODEL: str = "qwen-3b"
++    NL2ATL_FEW_SHOT: bool = True
++    NL2ATL_NUM_FEW_SHOT: Optional[int] = None
++    NL2ATL_ADAPTER: Optional[str] = "qwen-3b_finetuned_few_shot/final"
++    NL2ATL_MAX_NEW_TOKENS: int = 128
++    NL2ATL_TIMEOUT: int = 300
+
+	# ChromaDB Configuration
 *** End Patch

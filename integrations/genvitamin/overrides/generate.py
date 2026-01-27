@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from typing import Optional
@@ -51,10 +52,12 @@ def _call_nl2atl(description: str, logic: str) -> Optional[str]:
     """Call NL2ATL API if configured, otherwise return None."""
     base_url = settings.NL2ATL_URL
     if not base_url:
+        logger.info("NL2ATL_URL not set; skipping NL2ATL")
         return None
 
     # NL2ATL currently generates ATL only
     if logic != "ATL":
+        logger.info(f"NL2ATL supports ATL only; got {logic}")
         return None
 
     payload = {
@@ -85,6 +88,11 @@ def _call_nl2atl(description: str, logic: str) -> Optional[str]:
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         logger.warning(f"NL2ATL call failed: {exc}")
         return None
+
+
+def _normalize_coalition_syntax(formula: str) -> str:
+    """Normalize NL2ATL coalition syntax for genVITAMIN."""
+    return re.sub(r"<<\s*([^>]+?)\s*>>", r"<\1>", formula)
 
 
 # ============================================================================
@@ -127,6 +135,8 @@ async def generate_formula(request: GenerateFormulaRequest):
         else:
             formula_part = formula.strip()
             explanation = f"Generated {request.logic_type.value} formula based on: {request.description}"
+
+        formula_part = _normalize_coalition_syntax(formula_part)
 
         logger.info(f"Returning generated formula: {formula_part[:50]}...")
         return GenerateFormulaResponse(
