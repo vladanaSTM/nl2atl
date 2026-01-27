@@ -62,6 +62,9 @@ cp .env.example .env
 | `AZURE_VERIFY_SSL` | No | SSL verification (default: false) |
 | `HUGGINGFACE_TOKEN` | No | Token for gated/private HF models |
 | `WANDB_API_KEY` | No | W&B API key for experiment logging |
+| `NL2ATL_DEFAULT_MODEL` | No | Default model key/name for the API service |
+| `NL2ATL_MODELS_CONFIG` | No | Models config path (API service) |
+| `NL2ATL_EXPERIMENTS_CONFIG` | No | Experiments config path (API service) |
 
 ## Usage
 
@@ -112,6 +115,69 @@ python -m src.cli.run_judge_agreement
 python -m src.cli.run_model_efficiency
 python -m src.cli.classify_difficulty
 ```
+
+### API Service (for UI integration)
+
+Run the lightweight FastAPI server for NL→ATL generation:
+
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+```
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8081/generate \
+	-H "Content-Type: application/json" \
+	-d '{
+		"description": "Agent A can eventually reach goal",
+		"model": "gpt-5.2",
+		"few_shot": true,
+		"max_new_tokens": 128
+	}'
+```
+
+For genVITAMIN GUI wiring instructions, see [docs/integrations/genvitamin.md](docs/integrations/genvitamin.md).
+
+### genVITAMIN Integration (one-click patch)
+
+The integration is designed so genVITAMIN users only apply a single backend patch and set an env var.
+**Only one file in genVITAMIN is modified**: `api/routes/ai/generate.py` (a timestamped backup is created).
+
+Steps (Windows/Linux/macOS):
+
+1) Clone genVITAMIN next to this repo.
+2) Start NL2ATL API (from repo root so configs resolve):
+
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+```
+
+If you start NL2ATL from another working directory, set:
+
+```bash
+NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
+```
+
+3) Apply the patch from this repo:
+
+```bash
+python integrations/genvitamin/apply_genvitamin_patch.py \
+	--genvitamin-path "/path/to/genVITAMIN"
+```
+
+4) Set env in genVITAMIN backend (persisted in genVITAMIN/api/.env or shell):
+
+```bash
+NL2ATL_URL=http://localhost:8081
+```
+
+5) Start genVITAMIN backend and frontend as usual.
+
+Validation: from the genVITAMIN UI, choose logic `ATL` and generate a formula. The backend log should include:
+“Generated formula using NL2ATL”. If `NL2ATL_URL` is not set or logic is not `ATL`, genVITAMIN falls back to its
+original generator.
 
 ## Outputs
 

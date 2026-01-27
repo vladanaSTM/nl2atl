@@ -164,6 +164,18 @@ HUGGINGFACE_TOKEN=...
 WANDB_API_KEY=...
 ```
 
+### API service variables
+
+These are only needed when you run the API server:
+
+```bash
+NL2ATL_DEFAULT_MODEL=...
+NL2ATL_MODELS_CONFIG=configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=configs/experiments.yaml
+```
+
+If you start the API from another working directory, use absolute paths for the config files.
+
 ---
 
 ## Validation

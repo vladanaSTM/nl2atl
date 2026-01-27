@@ -34,7 +34,7 @@ cd nl2atl
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+source .venv/bin/activate  # On Windows (PowerShell): .venv\Scripts\Activate.ps1
 ```
 
 ### 3. Install Dependencies
@@ -67,12 +67,30 @@ AZURE_USE_CACHE=true
 AZURE_VERIFY_SSL=false
 HUGGINGFACE_TOKEN=your-hf-token
 WANDB_API_KEY=your-wandb-key
+NL2ATL_DEFAULT_MODEL=gpt-5.2
+NL2ATL_MODELS_CONFIG=configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=configs/experiments.yaml
 ```
 
 ### 5. Verify Installation
 
 ```bash
 python nl2atl.py --help
+```
+
+### 6. (Optional) Run the NL2ATL API Service
+
+If you want to integrate NL2ATL with external UIs (e.g., VITAMIN), run the API server:
+
+```bash
+uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+```
+
+If you start NL2ATL from another working directory, set absolute paths so configs resolve:
+
+```bash
+NL2ATL_MODELS_CONFIG=/abs/path/to/nl2atl/configs/models.yaml
+NL2ATL_EXPERIMENTS_CONFIG=/abs/path/to/nl2atl/configs/experiments.yaml
 ```
 
 Expected output (command list may vary by version):
