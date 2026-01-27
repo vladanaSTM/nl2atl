@@ -36,6 +36,39 @@ nl2atl llm-judge --datasets all
 nl2atl model-efficiency --predictions_dir outputs/model_predictions
 ```
 
+---
+
+## 📦 Accessing Large Output Files (Git LFS)
+
+Some files in the `outputs/` directory (such as model predictions and evaluation results) are tracked using [Git Large File Storage (LFS)](https://git-lfs.github.com/).
+
+**To clone and use these files:**
+
+1. Install Git LFS:
+  ```bash
+  # On Ubuntu/Debian
+  sudo apt-get install git-lfs
+  # Or use Homebrew (macOS)
+  brew install git-lfs
+  ```
+2. Initialize Git LFS (once per machine):
+  ```bash
+  git lfs install
+  ```
+3. Clone the repository as usual:
+  ```bash
+  git clone https://github.com/vladanaSTM/nl2atl.git
+  cd nl2atl
+  ```
+4. Pull LFS files (if needed):
+  ```bash
+  git lfs pull
+  ```
+
+If you do not install Git LFS, you will only see small pointer files instead of the actual data in `outputs/`.
+
+For more details, see: https://git-lfs.github.com/
+
 ## Quick Start
 
 ### Installation
@@ -516,15 +549,14 @@ If you use NL2ATL in your research, please cite:
 
 ## License
 
-NL2ATL is released under the MIT License. See [LICENSE](LICENSE) for details.
+NL2ATL is released under the [MIT License](https://opensource.org/licenses/MIT). See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
 This research was conducted at:
-- **University of Naples Federico II**
 - **Telecom Paris**
-
-Special thanks to the contributors and the broader formal methods and LLM communities.
+- **STMicroelectronics Grenoble**
+- **University of Naples Federico II**
 
 ## Contact & Support
 
