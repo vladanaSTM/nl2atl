@@ -62,6 +62,8 @@ def resolve_judge_models(
     models_config_path: Path,
     judge_models: Optional[list],
     judge_model: Optional[str],
+    hf_min_params_b: Optional[float],
+    hf_only: bool,
 ) -> list:
     models = load_models_config(models_config_path)
 
@@ -121,7 +123,15 @@ def resolve_judge_models(
                 selected_keys.append(key)
                 seen.add(key)
     else:
-        selected_keys = azure_keys()
+        if hf_only or hf_min_params_b is not None:
+            selected_keys = [
+                key
+                for key, data in models.items()
+                if isinstance(data, dict)
+                and str(data.get("provider", "huggingface")).lower() == "huggingface"
+            ]
+        else:
+            selected_keys = azure_keys()
 
     resolved = []
     for key in selected_keys:
@@ -129,6 +139,26 @@ def resolve_judge_models(
         if not isinstance(data, dict):
             continue
         resolved.append((key, ModelConfig(**data)))
+
+    if hf_min_params_b is not None:
+        filtered = []
+        for key, model_cfg in resolved:
+            if str(model_cfg.provider).lower() != "huggingface":
+                if hf_only:
+                    continue
+                filtered.append((key, model_cfg))
+                continue
+            params_b = model_cfg.params_b or 0
+            if params_b >= hf_min_params_b:
+                filtered.append((key, model_cfg))
+        resolved = filtered
+
+    if hf_only:
+        resolved = [
+            (key, model_cfg)
+            for key, model_cfg in resolved
+            if str(model_cfg.provider).lower() == "huggingface"
+        ]
 
     return resolved
 
@@ -204,6 +234,17 @@ def main():
         help="Models config file (default: configs/models.yaml)",
     )
     parser.add_argument(
+        "--hf_min_params_b",
+        type=float,
+        default=None,
+        help="Only include Hugging Face judge models with params_b >= this value.",
+    )
+    parser.add_argument(
+        "--hf_only",
+        action="store_true",
+        help="Restrict judges to Hugging Face models only.",
+    )
+    parser.add_argument(
         "--predictions_dir",
         default="outputs/model_predictions",
         help="Directory with prediction JSON files",
@@ -236,7 +277,11 @@ def main():
         raise ValueError("No prediction files found to evaluate.")
 
     judge_entries = resolve_judge_models(
-        Path(args.models_config), args.judge_models, None
+        Path(args.models_config),
+        args.judge_models,
+        None,
+        args.hf_min_params_b,
+        args.hf_only,
     )
     if not judge_entries:
         raise ValueError("No judge models resolved from config.")

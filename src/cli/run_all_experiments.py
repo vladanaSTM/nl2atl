@@ -61,6 +61,19 @@ def main():
         help="Conditions to test (default: all)",
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the experiment seed (single value).",
+    )
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Override experiment seeds with an explicit list.",
+    )
+    parser.add_argument(
         "--model_provider",
         choices=["hf", "azure", "all"],
         default="hf",
@@ -79,10 +92,20 @@ def main():
     # Load config
     config = Config.from_yaml(args.models_config, args.experiments_config)
 
-    seeds = config.resolve_seeds()
+    if args.seed is not None and args.seeds:
+        raise ValueError("Use either --seed or --seeds, not both.")
+
+    if args.seed is not None:
+        seeds = [args.seed]
+    elif args.seeds:
+        seeds = list(args.seeds)
+    else:
+        seeds = config.resolve_seeds()
     all_results = []
 
     if len(seeds) == 1:
+        config.seed = seeds[0]
+        config.seeds = list(seeds)
         runner = ExperimentRunner(config)
         runner.run_all_experiments(
             models=args.models,

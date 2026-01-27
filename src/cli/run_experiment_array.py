@@ -111,6 +111,19 @@ def main() -> None:
     )
     parser.add_argument("--models_config", default="configs/models.yaml")
     parser.add_argument("--experiments_config", default="configs/experiments.yaml")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the experiment seed (single value).",
+    )
+    parser.add_argument(
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
+        help="Override experiment seeds with an explicit list.",
+    )
     parser.add_argument("--task-id", type=int, default=None)
     parser.add_argument(
         "--list-tasks",
@@ -130,7 +143,16 @@ def main() -> None:
     args = parser.parse_args()
 
     config = Config.from_yaml(args.models_config, args.experiments_config)
-    seeds = config.resolve_seeds()
+
+    if args.seed is not None and args.seeds:
+        raise ValueError("Use either --seed or --seeds, not both.")
+
+    if args.seed is not None:
+        seeds = [args.seed]
+    elif args.seeds:
+        seeds = list(args.seeds)
+    else:
+        seeds = config.resolve_seeds()
     tasks = build_tasks(
         config, seeds, args.models, args.conditions, args.model_provider
     )
