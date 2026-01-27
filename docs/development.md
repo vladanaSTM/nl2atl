@@ -1,4 +1,45 @@
-# Development Guide
+# Development
+
+This guide covers local development and extension points.
+
+## Setup
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+```
+
+## Run tests
+
+```bash
+pytest -q
+```
+
+## Code map
+
+- `src/cli/` — CLI entry points
+- `src/experiment/` — experiment orchestration
+- `src/models/` — model registry and prompting
+- `src/evaluation/` — exact match, LLM judge, agreement, efficiency
+- `src/infra/` — I/O and Azure utilities
+
+## Add a new model
+
+1) Add a model entry in [configs/models.yaml](../configs/models.yaml).
+2) If needed, extend provider logic in `src/models/registry.py`.
+
+## Add a new evaluator
+
+1) Implement a new class in `src/evaluation/` (extend `BaseEvaluator`).
+2) Export it from `src/evaluation/__init__.py` if it is public.
+3) Add tests under `tests/`.
+
+## Add a new CLI command
+
+1) Create a handler in `src/cli/` with a `main()` function.
+2) Register it in `src/cli/main.py`.# Development Guide
 
 This guide covers contributing to NL2ATL and extending its functionality.
 

@@ -1,138 +1,99 @@
-# Evaluation Guide
+# Evaluation guide
 
-NL2ATL provides exact-match evaluation, LLM-as-a-judge evaluation, inter-rater agreement metrics, and model efficiency reporting.
-
-## Table of Contents
-
-- [Overview](#overview)
-- [LLM-as-a-Judge](#llm-as-a-judge)
-- [Exact Match](#exact-match)
-- [Model Efficiency Report](#model-efficiency-report)
-- [Judge Agreement](#judge-agreement)
-- [Human Annotations (Optional)](#human-annotations-optional)
-- [Extending Evaluation](#extending-evaluation)
-
----
+This guide explains the evaluation pipeline: exact‑match scoring, LLM‑as‑judge evaluation, agreement metrics, and the efficiency report.
 
 ## Overview
 
 ```mermaid
 flowchart LR
-    subgraph "Evaluation Methods"
-        A[Exact Match]
-        B[LLM Judge]
-    end
-
-    subgraph "Agreement"
-        C[Judge Agreement]
-    end
-
-    A --> C
-    B --> C
+    A[Exact match] --> C[Agreement]
+    B[LLM judge] --> C
+    C --> D[Efficiency report]
 ```
 
----
+## Exact match
 
-## LLM-as-a-Judge
+Exact‑match compares generated formulas to references after normalization:
 
-The LLM judge evaluates semantic correctness by comparing generated ATL formulas against reference translations.
+- Strip whitespace
+- Normalize operators `∧`, `∨`, `¬`, `→` to ASCII
+- Lowercase the formula
 
-### Running LLM Evaluation
+This is the default baseline metric used across the project.
+
+## LLM‑as‑judge
+
+The LLM judge checks semantic correctness beyond exact string match.
+
+Run:
 
 ```bash
 nl2atl llm-judge --datasets all
 ```
 
-By default, existing evaluated datasets are skipped unless you pass `--overwrite/--force`.
+Use `--overwrite` or `--force` to re‑evaluate existing outputs.
 
-### Judge Prompt Structure
+### Judge prompt
 
-The judge prompt is defined in `src/evaluation/llm_judge/prompts.py` and expects a JSON response with:
+The prompt is defined in [src/evaluation/llm_judge/prompts.py](../src/evaluation/llm_judge/prompts.py) and expects JSON like:
 
 ```json
 { "correct": "yes" | "no", "reasoning": "..." }
 ```
 
-### Output Format
+### Output format
 
-Each evaluated dataset is stored as a JSON file with top-level metadata and
-`detailed_results` containing the per-item rows:
+Each evaluated file contains run metadata plus `detailed_results`:
 
 ```json
 {
   "run_name": "qwen-3b_baseline_zero_shot",
-  "model": "qwen-3b",
-  "condition": "baseline_zero_shot",
-  "finetuned": false,
-  "few_shot": false,
-  "seed": 42,
+  "judge_model": "gpt-5.2",
   "metrics": {
     "n_examples": 90,
     "exact_match": 0.82
   },
-  "judge_model": "gpt-5.2",
-  "source_file": "qwen-3b_baseline_zero_shot.json",
   "detailed_results": [
     {
       "input": "...",
       "gold": "<<User>>F p",
       "prediction": "<<User>>F p",
       "correct": "yes",
-      "reasoning": "Exact match (normalized).",
+      "reasoning": "Exact match \(normalized\)",
       "decision_method": "exact"
     }
   ]
 }
 ```
 
-### Metrics
+## Judge agreement
 
-`compute_metrics()` returns:
+Compute agreement across judge outputs:
 
-- `accuracy`, `total_evaluated`, `correct`, `incorrect`
-- `exact_match` (count/rate)
-- `llm_judged` (count/rate/approval_rate)
-- `accuracy_from_exact_match` and `accuracy_boost_from_llm`
-- `no_llm_fallback_count`
-
----
-
-## Exact Match
-
-Exact-match evaluation normalizes outputs by:
-
-- Removing whitespace
-- Normalizing operator symbols (`∧`, `∨`, `¬`, `→`) into ASCII
-- Lowercasing the formula
-
-The evaluator returns:
-
-```json
-{
-  "n_examples": 298,
-  "exact_match": 0.82,
-  "total_tokens_input": 12345,
-  "total_tokens_output": 2345,
-  "total_tokens": 14690
-}
+```bash
+nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
 ```
 
----
+The report includes:
 
-## Model Efficiency Report
+- Pairwise Cohen’s $\kappa$
+- Fleiss’ $\kappa$ when all judges rate the same items
+- Krippendorff’s $\alpha$
+- Optional disagreement samples
 
-The efficiency report aggregates accuracy, latency, and cost across models and
-derives normalized composite scores. This is useful because it
-quantifies trade-offs between quality and resource usage, enabling clear
-comparisons of “best overall,” “cheapest,” and “fastest” models.
+## Model efficiency report
 
-### Running the report
+This report aggregates accuracy, latency, and cost across models and derives normalized composite
+scores. This helps quantify trade‑offs between quality and resource usage, enabling comparisons of
+“best overall,” “cheapest,” and “fastest” models.
+
+Run:
 
 ```bash
 nl2atl model-efficiency --predictions_dir outputs/model_predictions
 ```
 
-### Outputs
+Outputs:
 
 - `outputs/LLM-evaluation/efficiency_report.json`
 - `outputs/LLM-evaluation/efficiency_report.ipynb`
@@ -141,30 +102,39 @@ nl2atl model-efficiency --predictions_dir outputs/model_predictions
 
 The report includes:
 
-- Accuracy (LLM-judge accuracy when available, else exact-match).
+- Accuracy (LLM‑judge accuracy when available, else exact‑match).
 - Average cost and total cost (USD).
 - Latency statistics and throughput.
 - Composite efficiency score: normalized weighted sum of accuracy, cost, and latency.
 - Rankings for cheapest, fastest, most accurate, and best composite score.
 
-### USD cost calculation
+### USD cost calculation and pricing sources
 
-Costs are derived from token usage and the per‑1k pricing in `configs/models.yaml`:
+Costs are derived from token usage and the per‑1k pricing in `configs/models.yaml`.
 
-- Azure models: token usage comes from the Azure API (or is estimated via tiktoken when usage
-  is unavailable). Prices match the official Azure OpenAI and Azure AI Foundry Models pricing page. Costs are computed as
-  $\text{cost\_input} = \frac{\text{tokens\_input}}{1000} \times \text{price\_input\_per\_1k}$ and
-  $\text{cost\_output} = \frac{\text{tokens\_output}}{1000} \times \text{price\_output\_per\_1k}$.
-  The total cost is $\text{cost\_input} + \text{cost\_output}$.
-- GPU/local models: you can either provide per‑token prices (`price_input_per_1k`,
-  `price_output_per_1k`) or a GPU hourly rate (`gpu_hour_usd`) in `configs/models.yaml`.
-  When `gpu_hour_usd` is available, the report derives total USD cost and
-  per‑1k‑token cost using:
-  $\text{tokens\_per\_hour} = \frac{\text{tokens\_total}}{\text{hours\_used}}$ and
-  $\text{cost\_per\_1k\_tokens} = \frac{\text{gpu\_hour\_usd}}{\text{tokens\_per\_hour}} \times 1000$.
-  If none of these fields are set, cost‑based rankings are skipped for those models.
+For Azure models:
 
-If you don't know your GPU cost, you can estimate it:
+$$
+  ext{cost} = \frac{\text{tokens\_input}}{1000} \cdot \text{price\_input\_per\_1k} +
+\frac{\text{tokens\_output}}{1000} \cdot \text{price\_output\_per\_1k}
+$$
+
+Token usage comes from the Azure API (or is estimated via tiktoken when usage is unavailable). Prices
+should match the official Azure OpenAI and Azure AI Foundry Models pricing page.
+
+For local GPU runs with `gpu_hour_usd`:
+
+$$
+  ext{tokens\_per\_hour} = \frac{\text{tokens\_total}}{\text{hours\_used}},
+\quad
+  ext{cost\_per\_1k\_tokens} = \frac{\text{gpu\_hour\_usd}}{\text{tokens\_per\_hour}} \cdot 1000
+$$
+
+For GPU/local models, you can either provide per‑token prices (`price_input_per_1k`,
+`price_output_per_1k`) or a GPU hourly rate (`gpu_hour_usd`) in `configs/models.yaml`. If none of
+these fields are set, cost‑based rankings are skipped for those models.
+
+If you don’t know your GPU cost, you can estimate it:
 
 1) **GPU amortization per hour**:
   $\text{gpu\_amort\_hour} = \frac{\text{gpu\_price\_usd}}{\text{lifespan\_years} \times 365 \times 24 \times \text{utilization}}$
@@ -175,85 +145,38 @@ If you don't know your GPU cost, you can estimate it:
 3) **Overhead**: add 10–30% for shared infrastructure if you want a conservative estimate.
 
 Then set:
+
 $$
-  ext{gpu\_hour\_usd} = \text{gpu\_amort\_hour} + \text{power\_hour} + \text{overhead\_hour}
+	ext{gpu\_hour\_usd} = \text{gpu\_amort\_hour} + \text{power\_hour} + \text{overhead\_hour}
 $$
 
----
+If neither per‑token prices nor `gpu_hour_usd` is set, cost rankings are omitted for that model.
 
-## Judge Agreement
+## Human annotations
 
-Agreement metrics are computed across evaluated datasets:
+You can add a human‑annotated file as an additional judge during agreement analysis.
+The human file may be either a list of items or a metadata dictionary with an `annotations` list.
 
-```bash
-nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
-```
-
-The report includes:
-
-- Pairwise Cohen’s κ
-- Fleiss’ κ (when all judges rated the same items)
-- Krippendorff’s α
-- Per-source agreement breakdown
-- Sample disagreements (optional)
-- Human comparison (when `human` is present), including per-judge accuracy plus majority/unanimous vote accuracy
-
----
-
-## Human Annotations (Optional)
-
-You can include a human-annotated dataset as an additional judge when running agreement analysis. The human file is optional and should mirror the LLM judge row structure but only needs `input`, `gold`, `prediction`, and `correct`.
-
-### Supported JSON Formats
-
-Either a list of items:
-
-```json
-[
-  {
-    "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
-    "gold": "<<Cobot>>(cycle_running U stop_requested)",
-    "prediction": "<<Robot>>(running_cycle U stop_requested)",
-    "correct": "no"
-  }
-]
-```
-
-Or a dictionary with metadata and an annotations list:
+Minimal item schema:
 
 ```json
 {
-  "run_name": "qwen-3b_baseline_few_shot",
-  "model": "qwen-3b",
-  "condition": "baseline_few_shot",
-  "finetuned": false,
-  "few_shot": true,
-  "metrics": {
-    "n_examples": 30,
-    "exact_match": 0.06666666666666667
-  },
-  "annotations": [
-    {
-      "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
-      "gold": "<<Cobot>>(cycle_running U stop_requested)",
-      "prediction": "<<Robot>>(running_cycle U stop_requested)",
-      "correct": "no"
-    }
-  ]
+  "input": "...",
+  "gold": "<<A>>F goal",
+  "prediction": "<<A>>F goal",
+  "correct": "yes"
 }
 ```
 
-### Running Agreement with Humans
+Run with humans:
 
 ```bash
 nl2atl judge-agreement \
-    --eval_dir outputs/LLM-evaluation/evaluated_datasets \
-    --human_annotations path/to/human_annotations.json
+  --eval_dir outputs/LLM-evaluation/evaluated_datasets \
+  --human_annotations path/to/human_annotations.json
 ```
 
----
+## Extending evaluation
 
-## Extending Evaluation
-
-Implement custom evaluators by extending `BaseEvaluator` in `src/evaluation/base.py`, then wire them into your workflow.
+Implement custom evaluators by extending `BaseEvaluator` in [src/evaluation/base.py](../src/evaluation/base.py) and wiring them into your workflow.
 

@@ -1,65 +1,77 @@
 # NL2ATL Documentation
 
-> **Natural Language to ATL**: A research framework for translating natural language specifications into Alternating-Time Temporal Logic formulas using Large Language Models.
+NL2ATL is a research framework for translating natural‑language specifications into ATL formulas using
+Large Language Models. It supports experiment orchestration, evaluation, difficulty classification, and
+efficiency analysis for paper‑ready comparisons.
 
-## Overview
+## How to use this documentation (recommended order)
 
-NL2ATL is a Python framework developed to support the research presented in:
+1) **Install and run a first experiment**
+  - Start here: [installation.md](installation.md)
+  - Then: [quickstart.md](quickstart.md)
+2) **Understand ATL and the dataset**
+  - ATL primer: [atl-primer.md](atl-primer.md)
+  - Dataset format: [dataset.md](dataset.md)
+3) **Configure and run experiments**
+  - Config files: [configuration.md](configuration.md)
+  - CLI workflows: [usage.md](usage.md)
+4) **Evaluate and analyze**
+  - Metrics and evaluation: [evaluation.md](evaluation.md)
+  - Difficulty labeling: [difficulty_classification.md](difficulty_classification.md)
+5) **Integrate into UI tools**
+  - genVITAMIN wiring: [integrations/genvitamin.md](integrations/genvitamin.md)
+6) **Deep dive and extend**
+  - Architecture: [architecture.md](architecture.md)
+  - API reference: [api.md](api.md)
+  - Development guide: [development.md](development.md)
 
-> **Translating Natural Language to Strategic Temporal Specifications via LLMs**
->
-> *M. Aruta, F. Improta, V. Malvone, A. Murano, V. Perlić*
->
-> University of Naples Federico II & Telecom Paris
+## Workflow at a glance
 
-The framework enables automatic translation of natural language requirements involving strategic reasoning into well-formed ATL formulas (coalitions + temporal operators). It provides tooling for experiments, evaluation, dataset difficulty classification, and model efficiency reporting (cost/latency/accuracy trade-offs) that supports paper-ready comparisons.
+```mermaid
+flowchart LR
+  A[Dataset: NL → ATL pairs] --> B[Experiments]
+   B --> C[Predictions]
+  C --> D[Evaluation]
+  D --> E[Reports: accuracy, judge, efficiency]
+   A --> F[Difficulty classification]
+   F --> D
+```
 
-## Motivation
-
-Formal verification of Multi-Agent Systems (MAS) relies on logical formalisms capable of expressing strategic abilities of interacting agents. Strategic logics such as ATL and ATL* allow reasoning about the existence of joint strategies for coalitions of agents under adversarial conditions. NL2ATL bridges this gap by enabling non-expert users to specify strategic properties via natural language.
-
-## Documentation
+## Documentation map
 
 ### Getting Started
 
-| Document | Description |
-|----------|-------------|
-| [Installation](installation.md) | Setup instructions and requirements |
-| [Quick Start](quickstart.md) | Run your first experiment |
-| [ATL* Primer](atl-primer.md) | Introduction to Alternating-Time Temporal Logic |
+| Document | Purpose |
+|----------|---------|
+| [Installation](installation.md) | Setup instructions and dependencies |
+| [Quick Start](quickstart.md) | First experiment end‑to‑end |
+| [ATL Primer](atl-primer.md) | ATL/ATL* overview and notation |
 
 ### User Guide
 
-| Document | Description |
-|----------|-------------|
-| [Usage Guide](usage.md) | CLI commands and experiment workflows |
-| [Configuration](configuration.md) | Config file formats and options |
-| [Dataset](dataset.md) | Dataset structure and format |
-| [genVITAMIN Integration](integrations/genvitamin.md) | Wire NL2ATL into genVITAMIN GUI |
+| Document | Purpose |
+|----------|---------|
+| [Usage Guide](usage.md) | CLI commands and workflows |
+| [Configuration](configuration.md) | Model/experiment config formats |
+| [Dataset](dataset.md) | Dataset schema and conventions |
+| [Difficulty Classification](difficulty_classification.md) | Difficulty scoring and labeling |
+| [genVITAMIN Integration](integrations/genvitamin.md) | Wire NL2ATL into genVITAMIN |
 
 ### Technical Reference
 
-| Document | Description |
-|----------|-------------|
-| [Architecture](architecture.md) | System design, module structure, and data flow |
-| [Evaluation](evaluation.md) | Evaluation methods and metrics |
-| [API Reference](api.md) | Module and class documentation |
+| Document | Purpose |
+|----------|---------|
+| [Architecture](architecture.md) | Modules, data flow, design | 
+| [Evaluation](evaluation.md) | Metrics and evaluation pipelines |
+| [API Reference](api.md) | Public modules and classes |
 
 ### Contributing
 
-| Document | Description |
-|----------|-------------|
-| [Development](development.md) | Contributing and extending the framework |
+| Document | Purpose |
+|----------|---------|
+| [Development](development.md) | Contribution and extension guide |
 
-## Key Features
-
-- **Strategic Logic Support**: Native handling of ATL coalition modalities and temporal operators.
-- **Multiple Evaluation Methods**: Exact-match scoring and LLM-as-a-judge evaluation.
-- **Efficiency Analysis**: Composite, normalized comparisons of cost, latency, and accuracy.
-- **Reproducibility**: Experiment tracking with W&B integration and seed aggregation.
-- **Extensible Design**: Modular model registry, evaluators, and CLI subcommands.
-
-## Project Structure
+## Repository structure
 
 ```
 nl2atl/
@@ -79,10 +91,10 @@ nl2atl/
 
 ## Citation
 
-If you use NL2ATL in your research, please cite our paper:
+If you use NL2ATL in your research, cite:
 
 ```bibtex
-@inproceedings{aruta2024nl2atl,
+@inproceedings{aruta2026nl2atl,
   title={Translating Natural Language to Strategic Temporal Specifications via LLMs},
   author={Aruta, Marco and Improta, Francesco and Malvone, Vadim and Murano, Aniello and Perli{\'c}, Vladana},
   booktitle={[Conference/Journal]},
@@ -90,11 +102,8 @@ If you use NL2ATL in your research, please cite our paper:
 }
 ```
 
-## License
+## License and acknowledgments
 
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+NL2ATL is MIT‑licensed. See [LICENSE](../LICENSE).
 
-## Acknowledgments
-
-- University of Naples Federico II
-- Telecom Paris
+Acknowledgments: University of Naples Federico II; Telecom Paris.
