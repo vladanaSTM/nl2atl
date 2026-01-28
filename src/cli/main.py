@@ -11,10 +11,13 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "run-all": ("src.cli.run_all_experiments", "main"),
     "run-single": ("src.cli.run_single_experiment", "main"),
     "run-array": ("src.cli.run_experiment_array", "main"),
+    "aggregate-seeds": ("src.cli.aggregate_seeds", "main"),
     "llm-judge": ("src.cli.run_llm_judge", "main"),
     "judge-agreement": ("src.cli.run_judge_agreement", "main"),
     "classify-difficulty": ("src.cli.classify_difficulty", "main"),
     "model-efficiency": ("src.cli.run_model_efficiency", "main"),
+    "generate-eval-reports": ("src.cli.generate_eval_reports", "main"),
+    "slurm": ("src.cli.slurm", "main"),
 }
 
 

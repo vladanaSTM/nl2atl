@@ -26,36 +26,49 @@ Add filters as needed:
 nl2atl run-array --models qwen-3b --conditions baseline_zero_shot --count
 ```
 
-### 2) Create or edit the array job script
+### 2) Submit the array from the CLI (recommended)
 
-Use the helper in [scripts/slurm/submit_array.sh](../scripts/slurm/submit_array.sh), or adapt it to your cluster.
+The CLI can generate and submit the SLURM script for you, while still letting you pass any
+`run-array` filters.
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=nl2atl-array
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=32G
-#SBATCH --time=08:00:00
-#SBATCH --array=0-99
-
-cd /path/to/nl2atl
-source .venv/bin/activate
-
-nl2atl run-array \
-  --model_provider hf \
+nl2atl slurm array \
+  --partition A100 \
+  --time 06:00:00 \
+  --mem 32G \
+  --cpus-per-task 8 \
+  --gres gpu:1 \
+  --seed 123 \
   --models qwen-3b \
   --conditions baseline_zero_shot
 ```
 
-The helper computes the task count and submits the array with the correct `0-(count-1)` range.
+This automatically computes the task count and submits the array with the correct `0-(count-1)` range.
+Use `--dry-run` to print the generated script without submitting.
 
-### 3) Submit and monitor
+### 3) (Optional) Use the legacy scripts
+
+If you prefer static scripts, you can still use [slurm_scripts/submit_array.sh](../slurm_scripts/submit_array.sh)
+and adapt it to your cluster.
+
+### 4) Monitor jobs
 
 ```bash
-sbatch scripts/slurm/submit_array.sh
 squeue --me
+```
+
+Or use the CLI helper:
+
+```bash
+nl2atl slurm status
+```
+
+## LLM-judge on SLURM
+
+Submit the evaluator as a single SLURM job:
+
+```bash
+nl2atl slurm llm-judge --datasets all --models gpt-5.2
 ```
 
 ## Notes

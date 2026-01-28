@@ -106,7 +106,8 @@ The report includes:
 - Average cost and total cost (USD).
 - Latency statistics and throughput.
 - Composite efficiency score: normalized weighted sum of accuracy, cost, and latency.
-- Rankings for cheapest, fastest, most accurate, and best composite score.
+- **Confidence score**: Inter‑rater agreement (Cohen's $\kappa$) across judges, aggregated across all seeds for the model‑condition pair. This indicates how much judges agree on the model's outputs (range 0–1, higher = stronger agreement). The score is computed as the mean pairwise kappa with uncertainty bounds (mean ± std).
+- Rankings for cheapest, fastest, most accurate, and best composite score, all including confidence scores.
 
 ### USD cost calculation and pricing sources
 
@@ -151,6 +152,54 @@ $$
 $$
 
 If neither per‑token prices nor `gpu_hour_usd` is set, cost rankings are omitted for that model.
+
+### Confidence scores (judge agreement)
+
+The efficiency report includes **confidence scores** that reflect inter‑rater agreement across judges. This metric helps identify whether model outputs are inherently ambiguous or whether judges consistently agree on correctness.
+
+#### What is a confidence score?
+
+The confidence score is the mean Cohen's $\kappa$ coefficient computed pairwise between all judge pairs, then aggregated across all seeds for a given model‑condition combination. It measures agreement on a scale of 0–1:
+
+- **0.8–1.0**: Very strong agreement (judges almost always agree)
+- **0.6–0.8**: Strong agreement (judges frequently agree)
+- **0.4–0.6**: Moderate agreement (judges sometimes disagree)
+- **0.0–0.4**: Weak or poor agreement (judges often disagree)
+
+#### Interpretation
+
+A **high confidence score** suggests:
+- Model outputs are unambiguous to evaluators
+- Judge disagreements are rare (more reliable accuracy estimates)
+- The accuracy metric is trustworthy
+
+A **low confidence score** suggests:
+- Model outputs are borderline or ambiguous
+- Judges frequently disagree (noisy accuracy estimates)
+- Consider manual review to understand disagreement sources
+
+#### In the efficiency report
+
+Confidence scores appear in:
+
+1. **JSON output** (`efficiency_report.json`): Each model includes `confidence_score` (scalar, range 0–1)
+2. **Notebook tables** (`efficiency_report.ipynb`): Rankings display confidence_score alongside accuracy
+3. **Seed aggregation** (`seed_aggregate_metrics_from_judged.json`): Each model includes `judge_agreement` with mean and std
+
+#### Example workflow
+
+```bash
+# Run LLM-as-judge evaluation across multiple judges
+nl2atl llm-judge --datasets all
+
+# Compute inter‑judge agreement
+nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
+
+# Generate efficiency report with confidence scores
+nl2atl model-efficiency --predictions_dir outputs/model_predictions
+```
+
+The confidence scores are automatically integrated into all rankings and visualizations.
 
 ## Human annotations
 

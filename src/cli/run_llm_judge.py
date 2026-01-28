@@ -13,8 +13,6 @@ from ..infra.io import load_yaml, save_json, load_json
 from ..evaluation.llm_judge import (
     LLMJudge,
     PROMPT_VERSION,
-    build_summary,
-    build_summary_notebook,
     compute_metrics,
     evaluate_prediction_file,
 )
@@ -63,54 +61,49 @@ def resolve_judge_models(
     judge_models: Optional[list],
     judge_model: Optional[str],
 ) -> list:
-    models = load_models_config(models_config_path)
+    """Resolve judge models from config or fall back to a fixed allowed set.
 
-    if not models:
-        if judge_model:
-            return [
-                (
-                    judge_model,
-                    ModelConfig(
-                        name=judge_model, short_name=judge_model, provider="azure"
-                    ),
-                )
-            ]
-        if judge_models:
-            return [
-                (
-                    name,
-                    ModelConfig(name=name, short_name=name, provider="azure"),
-                )
-                for name in judge_models
-            ]
-        return [
-            (
-                "gpt-5.2",
-                ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
-            )
-        ]
+    Allowed default judges: `llama-70b`, `gpt-5.2`, `DeepSeek-V3.2`.
+    If a models config exists and contains matching keys those entries are used;
+    otherwise a simple `ModelConfig` with provider="azure" is returned for
+    the requested names.
+    """
+
+    models = load_models_config(models_config_path)
 
     if judge_model:
         judge_models = [judge_model]
 
-    def azure_keys() -> list:
+    # If no config is present, construct simple ModelConfig entries for the
+    # requested models or fall back to the allowed defaults.
+    if not models:
+        if judge_models:
+            return [
+                (name, ModelConfig(name=name, short_name=name, provider="azure"))
+                for name in judge_models
+            ]
         return [
-            key
-            for key, data in models.items()
-            if isinstance(data, dict)
-            and str(data.get("provider", "huggingface")).lower() == "azure"
+            (
+                "llama-70b",
+                ModelConfig(name="llama-70b", short_name="llama-70b", provider="azure"),
+            ),
+            (
+                "gpt-5.2",
+                ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
+            ),
+            (
+                "DeepSeek-V3.2",
+                ModelConfig(
+                    name="DeepSeek-V3.2", short_name="DeepSeek-V3.2", provider="azure"
+                ),
+            ),
         ]
 
+    # If explicit judge models were provided, resolve them against the config.
     if judge_models:
         selected_keys = []
         seen = set()
         for model_arg in judge_models:
-            if str(model_arg).lower() == "azure":
-                for key in azure_keys():
-                    if key not in seen:
-                        selected_keys.append(key)
-                        seen.add(key)
-                continue
             key = resolve_model_key(
                 model_arg,
                 models,
@@ -121,7 +114,19 @@ def resolve_judge_models(
                 selected_keys.append(key)
                 seen.add(key)
     else:
-        selected_keys = azure_keys()
+        # Default selection: only the allowed three, in this order.
+        default_keys = ["llama-70b", "gpt-5.2", "DeepSeek-V3.2"]
+        selected_keys = [k for k in default_keys if k in models]
+        if not selected_keys:
+            # If none of the allowed keys exist in the config, fall back to any
+            # available azure-models or the first few entries in the config.
+            azure_keys = [
+                key
+                for key, data in models.items()
+                if isinstance(data, dict)
+                and str(data.get("provider", "huggingface")).lower() == "azure"
+            ]
+            selected_keys = azure_keys or list(models.keys())[:3]
 
     resolved = []
     for key in selected_keys:
@@ -203,6 +208,7 @@ def main():
         default="configs/models.yaml",
         help="Models config file (default: configs/models.yaml)",
     )
+    # Note: HF-size filtering (--hf_min_params_b / --hf_only) removed.
     parser.add_argument(
         "--predictions_dir",
         default="outputs/model_predictions",
@@ -236,7 +242,9 @@ def main():
         raise ValueError("No prediction files found to evaluate.")
 
     judge_entries = resolve_judge_models(
-        Path(args.models_config), args.judge_models, None
+        Path(args.models_config),
+        args.judge_models,
+        None,
     )
     if not judge_entries:
         raise ValueError("No judge models resolved from config.")
@@ -256,7 +264,6 @@ def main():
         evaluated_dir = output_dir / "evaluated_datasets" / judge_name
         evaluated_dir.mkdir(parents=True, exist_ok=True)
 
-        results = []
         totals = {
             "evaluated": 0,
             "auto_exact": 0,
@@ -274,17 +281,6 @@ def main():
                 rows = extract_evaluated_rows(existing_data)
                 metrics = compute_metrics(rows)
                 stats = compute_stats_from_rows(rows)
-
-                results.append(
-                    {
-                        "source_file": pred_path.name,
-                        "stem": pred_path.stem,
-                        "rows": rows,
-                        "metrics": metrics,
-                        "stats": stats,
-                        "evaluated_path": str(evaluated_path),
-                    }
-                )
 
                 totals["evaluated"] += int(metrics["evaluated"])
                 totals["auto_exact"] += stats.get("auto_exact", 0)
@@ -308,44 +304,19 @@ def main():
             }
             save_json(evaluated_payload, evaluated_path)
 
-            results.append(
-                {
-                    "source_file": pred_path.name,
-                    "stem": pred_path.stem,
-                    "rows": rows,
-                    "metrics": metrics,
-                    "stats": stats,
-                    "evaluated_path": str(evaluated_path),
-                }
-            )
-
             totals["evaluated"] += int(metrics["evaluated"])
             totals["auto_exact"] += stats.get("auto_exact", 0)
             totals["llm_calls"] += stats.get("llm_calls", 0)
             totals["no_llm"] += stats.get("no_llm", 0)
 
-        summary = build_summary(
-            results=results,
-            totals=totals,
-            judge_model=judge_name,
-            prompt_version=PROMPT_VERSION,
-        )
-
-        summary_path = output_dir / f"summary__judge-{judge_name}.json"
-        save_json(summary, summary_path)
-
-        notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
-        build_summary_notebook(summary_path, notebook_path)
-
-        print(f"Wrote {len(results)} evaluated datasets to {evaluated_dir}")
-        print(f"Summary JSON: {summary_path}")
-        print(f"Summary notebook: {notebook_path}")
+        print(f"Wrote evaluated datasets to {evaluated_dir}")
 
     # After processing all judges, compute inter-rater agreement if multiple judges
     if len(judge_entries) > 1:
         from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
+            build_agreement_notebook,
         )
 
         eval_datasets_dir = output_dir / "evaluated_datasets"
@@ -359,6 +330,14 @@ def main():
                 output_path=output_dir / "agreement_report.json",
             )
             print_agreement_summary(agreement_report)
+            try:
+                notebook_path = output_dir / "agreement_report.ipynb"
+                build_agreement_notebook(
+                    output_dir / "agreement_report.json", notebook_path
+                )
+                print(f"Agreement notebook: {notebook_path}")
+            except Exception as e:
+                print(f"Warning: could not build agreement notebook: {e}")
         except ValueError as e:
             print(f"Skipping agreement analysis: {e}")
 

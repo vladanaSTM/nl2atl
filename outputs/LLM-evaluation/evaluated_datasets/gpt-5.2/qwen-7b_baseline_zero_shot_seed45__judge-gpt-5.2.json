@@ -1,0 +1,532 @@
+{
+  "run_id": "qwen-7b_baseline_zero_shot_seed45",
+  "git_commit": "36abe0c",
+  "dataset_path": "./data/dataset.json",
+  "total_samples": 61,
+  "successful_predictions": 61,
+  "failed_predictions": 0,
+  "model": "Qwen/Qwen2.5-7B-Instruct",
+  "model_short": "qwen-7b",
+  "condition": "baseline_zero_shot",
+  "seed": 45,
+  "finetuned": false,
+  "few_shot": false,
+  "num_epochs": 0,
+  "learning_rate": 0.0002,
+  "batch_size": 10,
+  "num_few_shot": 0,
+  "price_input_per_1k": null,
+  "price_output_per_1k": null,
+  "gpu_hour_usd": null,
+  "price_input_per_token": null,
+  "price_output_per_token": null,
+  "latency_mean_ms": 745.69,
+  "latency_min_ms": 331.27,
+  "latency_max_ms": 2412.82,
+  "latency_total_ms": 45486.81,
+  "latency_p50_ms": 691.43,
+  "latency_p95_ms": 1221.48,
+  "latency_p99_ms": 2275.5,
+  "timestamp_start": "2026-01-28T00:39:11Z",
+  "timestamp_end": "2026-01-28T00:43:05Z",
+  "duration_seconds": 233.37,
+  "metrics": {
+    "n_examples": 61,
+    "exact_match": 0.01639344262295082,
+    "total_tokens_input": 9488,
+    "total_tokens_output": 972,
+    "total_tokens": 10460
+  },
+  "judge_model": "gpt-5.2",
+  "source_file": "qwen-7b_baseline_zero_shot_seed45.json",
+  "detailed_results": [
+    {
+      "input": "The financial system can guarantee that an unauthorized transaction will never be executed.",
+      "gold": "<<FinanceSystem>>G !unauthorized_transaction",
+      "prediction": "<<FinancialSystem>> G ! (Transaction & !Authorized)",
+      "correct": "no",
+      "reasoning": "Although the coalition matches in intent (FinanceSystem vs FinancialSystem), the atomic proposition differs: gold forbids the specific predicate unauthorized_transaction, while the prediction forbids any transaction that is not authorized (Transaction & !Authorized). These are not guaranteed to be equivalent without an explicit alias/equivalence, so the meaning may change.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The collaborative robot can guarantee that it will keep running the cycle until a stop is requested.",
+      "gold": "<<Cobot>>(cycle_running U stop_requested)",
+      "prediction": "<<robot>> (G (cycle -> G cycle) U stop)",
+      "correct": "no",
+      "reasoning": "The prediction changes the meaning: it uses different propositions (cycle/stop vs cycle_running/stop_requested) and, more importantly, replaces the simple condition 'cycle_running' with a complex nested formula 'G(cycle -> G cycle)' inside the U. This no longer states that the cycle is running continuously until a stop is requested; it states an until over a global implication about cycle persistence, which is not equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The rover can guarantee that if communication with the base is lost, then sooner or later it will activate the backup antenna.",
+      "gold": "<<Rover>>G (comm_lost -> F backup_antenna_on)",
+      "prediction": "<<rover>> (¬comm → (F (backupAntenna)))",
+      "correct": "no",
+      "reasoning": "The prediction changes the meaning: it uses ¬comm instead of comm_lost (polarity/atom mismatch), omits the required global scope G (it should hold at all times), and does not clearly match the same proposition names. These differences make it semantically different from <<Rover>>G (comm_lost -> F backup_antenna_on).",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The user can guarantee that they will continue attempting payment until it is completed.",
+      "gold": "<<User>>(!paid U paid)",
+      "prediction": "<<User>> (F PaymentCompleted -> X PaymentAttempt)",
+      "correct": "no",
+      "reasoning": "Gold states an until property: the user can ensure payment is not completed (!paid) holds continuously until it becomes completed (paid). The prediction instead is a global implication-free formula (F PaymentCompleted -> X PaymentAttempt) about if payment is eventually completed then a payment attempt occurs next step; it lacks the U structure, changes the temporal meaning, and does not express continuous attempting until completion.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robotic arm can guarantee that sooner or later it will grasp the object.",
+      "gold": "<<Arm>>F object_grasped",
+      "prediction": "<<robotic_arm>>(G(F(grasp_object)))",
+      "correct": "no",
+      "reasoning": "Gold states the arm can ensure eventual grasp: <<Arm>>F object_grasped. Prediction is <<robotic_arm>>G(F(grasp_object)), which means on all future steps it can ensure grasp eventually again (infinitely often / always eventually). This is strictly stronger than a single eventual grasp, so the temporal structure is not equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The collaborative robot can guarantee that if the human confirms, then at the next step it will start assembly.",
+      "gold": "<<Cobot, Human>>G (human_confirmed -> X assembly_started)",
+      "prediction": "<<Robot>> (human.confirms -> Robot.X assembly.starts)",
+      "correct": "no",
+      "reasoning": "Gold requires coalition <<Cobot, Human>> and a global condition G(human_confirmed -> X assembly_started). Prediction changes the coalition to <<Robot>> only and does not include the global G operator, so it is not semantically equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The collaborative robot can guarantee that if the grip fails, then sooner or later it will retry.",
+      "gold": "<<Cobot>>G (grip_failed -> F retry_grip)",
+      "prediction": "<<robot>> G !(grip) -> (X retry | F retry)",
+      "correct": "no",
+      "reasoning": "The prediction does not match the gold meaning. It changes the condition from grip_failed to !(grip), and the consequent from F retry_grip to (X retry | F retry) (adds an extra next-step option and uses a different retry predicate). It also appears to drop the intended scoping of G over the implication (written as G !(grip) -> ...), which is not equivalent to G(grip_failed -> F retry_grip). Coalition name mismatch (<<robot>> vs <<Cobot>>) is also not a clear alias here.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "Robots number 1 and number 2 have a strategy to ensure that position 3 holds until position 4 holds and not position 5.",
+      "gold": "<<Robot1, Robot2>> ((pos3 U pos4) && !pos5)",
+      "prediction": "<<Robot1,Robot2>>(G(3) U (4 & !5))",
+      "correct": "no",
+      "reasoning": "Gold requires both that pos3 holds until pos4 holds, and that pos5 is false (globally, since conjoined outside the U). Prediction instead uses G(3) (pos3 always) as the left side of U and makes !5 part of the right-side condition only when pos4 is reached. This changes both the until condition and the scope of !pos5.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The mobile robot can guarantee that when it is near the base, at the next step it will enable docking mode.",
+      "gold": "<<Robot>>G (near_base -> X docking_mode)",
+      "prediction": "<<robot>>(near(base) -> X docking_mode)",
+      "correct": "no",
+      "reasoning": "Gold requires the guarantee to hold globally (G): whenever near_base holds, then next docking_mode. Prediction omits the outer G, so it only states a one-time implication at the current state, which is weaker. Predicate naming differences are acceptable, but the missing G changes the meaning.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 2 has a strategy to ensure that globally reach position 2.",
+      "gold": "<<Robot2>> F pos2",
+      "prediction": "<<robot2>> G (position = 2)",
+      "correct": "no",
+      "reasoning": "Gold says Robot2 can ensure eventually reaching pos2 (F pos2). Prediction says Robot2 can ensure being at position 2 globally (G (position=2)), which is much stronger and not equivalent to eventual reachability.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The industrial system can guarantee that it will keep calibrating until quality is acceptable.",
+      "gold": "<<IndustrySystem>>(calibrating U quality_ok)",
+      "prediction": "<<industrial_system>> (G (quality_acceptable U calibrating))",
+      "correct": "no",
+      "reasoning": "Gold states the system can ensure it keeps calibrating until quality becomes acceptable: (calibrating U quality_ok). Prediction instead wraps a global G and reverses the until operands: (quality_acceptable U calibrating), meaning quality holds until calibrating occurs, and requires this globally. This changes both temporal structure and the intended condition order.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 1 has a strategy to guarantee globally that position 2 implies eventually position 3.",
+      "gold": "<<Robot1>> G (pos2 -> F pos3)",
+      "prediction": "<<robot1>> (position2 -> GF position3)",
+      "correct": "no",
+      "reasoning": "Gold says Robot1 can ensure globally: whenever pos2 holds, pos3 will eventually occur (G(pos2 -> F pos3)). Prediction lacks the outer G and instead uses (pos2 -> G F pos3), which requires that if pos2 holds now then pos3 happens infinitely often forever; this is a different and stronger temporal property. Predicate/agent casing aside, the temporal structure is not equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "Robots number 2 and number 3 have a strategy to ensure that always not position 4.",
+      "gold": "<<Robot2, Robot3>> G !pos4",
+      "prediction": "<<Robot2,Robot3>> G !Position4",
+      "correct": "yes",
+      "reasoning": "Same coalition {Robot2, Robot3}, same temporal operator G, and same negated proposition (pos4 vs Position4 is a harmless naming variation).",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The management system can guarantee that it will never reject a valid request.",
+      "gold": "<<ManagementSystem>>G !valid_request_rejected",
+      "prediction": "<<Management>> G ! (ValidRequest -> Reject)",
+      "correct": "no",
+      "reasoning": "Gold states that at all times the proposition valid_request_rejected is false (never reject a valid request). Prediction is G !(ValidRequest -> Reject), which is equivalent to G (ValidRequest && Reject), i.e., always a valid request is rejected. This reverses the intended meaning; also the coalition name differs.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 1 has a strategy to always avoid position 2 or eventually reach position 3.",
+      "gold": "<<Robot1>> (G !pos2 || F pos3)",
+      "prediction": "<<robot1>> G !(position=2) U position=3",
+      "correct": "no",
+      "reasoning": "Gold states a disjunction: either Robot1 can ensure always avoiding position 2 (G !pos2) OR it can ensure eventually reaching position 3 (F pos3). The prediction instead uses an until formula G(!(pos2) U pos3), which (i) requires eventually reaching position 3 and (ii) only enforces !pos2 up to that point, not forever, and also adds an outer G. This is not equivalent to the original disjunction.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system and the controller together can guarantee that sooner or later consumption will be reduced.",
+      "gold": "<<ClimateSystem,Controller>>F consumption_reduced",
+      "prediction": "<<System,Controller>> (F (consumption -> F reduction))",
+      "correct": "no",
+      "reasoning": "Gold says the coalition {ClimateSystem, Controller} can ensure eventually consumption_reduced. Prediction changes the agent name (System vs ClimateSystem) and, more importantly, changes the property to F(consumption -> F reduction), which is not equivalent to F consumption_reduced (it can hold even if consumption never occurs, or require a different nested eventuality).",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The control system can guarantee that it will never cause instability.",
+      "gold": "<<ControlSystem>>G !unstable",
+      "prediction": "<<Ctrl>> G ! Instability",
+      "correct": "yes",
+      "reasoning": "Same meaning: the control system coalition can enforce globally that instability never occurs. <<Ctrl>> is an alias for <<ControlSystem>>, and Instability/unstable are the same predicate with negation preserved under G.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 1 has a strategy to guarantee that it will keep position 1 until move is true and while not attack.",
+      "gold": "<<Robot1>> (pos1 U (move && !attack))",
+      "prediction": "<<robot1>> (G (position1 & !move) U (!attack))",
+      "correct": "no",
+      "reasoning": "Gold says Robot1 can keep pos1 until a state where both move is true and attack is false: pos1 U (move && !attack). Prediction instead uses (G(position1 & !move) U (!attack)), which (i) changes the until target from (move && !attack) to just !attack, (ii) adds a global constraint G(position1 & !move) as the left operand, and (iii) enforces !move rather than allowing move to become true at the terminating state. These alter the meaning substantially.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robotic arm can guarantee that it will never exceed the torque limit.",
+      "gold": "<<Arm>>G !torque_over_limit",
+      "prediction": "<<robotic_arm>> G ! (torque > limit)",
+      "correct": "yes",
+      "reasoning": "Same coalition (robotic arm) and same temporal requirement (globally never). Predicate !torque_over_limit is equivalent to !(torque > limit) as a clear restatement of not exceeding the torque limit.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The drone can guarantee that if it loses GPS signal, then at the next step it will switch to inertial navigation.",
+      "gold": "<<Drone>>G (gps_lost -> X inertial_nav_on)",
+      "prediction": "<<drone>>(!GPS -> X inertial)",
+      "correct": "no",
+      "reasoning": "Gold states a global guarantee: whenever gps_lost holds, then in the next step inertial_nav_on holds (<<Drone>>G (gps_lost -> X inertial_nav_on)). The prediction omits both the coalition modality and the global G, and it changes the condition from gps_lost to !GPS (not equivalent in general). Predicate names for the consequent are also not clearly the same. These changes alter the meaning.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system and the user together can guarantee that sooner or later the refund will be credited.",
+      "gold": "<<FinanceSystem,User>>F refund_credited",
+      "prediction": "<<System,User>> (F (refund credited U eventually refund credited))",
+      "correct": "no",
+      "reasoning": "Gold states the coalition {FinanceSystem,User} can ensure eventually refund_credited (<<FinanceSystem,User>>F refund_credited). Prediction changes the agent name (System vs FinanceSystem) and the temporal formula is not equivalent: it uses F(refund_credited U eventually refund_credited) with an extra/ill-formed proposition ('eventually refund credited') and an unnecessary until, not simply F refund_credited.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 2 has a strategy to Globally reach position 1 and not position 2 and not position 3.",
+      "gold": "<<Robot2>> G pos1 && pos2 && !pos3",
+      "prediction": "<<robot2>> G ((position=1) & !(position=2) & !(position=3))",
+      "correct": "no",
+      "reasoning": "The gold formula requires pos1 && pos2 && !pos3 globally, while the prediction requires position=1 && !position=2 && !position=3 globally. This changes the polarity of pos2 (gold has pos2, prediction has !pos2) and also uses different atomic propositions (pos1/pos2/pos3 vs position=1/2/3), so the expressed property is not the same.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The warehouse can guarantee that if a shelf is empty, then at the next step it will request restocking.",
+      "gold": "<<Warehouse>>G (shelf_empty -> X restock_requested)",
+      "prediction": "<<warehouse>>(G(EmptyShelf -> X RequestRestock))",
+      "correct": "yes",
+      "reasoning": "Same coalition (Warehouse) and same temporal structure: globally, if shelf is empty then in the next step restocking is requested. Predicate names are clear aliases with only casing differences.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The collaborative robot can guarantee that if a human enters the area, then at the next step it will reduce speed.",
+      "gold": "<<Cobot>>G (human_in_area -> X speed_low)",
+      "prediction": "<<collaborative_robot>> (human_in_area -> X speed_reduced)",
+      "correct": "no",
+      "reasoning": "The gold formula requires the cobot to guarantee this implication globally (G). The prediction omits the G, so it only states the implication at the initial state, not at all times. Also, the consequent predicate differs (speed_low vs speed_reduced), which is not clearly an alias.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robotic arm can guarantee that it will keep moving toward the target until it reaches it.",
+      "gold": "<<Arm>>(moving_to_target U at_target)",
+      "prediction": "<<robotic_arm>> (G (target_reached U target_reaching))",
+      "correct": "no",
+      "reasoning": "Gold says the Arm can ensure (moving_to_target U at_target): keep moving toward the target until reaching it. Prediction changes both the temporal structure and proposition roles: it wraps everything in G, uses U with reversed/altered predicates (target_reached U target_reaching), and does not match the intended 'moving until reached' meaning.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The recommender system can guarantee that sooner or later it will suggest relevant content.",
+      "gold": "<<Recommender>>F relevant_content",
+      "prediction": "<<Recommender>> F (true U (relevantContent -> true))",
+      "correct": "no",
+      "reasoning": "Gold requires the recommender to be able to eventually make relevant_content true (<<Recommender>>F relevant_content). The prediction is <<Recommender>>F(true U (relevantContent -> true)), but (relevantContent -> true) is a tautology, so (true U tautology) is always true, making the whole formula trivially true and not equivalent to eventually relevant_content.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robotic arm can guarantee that if the gripper is closed, then sooner or later the object will be lifted.",
+      "gold": "<<Arm>>G (gripper_closed -> F object_lifted)",
+      "prediction": "<<robotic_arm>> (closed_gripper -> (lifted_object F (lifted_object U closed_gripper)))",
+      "correct": "no",
+      "reasoning": "Gold says the Arm can enforce globally that whenever gripper_closed holds, eventually object_lifted will occur: <<Arm>>G(gripper_closed -> F object_lifted). Prediction changes the temporal structure (no global G, and uses a malformed/incorrect combination of F and U), and even the implication’s consequent is not simply eventual lifted_object. Thus it does not express the same property.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 1 has a strategy to ensure that if position 1 ever occurs then position 2 will hold in the next step.",
+      "gold": "<<Robot1>> (F pos1 -> X pos2)",
+      "prediction": "<<robot1>>(position1 F (position2 X true))",
+      "correct": "no",
+      "reasoning": "Gold states an implication: if pos1 ever occurs (F pos1) then in the next step pos2 holds (X pos2). The prediction instead is an until-style formula 'position1 F (position2 X true)' (i.e., position1 U (position2 U true) / malformed use of F and X), not an implication and not the same temporal structure. It does not express 'if F pos1 then X pos2'.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "It is not the case that robots 1, 2 and 3 have a strategy to enforce globally position 1.",
+      "gold": "!<<Robot1, Robot2, Robot3>> G pos1",
+      "prediction": "<<robot1,robot2,robot3>> (G position=1)",
+      "correct": "no",
+      "reasoning": "The input/gold negate the coalition ability: it is NOT the case that <<Robot1,Robot2,Robot3>> can enforce G pos1. The prediction omits the leading negation and thus asserts the opposite (that they do have such a strategy). Predicate naming aside, the polarity is wrong.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 1 has a strategy to guarantee that eventually it reaches position 2 without ever reaching position 3.",
+      "gold": "<<Robot1>> F (pos2 && G !pos3)",
+      "prediction": "<<robot1>> G (F position2 -> !F position3)",
+      "correct": "no",
+      "reasoning": "Gold says Robot1 can ensure that at some point pos2 holds and from then on pos3 is never reached (F(pos2 && G !pos3)), which implies pos3 is never reached at all. Prediction instead is a global implication G(F pos2 -> !F pos3): it only forbids eventually reaching pos3 on paths where pos2 is eventually reached, and allows reaching pos3 if pos2 is never reached. This is weaker and not equivalent to the requirement of reaching pos2 while never reaching pos3.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "It is not the case that robots 1 and 3 have a strategy to always eventually reach position 2.",
+      "gold": "!<<Robot1, Robot3>> G F pos2",
+      "prediction": "!<<robot1,robot3>> AG AF position=2",
+      "correct": "no",
+      "reasoning": "The gold is an ATL negation of a coalition ability: !<<Robot1, Robot3>> G F pos2. The prediction uses CTL-style universal path quantifiers (AG AF) instead of the ATL coalition modality <<...>> and also omits the leading coalition ability structure. Even if AG AF is read as G F, it changes the logic/semantics from 'coalition cannot enforce' to a universal-path property.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The management system can guarantee that if a priority changes, then at the next step it will update the schedule.",
+      "gold": "<<ManagementSystem>>G (priority_changed -> X schedule_updated)",
+      "prediction": "<<Management>> (priority change -> schedule update X)",
+      "correct": "no",
+      "reasoning": "Prediction is not a well-formed ATL formula and it also does not preserve the required temporal/structural meaning: it omits the global G modality and does not clearly express the next-step X on schedule_updated under the implication. Coalition name also differs (Management vs ManagementSystem) without clear aliasing.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The mobile robot can guarantee that sooner or later it will deliver the package to the drop-off point.",
+      "gold": "<<Robot>>F delivered",
+      "prediction": "<<robot>> G (F (deliver(package, drop-off-point)))",
+      "correct": "no",
+      "reasoning": "Gold states the robot can ensure eventual delivery (<<Robot>>F delivered). Prediction strengthens this to <<robot>>G F deliver(...), meaning from every point along the execution delivery will occur again eventually (infinitely often). This is not equivalent to a single eventual delivery. Also the predicate form differs (delivered vs deliver(package, drop-off-point)) but the main error is the extra outer G.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The coalition of robots 2 and 3 has a strategy to ensure that eventually either attack or defend holds and not retreat.",
+      "gold": "<<Robot2, Robot3>> F ((attack || defend) && !retreat)",
+      "prediction": "<<robot2,robot3>>(F(attack|defend)&!retreat)",
+      "correct": "no",
+      "reasoning": "Gold requires eventually reaching a state where (attack or defend) holds AND retreat is false at that same time: F(((attack||defend)&&!retreat)). Prediction instead enforces !retreat outside the F, i.e., (F(attack|defend) && !retreat) at the current state, which is a different (stronger/different) property. Also uses '|' and '&' instead of '||' and '&&'.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The machine and the user together can guarantee that the ticket is printed before the system times out.",
+      "gold": "<<User,Machine>>(!timeout U ticket_printed)",
+      "prediction": "<<Machine,User>> (F \"ticket printed\" U \"system times out\")",
+      "correct": "no",
+      "reasoning": "Gold says the coalition can ensure ticket_printed occurs before any timeout, i.e., !timeout holds until ticket_printed (!timeout U ticket_printed). Prediction instead uses (F ticket_printed) U system_times_out, which allows timeout to occur and only requires that eventually ticket_printed holds before that timeout; it does not enforce that timeout is avoided up to printing and reverses the until structure.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The mobile robot can guarantee that it will never collide with an obstacle.",
+      "gold": "<<Robot>>G !collision",
+      "prediction": "<<robot>> G !Collision",
+      "correct": "yes",
+      "reasoning": "Exact match (normalized).",
+      "decision_method": "exact"
+    },
+    {
+      "input": "Robots number 1 and number 2 have a joint strategy to always avoid position 3.",
+      "gold": "<<Robot1, Robot2>> G !pos3",
+      "prediction": "<<Robot1,Robot2>> G !(position=3)",
+      "correct": "yes",
+      "reasoning": "Same coalition (Robot1 and Robot2) and same temporal requirement G with negation of being in position 3; pos3 and (position=3) are equivalent predicate renderings.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The smart grid can guarantee that overload will never occur.",
+      "gold": "<<Grid>>G !overload",
+      "prediction": "<<smart_grid>> G ! overload",
+      "correct": "yes",
+      "reasoning": "Same coalition (smart grid/Grid) and same temporal property: globally (G) overload never holds (!overload). Whitespace/casing differences are not semantically relevant.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system and the operator together can guarantee that sooner or later the connection will be restored.",
+      "gold": "<<Network,Operator>>F connection_restored",
+      "prediction": "<<System,Operator>> (F ConnectionRestored)",
+      "correct": "no",
+      "reasoning": "Coalition mismatch: gold attributes the ability to <<Network,Operator>>, while the prediction uses <<System,Operator>>. Even if the predicate name is an alias, changing the agent set changes the meaning in ATL.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system can guarantee that there will never be false positives when calibration is valid.",
+      "gold": "<<System>>G (calibration_ok -> G !false_positive)",
+      "prediction": "<<Calibrator>> G !(FalsePositive & CalibrationValid)",
+      "correct": "no",
+      "reasoning": "Coalition is wrong (<<Calibrator>> vs <<System>>). The temporal/logic structure also differs: gold requires globally that whenever calibration_ok holds, from then on always no false_positive (G (calibration_ok -> G !false_positive)). Prediction states globally not(false_positive AND calibration_valid), i.e., never both at the same time, which still allows false positives when calibration is invalid and does not enforce the nested 'from that point onward' guarantee.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The user can guarantee that at the next step there will be no error and that this condition will always remain true.",
+      "gold": "<<User>>X G !error",
+      "prediction": "<<User>>(X !Error -> G !Error)",
+      "correct": "no",
+      "reasoning": "Gold requires the user to ensure that starting from the next state, !error holds forever (X G !error). Prediction instead states an implication: if !Error holds at the next step, then !Error holds globally. This is weaker and does not guarantee !Error at the next step nor that the global condition starts from the next state.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The user can guarantee that at the next step they will perform a valid action or cancel the operation.",
+      "gold": "<<User>>X (valid_action || cancel)",
+      "prediction": "<<User>>(X valid_action | cancel)",
+      "correct": "no",
+      "reasoning": "Gold requires the disjunction to hold at the next step: X(valid_action || cancel). Prediction is (X valid_action) || cancel, which allows cancel to hold immediately (without X). This changes the temporal scope and meaning.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robot number 3 has a strategy to guarantee that they will reach position 2 in the next step.",
+      "gold": "<<Robot3>> X pos2",
+      "prediction": "<<robot3>> X (position = 2)",
+      "correct": "yes",
+      "reasoning": "Same coalition (Robot3) and same temporal operator X. Predicate 'pos2' is a clear alias of 'position = 2', expressing reaching position 2 in the next step.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The machine can guarantee that the system remains safe until cancellation is requested.",
+      "gold": "<<Machine>>(safe U cancel)",
+      "prediction": "<<Machine>> (G Safety U CancellationRequested)",
+      "correct": "no",
+      "reasoning": "Gold requires <<Machine>>(safe U cancel): safety holds continuously until cancel becomes true. Prediction uses different atomic propositions (Safety vs safe; CancellationRequested vs cancel) and, more importantly, wraps Safety in G, yielding (G Safety) U CancellationRequested, which is a stronger/different condition than safe U cancel.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The drone swarm can guarantee that sooner or later the area will be fully explored.",
+      "gold": "<<Swarm>>F area_explored",
+      "prediction": "<<drone_swarm>>(F(X E explored_area))",
+      "correct": "no",
+      "reasoning": "Gold states the swarm can ensure eventually (F) that area_explored holds. Prediction instead is F(X E explored_area): it adds an extra next-step X and uses an existential path quantifier E (not the same as an atomic proposition), changing the temporal meaning and the proposition. Even if coalition name is similar, the property is not equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The machine can guarantee that the gate will never open without payment.",
+      "gold": "<<Machine>>G (!paid -> !gate_open)",
+      "prediction": "<<Machine>> G !(GateOpen U Payment)",
+      "correct": "no",
+      "reasoning": "Gold states an invariant: whenever payment is not made, the gate is not open (G(!paid -> !gate_open)). Prediction is G !(GateOpen U Payment), which forbids any path segment where GateOpen holds continuously until a Payment occurs; it is not equivalent and can be violated even if the gate never opens without payment (e.g., gate opens briefly before payment, or gate opens after payment). Temporal structure and meaning differ.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The smart city system can guarantee that if an intersection is congested, then at the next step it will retime the traffic lights.",
+      "gold": "<<CitySystem>>G (junction_congested -> X lights_retimed)",
+      "prediction": "<<smart_city>> (Congested(X) -> Retime(X))",
+      "correct": "no",
+      "reasoning": "Prediction is not a semantically equivalent ATL formula: it omits the coalition ability operator <<CitySystem>> and the global modality G, and it does not express the required next-step temporal operator X on retiming. It also changes/unclear predicates (Congested(X), Retime(X)) and structure compared to the conditional 'if congested then next step retime'.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "Robots number 1 and number 2 have a strategy to ensure eventually position 1 and always position 3 afterwards.",
+      "gold": "<<Robot1, Robot2>> F (pos1 && G pos3)",
+      "prediction": "<<Robot1,Robot2>>(F(position=1) & GF(position=3))",
+      "correct": "no",
+      "reasoning": "Gold requires that the coalition can ensure eventually (pos1 && G pos3), i.e., there is a time when pos1 holds and from that same point onward pos3 holds forever. Prediction instead is F(position=1) & GF(position=3): pos1 eventually (not necessarily at the same time as the start of the always-pos3 phase) and pos3 holds infinitely often, not continuously forever after. GF is weaker than G, so the temporal meaning changes.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The smart grid can guarantee that if demand increases, then at the next step it will increase production.",
+      "gold": "<<Grid>>G (demand_high -> X production_increased)",
+      "prediction": "<<smart_grid>>(demand F increases -> production X increases)",
+      "correct": "no",
+      "reasoning": "The prediction does not match the ATL structure of the input/gold. It lacks the global modality G, misuses temporal operators by writing 'demand F increases' instead of a state predicate like demand_high, and places X incorrectly ('production X increases' instead of X production_increased). These changes alter the meaning from a next-step response to a demand increase under all times.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "Aye, aye! and I’ll chase him round Good Hope, and round the Horn, and round the Norway Maelstrom, and round perdition’s flames before I give him up. And this is what ye have shipped for, men! to chase that white whale on both sides of land, and over all sides of earth, till he spouts black blood and rolls fin out.",
+      "gold": "<<I>>(chase U enemy_spouts_black_blood && enemy_rolls_fin_out)",
+      "prediction": "<<Aye,Aye>> G (Chase(WhiteWhale) U (SpoutBlackBlood & RollFinOut))",
+      "correct": "no",
+      "reasoning": "Prediction changes the temporal structure and scope: gold is <<I>>(chase U (enemy_spouts_black_blood && enemy_rolls_fin_out)) with no outer G, while prediction wraps the until inside a global G. It also changes the coalition from <<I>> to <<Aye,Aye>> and alters propositions (generic Chase(WhiteWhale) vs chase/enemy_*). These are semantic changes.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The security system can guarantee that it will keep monitoring until the threat is removed.",
+      "gold": "<<SecuritySystem>>(monitoring U threat_removed)",
+      "prediction": "<<Security>> (F (monitoring & !threat) U !monitoring)",
+      "correct": "no",
+      "reasoning": "Gold states the SecuritySystem can ensure monitoring holds continuously until threat_removed becomes true: <<SecuritySystem>>(monitoring U threat_removed). Prediction changes the coalition name and, more importantly, changes the temporal meaning to an until where the right side is !monitoring (monitoring stops) and the left side is F(monitoring & !threat), which does not enforce continuous monitoring up to threat removal. It also uses !threat instead of threat_removed. Overall it expresses a different property.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The Romans, in the countries which they annexed, observed closely these measures; they sent colonies and maintained friendly relations with the minor powers, without increasing their strength; they kept down the greater, and did not allow any strong foreign powers to gain authority.",
+      "gold": " <<Romans>>G(send-colony && friendly_with_minor_powers && keep_down_the_greater )",
+      "prediction": "<<Romans>> ((in(CountriesAnnexed) & ObservedMeasures) U (SentColonies & MaintainedFriendlyRelations & !IncreasedStrength) R (KeptDownGreater & !AllowedStrongForeignPowers))",
+      "correct": "no",
+      "reasoning": "Gold states that the Romans can guarantee globally (G) that all three conditions hold: send colonies, be friendly with minor powers, and keep down the greater. The prediction instead uses a complex mix of U and R (until/release) with additional predicates (observed measures, not increased strength, not allowed strong foreign powers) and no global G over the same conjunction. This changes the temporal structure and the required conditions, so it is not semantically equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system and the farmer together can guarantee that sooner or later the harvest will be saved.",
+      "gold": "<<AgriSystem,Farmer>>F harvest_saved",
+      "prediction": "<<system,farmer>>(F X (harvest_saved U harvest_saved))",
+      "correct": "no",
+      "reasoning": "Gold states the coalition can ensure harvest_saved eventually (F harvest_saved). Prediction uses a different temporal structure: F X (harvest_saved U harvest_saved) simplifies to F X harvest_saved, i.e., harvest_saved must hold at the step after some future point, which is not equivalent to F harvest_saved (it can be false at the immediate next step after it first becomes true). Coalition naming aside, the temporal operators are not semantically equivalent.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The medical system can guarantee that it will never administer the wrong medication.",
+      "gold": "<<MedicalSystem>>G !wrong_medication",
+      "prediction": "<<MedSystem>> G ! (MedicationAdministered & WrongMedicationGiven)",
+      "correct": "no",
+      "reasoning": "The gold states that wrong_medication never occurs (G !wrong_medication). The prediction instead forbids the conjunction of administering medication and it being wrong (G !(MedicationAdministered & WrongMedicationGiven)), which still allows WrongMedicationGiven to occur when MedicationAdministered is false. This is semantically weaker/different. Also the predicate is not a clear alias of wrong_medication.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The robotic arm can guarantee that if the target position changes, then at the next step it will start replanning.",
+      "gold": "<<Arm>>G (target_changed -> X replanning)",
+      "prediction": "<<robotic_arm>>(target_position_change -> X replanning_start)",
+      "correct": "yes",
+      "reasoning": "Same coalition (robotic arm) and same temporal structure: globally, if the target changes then in the next step replanning starts. Predicate names are consistent aliases (target_changed vs target_position_change; replanning vs replanning_start).",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The mobile robot can guarantee that if the map is invalid, then at the next step it will enter exploration mode.",
+      "gold": "<<Robot>>G (map_invalid -> X exploration_mode)",
+      "prediction": "<<robot>>(!validMap -> X explorationMode)",
+      "correct": "no",
+      "reasoning": "Prediction is missing the global temporal operator G, so it states the implication only for the current state rather than always. Also the coalition is not clearly the same (<<robot>> vs <<Robot>>), and the predicate map_invalid is not necessarily equivalent to !validMap without an explicit alias.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "If the user presses cancel, the machine can guarantee that sooner or later a refund will be issued.",
+      "gold": "<<Machine>>G (cancel -> F refund)",
+      "prediction": "<<User>> (cancel -> F (refund U eventually noAction))",
+      "correct": "no",
+      "reasoning": "Coalition is wrong (<<User>> instead of <<Machine>>). The temporal structure is also changed: gold requires a global condition G(cancell -> F refund), while prediction lacks the outer G and adds an unrelated until subformula (refund U eventually noAction), which does not match 'eventually refund'.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The doctor and the system together can guarantee that sooner or later a correct diagnosis will be made.",
+      "gold": "<<Doctor,MedicalSystem>>F diagnosis_done",
+      "prediction": "<<doctor,system>> (F (correct_diagnosis))",
+      "correct": "yes",
+      "reasoning": "Same coalition (doctor and system) and same eventuality operator F. Predicate names align with the natural language: 'a correct diagnosis will be made' matches correct_diagnosis/diagnosis_done.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The rover can guarantee that if it finds an interesting sample, then at the next step it will tag the sample.",
+      "gold": "<<Rover>>G (interesting_sample -> X sample_tagged)",
+      "prediction": "<<rover>>(find(interesting_sample) -> tag(sample)) X true",
+      "correct": "no",
+      "reasoning": "Prediction is not semantically equivalent to the gold ATL formula. It lacks the required global modality G, misplaces the next-step operator X (gold requires X sample_tagged as the consequent), and introduces an unrelated trailing 'X true'. It also changes the proposition structure (interesting_sample vs find(interesting_sample), sample_tagged vs tag(sample)) without clear aliasing.",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The system and the operators together can guarantee that sooner or later the area will be secured.",
+      "gold": "<<EmergencySystem,Operators>>F area_secured",
+      "prediction": "<<System,Operators>> (F (G Secured))",
+      "correct": "no",
+      "reasoning": "Gold says the coalition can ensure area_secured eventually (F area_secured). Prediction instead requires eventually reaching a state after which Secured holds forever (F G Secured), which is strictly stronger, and it also changes the proposition name (area_secured vs Secured) and coalition label (EmergencySystem vs System).",
+      "decision_method": "llm"
+    },
+    {
+      "input": "The world’s stable now. People are happy; they get what they want, and they never want what they can’t get. They’re well off; they’re safe; they’re never ill; they’re not afraid of death; they’re blissfully ignorant of passion and old age; they’re plagued with no mothers or fathers; they’ve got no wives, or children, or lovers to feel strongly about; they’re so conditioned that they practically can’t help behaving as they ought to behave.",
+      "gold": "<<World>>G stable",
+      "prediction": "<<People>> (G (! (wants(~what) & wellOff & safe & healthy & notAfraidOfDeath & ignorantOfPassionAndOldAge & noParentsOrChildrenOrLovers & conditioned))) -> (happy & get(what)))",
+      "correct": "no",
+      "reasoning": "Gold states that the World coalition can guarantee that stability holds globally (<<World>>G stable). The prediction changes the coalition to <<People>>, does not assert stable at all, and instead introduces a different implication with many unrelated propositions and negations. Temporal/strategic meaning is not preserved.",
+      "decision_method": "llm"
+    }
+  ]
+}

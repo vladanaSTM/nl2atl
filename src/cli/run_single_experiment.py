@@ -15,12 +15,22 @@ def main():
     parser.add_argument(
         "--few_shot", action="store_true", help="Use few-shot prompting"
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override the experiment seed (default: from config)",
+    )
     parser.add_argument("--models_config", default="configs/models.yaml")
     parser.add_argument("--experiments_config", default="configs/experiments.yaml")
     args = parser.parse_args()
 
     # Load config
     config = Config.from_yaml(args.models_config, args.experiments_config)
+
+    if args.seed is not None:
+        config.seed = args.seed
+        config.seeds = [args.seed]
 
     # Create condition
     condition_name = (

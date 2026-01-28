@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Generate a model efficiency report from prediction outputs."""
+"""Generate a model efficiency report from seed aggregate metrics."""
 
 import argparse
 from pathlib import Path
@@ -9,75 +9,43 @@ from ..infra.io import save_json
 from ..evaluation.model_efficiency import (
     EfficiencyWeights,
     build_efficiency_notebook,
-    build_efficiency_report,
-    load_judge_summary,
-    resolve_prediction_files,
+    build_efficiency_report_from_aggregate,
 )
 
 
-def _resolve_judge_summary(
-    summary_path: Optional[str],
-    llm_eval_dir: Path,
-    judge_model: Optional[str],
-) -> Optional[Path]:
-    if summary_path:
-        candidate = Path(summary_path)
-        return candidate if candidate.exists() else None
-
-    if judge_model:
-        candidate = llm_eval_dir / f"summary__judge-{judge_model}.json"
-        return candidate if candidate.exists() else None
-
-    summaries = sorted(llm_eval_dir.glob("summary__judge-*.json"))
-    if not summaries:
-        return None
-
-    summaries.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return summaries[0]
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--datasets",
-        nargs="+",
-        default=["all"],
-        help="Prediction files to analyze (default: all)",
+    parser = argparse.ArgumentParser(
+        description="Generate model efficiency report from seed aggregate metrics"
     )
     parser.add_argument(
-        "--predictions_dir",
-        default="outputs/model_predictions",
-        help="Directory with prediction JSON files",
+        "--aggregate_file",
+        default="outputs/seed_aggregate_metrics_from_judged.json",
+        help="Path to seed_aggregate_metrics_from_judged.json",
     )
     parser.add_argument(
-        "--llm_eval_dir",
-        default="outputs/LLM-evaluation",
-        help="Directory with LLM judge outputs",
-    )
-    parser.add_argument(
-        "--judge_summary",
-        default=None,
-        help="Path to summary__judge-<judge>.json (optional)",
-    )
-    parser.add_argument(
-        "--judge_model",
-        default=None,
-        help="Judge model name used to resolve summary file (optional)",
+        "--output_dir",
+        default="outputs",
+        help="Directory for output files (default: outputs)",
     )
     parser.add_argument(
         "--output",
         default=None,
-        help="Output report JSON path (default: <llm_eval_dir>/efficiency_report.json)",
+        help="Output report JSON path (default: <output_dir>/efficiency_report.json)",
     )
     parser.add_argument(
         "--notebook",
         default=None,
-        help="Output notebook path (default: <llm_eval_dir>/efficiency_report.ipynb)",
+        help="Output notebook path (default: <output_dir>/efficiency_report.ipynb)",
     )
     parser.add_argument(
         "--no_notebook",
         action="store_true",
         help="Disable notebook output",
+    )
+    parser.add_argument(
+        "--include_per_seed",
+        action="store_true",
+        help="Include efficiency calculations per seed",
     )
     parser.add_argument(
         "--top_k",
@@ -106,31 +74,26 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    predictions_dir = Path(args.predictions_dir)
-    llm_eval_dir = Path(args.llm_eval_dir)
+    aggregate_path = Path(args.aggregate_file)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    prediction_files = resolve_prediction_files(predictions_dir, args.datasets)
-    if not prediction_files:
-        raise ValueError("No prediction files found to analyze.")
+    if not aggregate_path.exists():
+        raise FileNotFoundError(f"Aggregate file not found: {aggregate_path}")
 
-    summary_path = _resolve_judge_summary(
-        args.judge_summary, llm_eval_dir, args.judge_model
-    )
-    summary = load_judge_summary(summary_path)
-
-    report = build_efficiency_report(
-        prediction_files,
-        judge_summary=summary,
+    report = build_efficiency_report_from_aggregate(
+        aggregate_path,
         weights=EfficiencyWeights(
             accuracy=args.weight_accuracy,
             cost=args.weight_cost,
             latency=args.weight_latency,
         ),
         top_k=args.top_k,
+        include_per_seed=args.include_per_seed,
     )
 
     report_path = (
-        Path(args.output) if args.output else llm_eval_dir / "efficiency_report.json"
+        Path(args.output) if args.output else output_dir / "efficiency_report.json"
     )
     save_json(report, report_path)
 
@@ -138,7 +101,7 @@ def main() -> None:
         notebook_path = (
             Path(args.notebook)
             if args.notebook
-            else llm_eval_dir / "efficiency_report.ipynb"
+            else output_dir / "efficiency_report.ipynb"
         )
         build_efficiency_notebook(report_path, notebook_path)
 
