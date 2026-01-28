@@ -42,7 +42,8 @@ def _safe_std(values: List[float]) -> float:
 
 
 def _iter_prediction_files(input_dir: Path) -> Iterable[Path]:
-    return sorted(p for p in input_dir.glob("*.json") if p.is_file())
+    # Search recursively so files inside dataset subdirectories are included
+    return sorted(p for p in input_dir.rglob("*.json") if p.is_file())
 
 
 def _extract_metadata(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,6 +168,115 @@ def aggregate_predictions(input_dir: Path) -> List[Dict[str, Any]]:
     return aggregates
 
 
+def _build_notebook(
+    aggregates: List[Dict[str, Any]], agg_json_path: str
+) -> Dict[str, Any]:
+    # Build a simple notebook that loads the aggregated JSON and shows
+    # comparison tables and a basic accuracy bar chart.
+    nb_cells = []
+
+    nb_cells.append(
+        {
+            "cell_type": "markdown",
+            "metadata": {"language": "markdown"},
+            "source": [
+                "# Aggregated Seed Metrics\n",
+                f"Generated from `{agg_json_path}`.\n",
+                "This notebook loads the aggregated JSON and shows comparison tables and plots.\n",
+            ],
+        }
+    )
+
+    nb_cells.append(
+        {
+            "cell_type": "markdown",
+            "metadata": {"language": "markdown"},
+            "source": [
+                "## Requirements\n",
+                "Install the plotting and data libraries if needed:\n",
+                "```\n",
+                "pip install pandas matplotlib seaborn\n",
+                "```\n",
+            ],
+        }
+    )
+
+    code_source = [
+        "import json\n",
+        "from pathlib import Path\n",
+        "import pandas as pd\n",
+        "import matplotlib.pyplot as plt\n",
+        "import seaborn as sns  # seaborn should be installed in the notebook kernel\n",
+        "from IPython.display import display\n",
+        "# Use POSIX-style path to avoid Windows backslash escape warnings\n",
+        # Embed an absolute POSIX path string so the generated notebook
+        # doesn't contain Windows backslashes or produce escape warnings.
+        f"PATH = '{Path(agg_json_path).resolve().as_posix()}'\n",
+        "with open(PATH, 'r', encoding='utf-8') as fh:\n",
+        "    aggregates = json.load(fh)\n",
+        "rows = []\n",
+        "for g in aggregates:\n",
+        "    row = {k: g.get(k) for k in ('model_short','condition','finetuned','few_shot','num_seeds')}\n",
+        "    for metric,vals in (g.get('metrics') or {}).items():\n",
+        "        row[f'{metric}_mean'] = vals.get('mean')\n",
+        "        row[f'{metric}_std'] = vals.get('std')\n",
+        "    rows.append(row)\n",
+        "df = pd.DataFrame(rows)\n",
+        "display(df.sort_values(by=['model_short','condition']).head(20))\n",
+        "# Basic accuracy comparison (if available)\n",
+        "if 'accuracy_mean' in df.columns:\n",
+        "    plot_df = df.sort_values('accuracy_mean', ascending=False).head(20)\n",
+        "    plt.figure(figsize=(10,6))\n",
+        "    sns.barplot(data=plot_df, x='accuracy_mean', y='model_short', hue='condition', dodge=False)\n",
+        "    plt.title('Top 20 groups by accuracy_mean')\n",
+        "    plt.tight_layout()\n",
+        "    plt.show()\n",
+    ]
+
+    # Display table sorted by accuracy_mean if available, otherwise fallback
+    # to the previous model/condition sort.
+    # We insert a small wrapper code cell that performs the conditional display.
+    display_wrapper = [
+        "# Display aggregated table, ranking by accuracy_mean when available\n",
+        "if 'accuracy_mean' in df.columns:\n",
+        "    display(df.sort_values(by='accuracy_mean', ascending=False).head(20))\n",
+        "else:\n",
+        "    display(df.sort_values(by=['model_short','condition']).head(20))\n",
+    ]
+
+    nb_cells.append(
+        {
+            "cell_type": "code",
+            "metadata": {"language": "python"},
+            "execution_count": None,
+            "outputs": [],
+            "source": code_source,
+        }
+    )
+
+    nb_cells.append(
+        {
+            "cell_type": "code",
+            "metadata": {"language": "python"},
+            "execution_count": None,
+            "outputs": [],
+            "source": display_wrapper,
+        }
+    )
+
+    nb = {
+        "cells": nb_cells,
+        "metadata": {
+            "kernelspec": {"name": "python3", "display_name": "Python 3"},
+            "language_info": {"name": "python"},
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+
+    return nb
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Aggregate seed metrics from saved evaluation outputs."
@@ -181,6 +291,25 @@ def main() -> None:
         default="outputs/seed_aggregate_metrics_from_judged.json",
         help="Path to write aggregated metrics JSON.",
     )
+    # Notebook enabled by default; provide --no-notebook to disable
+    parser.set_defaults(notebook=True)
+    parser.add_argument(
+        "--notebook",
+        dest="notebook",
+        action="store_true",
+        help="Also write a Jupyter notebook with comparison tables and plots. (default)",
+    )
+    parser.add_argument(
+        "--no-notebook",
+        dest="notebook",
+        action="store_false",
+        help="Do not write a Jupyter notebook.",
+    )
+    parser.add_argument(
+        "--notebook_output",
+        default="outputs/seed_aggregate_metrics_from_judged.ipynb",
+        help="Path to write the generated Jupyter notebook.",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -193,6 +322,13 @@ def main() -> None:
     output_path.write_text(
         json.dumps(aggregates, indent=2, ensure_ascii=False), encoding="utf-8"
     )
+
+    if args.notebook:
+        nb = _build_notebook(aggregates, str(output_path))
+        nb_path = Path(args.notebook_output)
+        nb_path.parent.mkdir(parents=True, exist_ok=True)
+        nb_path.write_text(json.dumps(nb, indent=2), encoding="utf-8")
+        print(f"Wrote notebook to {nb_path}")
 
     print(f"Aggregated {len(aggregates)} groups into {output_path}")
 

@@ -338,7 +338,7 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
                 "cell_type": "code",
                 "metadata": {},
                 "source": [
-                    "plt.figure(figsize=(10, 4))\n",
+                    "plt.figure(figsize=(100, 40))\n",
                     "plt.bar(df['source_file'], df['accuracy'])\n",
                     "plt.xticks(rotation=45, ha='right')\n",
                     "plt.ylabel('Accuracy')\n",
