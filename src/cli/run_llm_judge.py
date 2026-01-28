@@ -13,8 +13,6 @@ from ..infra.io import load_yaml, save_json, load_json
 from ..evaluation.llm_judge import (
     LLMJudge,
     PROMPT_VERSION,
-    build_summary,
-    build_summary_notebook,
     compute_metrics,
     evaluate_prediction_file,
 )
@@ -266,7 +264,6 @@ def main():
         evaluated_dir = output_dir / "evaluated_datasets" / judge_name
         evaluated_dir.mkdir(parents=True, exist_ok=True)
 
-        results = []
         totals = {
             "evaluated": 0,
             "auto_exact": 0,
@@ -284,17 +281,6 @@ def main():
                 rows = extract_evaluated_rows(existing_data)
                 metrics = compute_metrics(rows)
                 stats = compute_stats_from_rows(rows)
-
-                results.append(
-                    {
-                        "source_file": pred_path.name,
-                        "stem": pred_path.stem,
-                        "rows": rows,
-                        "metrics": metrics,
-                        "stats": stats,
-                        "evaluated_path": str(evaluated_path),
-                    }
-                )
 
                 totals["evaluated"] += int(metrics["evaluated"])
                 totals["auto_exact"] += stats.get("auto_exact", 0)
@@ -318,38 +304,12 @@ def main():
             }
             save_json(evaluated_payload, evaluated_path)
 
-            results.append(
-                {
-                    "source_file": pred_path.name,
-                    "stem": pred_path.stem,
-                    "rows": rows,
-                    "metrics": metrics,
-                    "stats": stats,
-                    "evaluated_path": str(evaluated_path),
-                }
-            )
-
             totals["evaluated"] += int(metrics["evaluated"])
             totals["auto_exact"] += stats.get("auto_exact", 0)
             totals["llm_calls"] += stats.get("llm_calls", 0)
             totals["no_llm"] += stats.get("no_llm", 0)
 
-        summary = build_summary(
-            results=results,
-            totals=totals,
-            judge_model=judge_name,
-            prompt_version=PROMPT_VERSION,
-        )
-
-        summary_path = output_dir / f"summary__judge-{judge_name}.json"
-        save_json(summary, summary_path)
-
-        notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
-        build_summary_notebook(summary_path, notebook_path)
-
-        print(f"Wrote {len(results)} evaluated datasets to {evaluated_dir}")
-        print(f"Summary JSON: {summary_path}")
-        print(f"Summary notebook: {notebook_path}")
+        print(f"Wrote evaluated datasets to {evaluated_dir}")
 
     # After processing all judges, compute inter-rater agreement if multiple judges
     if len(judge_entries) > 1:

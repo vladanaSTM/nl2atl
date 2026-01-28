@@ -16,6 +16,7 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "judge-agreement": ("src.cli.run_judge_agreement", "main"),
     "classify-difficulty": ("src.cli.classify_difficulty", "main"),
     "model-efficiency": ("src.cli.run_model_efficiency", "main"),
+    "generate-eval-reports": ("src.cli.generate_eval_reports", "main"),
     "slurm": ("src.cli.slurm", "main"),
 }
 
