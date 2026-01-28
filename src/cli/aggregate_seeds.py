@@ -6,7 +6,7 @@ import json
 import statistics
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 NUMERIC_FIELDS = [
@@ -100,8 +100,60 @@ def _extract_metrics(payload: Dict[str, Any]) -> Dict[str, Any]:
     return metrics
 
 
-def aggregate_predictions(input_dir: Path) -> List[Dict[str, Any]]:
+def _load_agreement_scores(
+    agreement_report_path: Optional[Path],
+) -> Dict[str, Dict[str, float]]:
+    """Load judge agreement scores from agreement report.
+
+    Returns dict mapping source_file to agreement metrics dict.
+    """
+    if not agreement_report_path or not agreement_report_path.exists():
+        return {}
+
+    try:
+        with open(agreement_report_path, "r", encoding="utf-8") as f:
+            report = json.load(f)
+
+        per_source = report.get("per_source_file", {})
+
+        # Extract agreement scores per source file
+        agreement_scores = {}
+        for source_file, metrics in per_source.items():
+            if isinstance(metrics, dict):
+                # Use mean_kappa as confidence metric (pairwise agreement between judges)
+                # This represents how much judges agree on this specific source file
+                confidence = metrics.get("mean_kappa")
+
+                agreement_scores[source_file] = {
+                    "confidence_score": confidence,
+                    "mean_kappa": metrics.get("mean_kappa"),
+                    "min_kappa": metrics.get("min_kappa"),
+                    "max_kappa": metrics.get("max_kappa"),
+                    "n_items": metrics.get("n_items"),
+                }
+
+        return agreement_scores
+    except Exception as e:
+        print(
+            f"Warning: Could not load agreement scores from {agreement_report_path}: {e}"
+        )
+        return {}
+
+
+def aggregate_predictions(
+    input_dir: Path,
+    agreement_report_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Aggregate predictions with optional agreement scores.
+
+    Args:
+        input_dir: Directory with prediction files
+        agreement_report_path: Optional path to agreement_report.json
+    """
     grouped: Dict[Tuple[str, str, bool, bool], List[Dict[str, Any]]] = defaultdict(list)
+
+    # Load agreement scores if provided
+    agreement_scores = _load_agreement_scores(agreement_report_path)
 
     for path in _iter_prediction_files(input_dir):
         try:
@@ -117,6 +169,20 @@ def aggregate_predictions(input_dir: Path) -> List[Dict[str, Any]]:
         seed = metadata.get("seed")
 
         metrics = _extract_metrics(payload)
+
+        # Add agreement scores if available for this source file
+        # The agreement report keys use base filename (without judge suffix)
+        # e.g., "ds-r1-qwen-32b_baseline_few_shot_seed42.json"
+        # matches prediction file "ds-r1-qwen-32b_baseline_few_shot_seed42__judge-ds-v3.2.json"
+        source_file = path.name
+        base_source = (
+            source_file.split("__judge-")[0] + ".json"
+            if "__judge-" in source_file
+            else source_file
+        )
+
+        if base_source in agreement_scores:
+            metrics["judge_agreement"] = agreement_scores[base_source]
 
         grouped[(model_short, condition, finetuned, few_shot)].append(
             {
@@ -146,24 +212,49 @@ def aggregate_predictions(input_dir: Path) -> List[Dict[str, Any]]:
                     "std": _safe_std(values),
                 }
 
-        aggregates.append(
-            {
-                "model_short": model_short,
-                "condition": condition,
-                "finetuned": finetuned,
-                "few_shot": few_shot,
-                "num_seeds": len(items),
-                "metrics": agg_metrics,
-                "per_seed": [
-                    {
-                        "seed": i["seed"],
-                        "metrics": i["metrics"],
-                        "source": i["source"],
-                    }
-                    for i in items
-                ],
-            }
-        )
+        # Aggregate judge agreement scores if present
+        agg_agreement_temp: Dict[str, List[float]] = {}
+        for item in items:
+            agreement = item["metrics"].get("judge_agreement")
+            if agreement and isinstance(agreement, dict):
+                for key, val in agreement.items():
+                    if val is not None:
+                        if key not in agg_agreement_temp:
+                            agg_agreement_temp[key] = []
+                        agg_agreement_temp[key].append(val)
+
+        # Compute mean/std for agreement metrics
+        agg_agreement: Dict[str, Dict[str, float]] = {}
+        for key in agg_agreement_temp:
+            values = agg_agreement_temp[key]
+            if values:
+                agg_agreement[key] = {
+                    "mean": _safe_mean(values),
+                    "std": _safe_std(values),
+                }
+
+        aggregate_entry = {
+            "model_short": model_short,
+            "condition": condition,
+            "finetuned": finetuned,
+            "few_shot": few_shot,
+            "num_seeds": len(items),
+            "metrics": agg_metrics,
+            "per_seed": [
+                {
+                    "seed": i["seed"],
+                    "metrics": i["metrics"],
+                    "source": i["source"],
+                }
+                for i in items
+            ],
+        }
+
+        # Add aggregated agreement scores if available
+        if agg_agreement:
+            aggregate_entry["judge_agreement"] = agg_agreement
+
+        aggregates.append(aggregate_entry)
 
     return aggregates
 
@@ -220,15 +311,26 @@ def _build_notebook(
         "    for metric,vals in (g.get('metrics') or {}).items():\n",
         "        row[f'{metric}_mean'] = vals.get('mean')\n",
         "        row[f'{metric}_std'] = vals.get('std')\n",
+        "    # Add confidence score (mean if aggregated)\n",
+        "    judge_agreement = g.get('judge_agreement', {})\n",
+        "    conf_score = judge_agreement.get('confidence_score')\n",
+        "    if isinstance(conf_score, dict):\n",
+        "        row['confidence_score'] = conf_score.get('mean')\n",
+        "    else:\n",
+        "        row['confidence_score'] = conf_score\n",
         "    rows.append(row)\n",
         "df = pd.DataFrame(rows)\n",
         "display(df.sort_values(by=['model_short','condition']).head(20))\n",
-        "# Basic accuracy comparison (if available)\n",
+        "# Show top models by accuracy with confidence scores\n",
         "if 'accuracy_mean' in df.columns:\n",
-        "    plot_df = df.sort_values('accuracy_mean', ascending=False).head(20)\n",
-        "    plt.figure(figsize=(10,6))\n",
+        "    top_models = df.sort_values('accuracy_mean', ascending=False).head(10)\n",
+        "    display_cols = ['model_short', 'condition', 'accuracy_mean', 'confidence_score', 'num_seeds']\n",
+        "    print('\\n=== Top 10 Most Accurate Models (with Confidence Scores) ===')\n",
+        "    display(top_models[[c for c in display_cols if c in top_models.columns]])\n",
+        "    plot_df = top_models\n",
+        "    plt.figure(figsize=(12,6))\n",
         "    sns.barplot(data=plot_df, x='accuracy_mean', y='model_short', hue='condition', dodge=False)\n",
-        "    plt.title('Top 20 groups by accuracy_mean')\n",
+        "    plt.title('Top 10 Groups by Accuracy (with Judge Agreement Scores)')\n",
         "    plt.tight_layout()\n",
         "    plt.show()\n",
     ]
@@ -287,6 +389,11 @@ def main() -> None:
         help="Directory containing evaluated JSON files.",
     )
     parser.add_argument(
+        "--agreement_report",
+        default="outputs/LLM-evaluation/agreement_report.json",
+        help="Optional path to agreement_report.json for judge agreement scores.",
+    )
+    parser.add_argument(
         "--output",
         default="outputs/seed_aggregate_metrics_from_judged.json",
         help="Path to write aggregated metrics JSON.",
@@ -316,7 +423,11 @@ def main() -> None:
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
 
-    aggregates = aggregate_predictions(input_dir)
+    agreement_report_path = (
+        Path(args.agreement_report) if args.agreement_report else None
+    )
+
+    aggregates = aggregate_predictions(input_dir, agreement_report_path)
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

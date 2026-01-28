@@ -88,18 +88,28 @@ def _rank_by(
     higher_is_better: bool = True,
     top_k: int = 5,
 ) -> List[Dict[str, Any]]:
-    """Rank entries by a specific key."""
+    """Rank entries by a specific key, including confidence scores."""
     candidates = [e for e in entries if e.get(key) is not None]
     candidates.sort(key=lambda x: x[key], reverse=higher_is_better)
-    return [
-        {
-            "rank": idx + 1,
-            "model": item.get("model_short"),
-            "condition": item.get("condition"),
-            key: item.get(key),
-        }
-        for idx, item in enumerate(candidates[:top_k])
-    ]
+
+    results = []
+    for idx, item in enumerate(candidates[:top_k]):
+        # Extract confidence score, handling both scalar and dict formats
+        conf_score = item.get("confidence_score")
+        if isinstance(conf_score, dict):
+            # If it's aggregated (has mean/std), use the mean
+            conf_score = conf_score.get("mean")
+
+        results.append(
+            {
+                "rank": idx + 1,
+                "model": item.get("model_short"),
+                "condition": item.get("condition"),
+                key: item.get(key),
+                "confidence_score": conf_score,
+            }
+        )
+    return results
 
 
 def _extract_metrics_from_entry(entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -285,13 +295,44 @@ def build_efficiency_report_from_aggregate(
     top_k: int = 5,
     include_per_seed: bool = False,
     gpu_hour_usd: Optional[float] = None,
+    agreement_report_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Build efficiency report from seed aggregate metrics JSON."""
+    """Build efficiency report from seed aggregate metrics JSON.
+
+    Args:
+        aggregate_path: Path to seed_aggregate_metrics_from_judged.json
+        weights: Efficiency weights for scoring
+        top_k: Number of top entries to include in rankings
+        include_per_seed: Whether to include per-seed efficiency scores
+        gpu_hour_usd: GPU cost per hour for cost calculations
+        agreement_report_path: Optional path to agreement_report.json for confidence scores
+    """
     weights = weights or EfficiencyWeights()
 
     data = load_json(aggregate_path)
     if not isinstance(data, list):
         raise ValueError(f"Expected list in {aggregate_path}, got {type(data)}")
+
+    # Load agreement scores if provided
+    agreement_scores: Dict[str, Dict[str, Any]] = {}
+    if agreement_report_path and agreement_report_path.exists():
+        try:
+            agreement_data = load_json(agreement_report_path)
+            per_source = agreement_data.get("per_source_file", {})
+            for source_file, metrics in per_source.items():
+                if isinstance(metrics, dict):
+                    # Use mean_kappa as primary confidence metric (pairwise agreement)
+                    confidence = metrics.get("mean_kappa")
+                    agreement_scores[source_file] = {
+                        "confidence_score": confidence,
+                        "mean_kappa": metrics.get("mean_kappa"),
+                        "min_kappa": metrics.get("min_kappa"),
+                        "max_kappa": metrics.get("max_kappa"),
+                    }
+        except Exception as e:
+            print(
+                f"Warning: Could not load agreement report from {agreement_report_path}: {e}"
+            )
 
     entries: List[Dict[str, Any]] = []
 
@@ -332,6 +373,18 @@ def build_efficiency_report_from_aggregate(
         metrics = item.get("metrics", {})
         if "accuracy" in metrics and isinstance(metrics["accuracy"], dict):
             entry["accuracy_std"] = metrics["accuracy"].get("std")
+
+        # Extract confidence score from judge agreement data if available
+        confidence_score = None
+        judge_agreement = item.get("judge_agreement", {})
+        if isinstance(judge_agreement, dict):
+            conf = judge_agreement.get("confidence_score")
+            # Extract mean if it's aggregated (has mean/std)
+            if isinstance(conf, dict):
+                confidence_score = conf.get("mean")
+            else:
+                confidence_score = conf
+        entry["confidence_score"] = confidence_score
 
         # Process per-seed data if requested
         if include_per_seed:
@@ -583,8 +636,28 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    "cols = ['model_short', 'condition', 'accuracy', 'latency_mean_ms', 'efficiency_score']\n",
-                    "display(df[cols].sort_values('efficiency_score', ascending=False).head(10))\n",
+                    "cols = ['model_short', 'condition', 'accuracy', 'latency_mean_ms', 'efficiency_score', 'confidence_score']\n",
+                    "display(df[[c for c in cols if c in df.columns]].sort_values('efficiency_score', ascending=False).head(10))\n",
+                ],
+            },
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": [
+                    "## Top Most Accurate Models (with Judge Confidence Scores)\n"
+                ],
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "metadata": {},
+                "outputs": [],
+                "source": [
+                    "# Show top accurate models with confidence scores\n",
+                    "acc_cols = ['model_short', 'condition', 'accuracy', 'confidence_score', 'num_seeds', 'latency_mean_ms']\n",
+                    "top_accurate = df[[c for c in acc_cols if c in df.columns]].sort_values('accuracy', ascending=False).head(10)\n",
+                    "print('\\n=== Top 10 Most Accurate Models (with Judge Agreement Confidence) ===')\n",
+                    "display(top_accurate)\n",
                 ],
             },
             {
