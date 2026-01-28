@@ -62,57 +62,50 @@ def resolve_judge_models(
     models_config_path: Path,
     judge_models: Optional[list],
     judge_model: Optional[str],
-    hf_min_params_b: Optional[float],
-    hf_only: bool,
 ) -> list:
-    models = load_models_config(models_config_path)
+    """Resolve judge models from config or fall back to a fixed allowed set.
 
-    if not models:
-        if judge_model:
-            return [
-                (
-                    judge_model,
-                    ModelConfig(
-                        name=judge_model, short_name=judge_model, provider="azure"
-                    ),
-                )
-            ]
-        if judge_models:
-            return [
-                (
-                    name,
-                    ModelConfig(name=name, short_name=name, provider="azure"),
-                )
-                for name in judge_models
-            ]
-        return [
-            (
-                "gpt-5.2",
-                ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
-            )
-        ]
+    Allowed default judges: `llama-70b`, `gpt-5.2`, `DeepSeek-V3.2`.
+    If a models config exists and contains matching keys those entries are used;
+    otherwise a simple `ModelConfig` with provider="azure" is returned for
+    the requested names.
+    """
+
+    models = load_models_config(models_config_path)
 
     if judge_model:
         judge_models = [judge_model]
 
-    def azure_keys() -> list:
+    # If no config is present, construct simple ModelConfig entries for the
+    # requested models or fall back to the allowed defaults.
+    if not models:
+        if judge_models:
+            return [
+                (name, ModelConfig(name=name, short_name=name, provider="azure"))
+                for name in judge_models
+            ]
         return [
-            key
-            for key, data in models.items()
-            if isinstance(data, dict)
-            and str(data.get("provider", "huggingface")).lower() == "azure"
+            (
+                "llama-70b",
+                ModelConfig(name="llama-70b", short_name="llama-70b", provider="azure"),
+            ),
+            (
+                "gpt-5.2",
+                ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
+            ),
+            (
+                "DeepSeek-V3.2",
+                ModelConfig(
+                    name="DeepSeek-V3.2", short_name="DeepSeek-V3.2", provider="azure"
+                ),
+            ),
         ]
 
+    # If explicit judge models were provided, resolve them against the config.
     if judge_models:
         selected_keys = []
         seen = set()
         for model_arg in judge_models:
-            if str(model_arg).lower() == "azure":
-                for key in azure_keys():
-                    if key not in seen:
-                        selected_keys.append(key)
-                        seen.add(key)
-                continue
             key = resolve_model_key(
                 model_arg,
                 models,
@@ -123,15 +116,19 @@ def resolve_judge_models(
                 selected_keys.append(key)
                 seen.add(key)
     else:
-        if hf_only or hf_min_params_b is not None:
-            selected_keys = [
+        # Default selection: only the allowed three, in this order.
+        default_keys = ["llama-70b", "gpt-5.2", "DeepSeek-V3.2"]
+        selected_keys = [k for k in default_keys if k in models]
+        if not selected_keys:
+            # If none of the allowed keys exist in the config, fall back to any
+            # available azure-models or the first few entries in the config.
+            azure_keys = [
                 key
                 for key, data in models.items()
                 if isinstance(data, dict)
-                and str(data.get("provider", "huggingface")).lower() == "huggingface"
+                and str(data.get("provider", "huggingface")).lower() == "azure"
             ]
-        else:
-            selected_keys = azure_keys()
+            selected_keys = azure_keys or list(models.keys())[:3]
 
     resolved = []
     for key in selected_keys:
@@ -139,26 +136,6 @@ def resolve_judge_models(
         if not isinstance(data, dict):
             continue
         resolved.append((key, ModelConfig(**data)))
-
-    if hf_min_params_b is not None:
-        filtered = []
-        for key, model_cfg in resolved:
-            if str(model_cfg.provider).lower() != "huggingface":
-                if hf_only:
-                    continue
-                filtered.append((key, model_cfg))
-                continue
-            params_b = model_cfg.params_b or 0
-            if params_b >= hf_min_params_b:
-                filtered.append((key, model_cfg))
-        resolved = filtered
-
-    if hf_only:
-        resolved = [
-            (key, model_cfg)
-            for key, model_cfg in resolved
-            if str(model_cfg.provider).lower() == "huggingface"
-        ]
 
     return resolved
 
@@ -233,17 +210,7 @@ def main():
         default="configs/models.yaml",
         help="Models config file (default: configs/models.yaml)",
     )
-    parser.add_argument(
-        "--hf_min_params_b",
-        type=float,
-        default=None,
-        help="Only include Hugging Face judge models with params_b >= this value.",
-    )
-    parser.add_argument(
-        "--hf_only",
-        action="store_true",
-        help="Restrict judges to Hugging Face models only.",
-    )
+    # Note: HF-size filtering (--hf_min_params_b / --hf_only) removed.
     parser.add_argument(
         "--predictions_dir",
         default="outputs/model_predictions",
@@ -280,8 +247,6 @@ def main():
         Path(args.models_config),
         args.judge_models,
         None,
-        args.hf_min_params_b,
-        args.hf_only,
     )
     if not judge_entries:
         raise ValueError("No judge models resolved from config.")
@@ -391,6 +356,7 @@ def main():
         from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
+            build_agreement_notebook,
         )
 
         eval_datasets_dir = output_dir / "evaluated_datasets"
@@ -404,6 +370,14 @@ def main():
                 output_path=output_dir / "agreement_report.json",
             )
             print_agreement_summary(agreement_report)
+            try:
+                notebook_path = output_dir / "agreement_report.ipynb"
+                build_agreement_notebook(
+                    output_dir / "agreement_report.json", notebook_path
+                )
+                print(f"Agreement notebook: {notebook_path}")
+            except Exception as e:
+                print(f"Warning: could not build agreement notebook: {e}")
         except ValueError as e:
             print(f"Skipping agreement analysis: {e}")
 

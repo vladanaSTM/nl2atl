@@ -19,7 +19,7 @@ export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 
 # Optional overrides via environment variables.
 DATASETS=${DATASETS:-all}
-JUDGE_MODELS=${JUDGE_MODELS:-}
+JUDGE_MODELS=${JUDGE_MODELS:-llama-70b}
 MODELS_CONFIG=${MODELS_CONFIG:-configs/models.yaml}
 PREDICTIONS_DIR=${PREDICTIONS_DIR:-outputs/model_predictions}
 OUTPUT_DIR=${OUTPUT_DIR:-outputs/LLM-evaluation}
