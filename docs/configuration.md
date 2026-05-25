@@ -18,17 +18,17 @@ Current defaults:
 ```yaml
 experiment:
   seed: 42
-  num_seeds: 5
+  num_seeds: 1
 
 data:
   path: "./data/dataset_gold_no_difficulty.json"
   train_size: 0.70
   val_size: 0.10
   test_size: 0.20
-  augment_factor: 10
+  augment_factor: 2
 
 training:
-  num_epochs: 10
+  num_epochs: 5
   batch_size: 10
   gradient_accumulation_steps: 8
   learning_rate: 2.0e-4
@@ -73,7 +73,7 @@ or a starting seed plus count:
 ```yaml
 experiment:
   seed: 42
-  num_seeds: 5
+  num_seeds: 1
 ```
 
 Each seed creates a different train/validation/test shuffle.

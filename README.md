@@ -61,7 +61,7 @@ data:
   train_size: 0.70
   val_size: 0.10
   test_size: 0.20
-  augment_factor: 10
+  augment_factor: 2
 ```
 
 Augmentation is applied only after splitting, and only to the training split.

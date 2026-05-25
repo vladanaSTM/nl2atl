@@ -10,6 +10,13 @@ def test_clean_output_strips_think_and_tags():
     assert cleaned == "<<A>>F p"
 
 
+def test_clean_output_extracts_mistral_inst_answer():
+    evaluator = ExactMatchEvaluator()
+    response = "<s>[INST] Convert to ATL formula: <<Bad>>F prompt [/INST] <<A>>F p</s>"
+    cleaned = evaluator.clean_output(response, model_type="mistral")
+    assert cleaned == "<<A>>F p"
+
+
 def test_normalize_symbols_equivalence():
     evaluator = ExactMatchEvaluator()
     a = "<<A>>G (p ∧ q)"

@@ -32,12 +32,19 @@ class ExactMatchEvaluator(BaseEvaluator):
 
     def _extract_assistant_response(self, response: str, model_type: str) -> str:
         """Extract assistant response based on model type."""
-        if model_type in ("qwen", "mistral"):
+        if model_type == "qwen":
             if "<|im_start|>assistant" in response:
                 response = response.split("<|im_start|>assistant")[-1]
             response = response.replace("<|im_end|>", "")
             response = response.replace("<|im_start|>", "")
             response = response.replace("</s>", "")
+
+        elif model_type == "mistral":
+            if "[/INST]" in response:
+                response = response.split("[/INST]")[-1]
+            response = response.replace("[INST]", "")
+            response = response.replace("</s>", "")
+            response = response.replace("<s>", "")
 
         elif model_type == "phi3":
             if "<|assistant|>" in response:

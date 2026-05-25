@@ -202,6 +202,33 @@ def _format_gemma(
     return prompt
 
 
+def _format_mistral(
+    system_prompt: str,
+    input_text: str,
+    output_text: Optional[str],
+    tokenizer: Optional[Any],
+) -> str:
+    """Format prompt for Mistral instruct models."""
+    user_content = f"{system_prompt.strip()}\n\nConvert to ATL formula: {input_text}"
+    messages = [{"role": "user", "content": user_content}]
+
+    add_generation_prompt = output_text is None
+    if output_text is not None:
+        messages.append({"role": "assistant", "content": output_text})
+
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        return tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=add_generation_prompt,
+        )
+
+    prompt = f"<s>[INST] {user_content} [/INST]"
+    if output_text is not None:
+        prompt += f" {output_text}</s>"
+    return prompt
+
+
 def format_prompt(
     input_text: str,
     output_text: Optional[str] = None,
@@ -232,14 +259,18 @@ def format_prompt(
         exclude_inputs=exclude_inputs,
     )
 
-    # Handle Gemma separately due to chat template needs
+    # Prefer model-owned chat templates when available for families whose
+    # formatting varies across releases.
     if model_type == ModelType.GEMMA:
         return _format_gemma(system_prompt, input_text, output_text, tokenizer)
+
+    if model_type == ModelType.MISTRAL:
+        return _format_mistral(system_prompt, input_text, output_text, tokenizer)
 
     # Build prompt based on model type
     user_content = f"Convert to ATL formula: {input_text}"
 
-    if model_type in (ModelType.QWEN, ModelType.MISTRAL):
+    if model_type == ModelType.QWEN:
         prompt = (
             f"<|im_start|>system\n{system_prompt}<|im_end|>\n"
             f"<|im_start|>user\n{user_content}<|im_end|>\n"

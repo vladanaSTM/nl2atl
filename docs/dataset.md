@@ -59,7 +59,7 @@ Splits are seeded shuffles, not stratified by difficulty.
 from src.data_utils import split_data, augment_data
 
 train, val, test = split_data(data, train_size=0.70, val_size=0.10, test_size=0.20, seed=42)
-train_aug = augment_data(train, augment_factor=10)
+train_aug = augment_data(train, augment_factor=2)
 ```
 
 Augmentation happens after splitting and only on the training split. Augmented rows keep the same `outputs` list.

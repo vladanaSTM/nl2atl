@@ -83,3 +83,31 @@ def test_format_prompt_gemma_uses_tokenizer():
     )
     assert prompt == "TEMPLATE"
     assert tokenizer.seen is not None
+
+
+def test_format_prompt_mistral_uses_tokenizer_template():
+    tokenizer = _FakeTokenizer()
+    prompt = few_shot.format_prompt(
+        input_text="A",
+        output_text=None,
+        few_shot=False,
+        model_type=ModelType.MISTRAL,
+        tokenizer=tokenizer,
+    )
+    assert prompt == "TEMPLATE"
+    assert tokenizer.seen is not None
+    assert tokenizer.seen["messages"][0]["role"] == "user"
+    assert tokenizer.seen["add_generation_prompt"] is True
+
+
+def test_format_prompt_mistral_fallback_uses_inst_tags():
+    prompt = few_shot.format_prompt(
+        input_text="A",
+        output_text="<<A>>F p",
+        few_shot=False,
+        model_type=ModelType.MISTRAL,
+    )
+    assert "[INST]" in prompt
+    assert "[/INST]" in prompt
+    assert "<|im_start|>" not in prompt
+    assert prompt.endswith("<<A>>F p</s>")
