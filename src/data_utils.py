@@ -4,16 +4,35 @@ Data loading, splitting, and augmentation utilities.
 
 import random
 import re
-from typing import Dict, List, Tuple
-
-from sklearn.model_selection import train_test_split
+from typing import Any, Dict, List, Optional, Tuple
 
 from .infra.io import load_json, save_json
 
 
+def get_preferred_output(item: Dict[str, Any]) -> Optional[str]:
+    """Return the preferred output formula for a dataset item."""
+    for key in ("output", "output_2", "output_1"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def normalize_dataset_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize dataset rows to the in-memory schema used by the project."""
+    normalized = dict(item)
+    preferred_output = get_preferred_output(normalized)
+    if preferred_output is not None:
+        normalized["output"] = preferred_output
+    return normalized
+
+
 def load_data(filepath: str) -> List[Dict]:
     """Load dataset from JSON file."""
-    return load_json(filepath)
+    data = load_json(filepath)
+    if not isinstance(data, list):
+        raise ValueError(f"Expected dataset list in {filepath}")
+    return [normalize_dataset_item(item) for item in data if isinstance(item, dict)]
 
 
 def save_data(data: List[Dict], filepath: str) -> None:
@@ -28,10 +47,10 @@ def split_data(
     seed: int = 42,
 ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
-    Split data into train, validation, and test sets with stratification.
+    Split data into train, validation, and test sets.
 
     Args:
-        data: List of data items with 'difficulty' field for stratification
+        data: List of data items
         test_size: Fraction of data for test+validation combined
         val_size: Fraction of test+validation to use for validation
         seed: Random seed for reproducibility
@@ -39,22 +58,24 @@ def split_data(
     Returns:
         Tuple of (train_data, val_data, test_data)
     """
-    labels = [item.get("difficulty") for item in data]
+    if not data:
+        return [], [], []
 
-    train_data, temp_data, train_labels, temp_labels = train_test_split(
-        data,
-        labels,
-        test_size=test_size,
-        random_state=seed,
-        stratify=labels,
-    )
+    shuffled = list(data)
+    random.Random(seed).shuffle(shuffled)
 
-    val_data, test_data = train_test_split(
-        temp_data,
-        test_size=val_size,
-        random_state=seed,
-        stratify=temp_labels,
-    )
+    temp_count = int(round(len(shuffled) * test_size))
+    temp_count = max(0, min(len(shuffled), temp_count))
+    train_count = len(shuffled) - temp_count
+
+    train_data = shuffled[:train_count]
+    temp_data = shuffled[train_count:]
+
+    val_count = int(round(len(temp_data) * val_size))
+    val_count = max(0, min(len(temp_data), val_count))
+
+    val_data = temp_data[:val_count]
+    test_data = temp_data[val_count:]
 
     return train_data, val_data, test_data
 
@@ -100,16 +121,17 @@ def augment_data(data_list: List[Dict], augment_factor: int = 5) -> List[Dict]:
     augmented = []
 
     for item in data_list:
+        normalized_item = normalize_dataset_item(item)
         # Always include original
-        augmented.append(item)
+        augmented.append(normalized_item)
 
         # Add paraphrased versions
         for _ in range(augment_factor - 1):
-            new_input = _apply_paraphrase(item["input"])
+            new_input = _apply_paraphrase(normalized_item["input"])
             augmented.append(
                 {
                     "input": new_input,
-                    "output": item["output"],
+                    "output": get_preferred_output(normalized_item),
                 }
             )
 

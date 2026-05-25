@@ -14,6 +14,8 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional, Union
 
+from ..data_utils import get_preferred_output
+
 # Data path
 DATA = "data/dataset.json"
 
@@ -451,7 +453,7 @@ def process_dataset(
 
     for item in dataset:
         nl_input = item["input"]
-        formula = item["output"]
+        formula = get_preferred_output(item) or ""
 
         classification, scores = classify_difficulty(
             nl_input, formula, formula_weight, nl_weight, threshold

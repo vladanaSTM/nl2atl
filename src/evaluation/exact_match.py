@@ -9,6 +9,7 @@ from typing import Dict, List, Any, Optional, Iterable, Tuple
 
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
+from ..data_utils import get_preferred_output
 from ..models.registry import generate, GenerationResult
 from ..models.few_shot import format_prompt
 
@@ -315,14 +316,15 @@ class ExactMatchEvaluator(BaseEvaluator):
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             exact_match = int(
-                self.normalize(item["output"]) == self.normalize(generated)
+                self.normalize(get_preferred_output(item) or "")
+                == self.normalize(generated)
             )
 
             # Build result dict
             result_dict = {
                 "id": item.get("id", i),
                 "input": item["input"],
-                "expected": item["output"],
+                "expected": get_preferred_output(item),
                 "generated": generated,
                 "difficulty": item.get("difficulty"),
                 "exact_match": exact_match,

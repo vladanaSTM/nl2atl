@@ -7,8 +7,8 @@ def test_prepare_data_splits_and_augments(tmp_path):
     dataset_path = tmp_path / "dataset.json"
     data = []
     for i in range(10):
-        data.append({"input": f"easy {i}", "output": "<<A>>F p", "difficulty": "easy"})
-        data.append({"input": f"hard {i}", "output": "<<A>>G p", "difficulty": "hard"})
+        data.append({"input": f"item a {i}", "output": "<<A>>F p"})
+        data.append({"input": f"item b {i}", "output_2": "<<A>>G p"})
     dataset_path.write_text(json.dumps(data))
 
     manager = ExperimentDataManager(

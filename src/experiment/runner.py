@@ -14,6 +14,7 @@ from trl import SFTTrainer
 
 from ..config import Config, ModelConfig, ExperimentCondition
 from ..constants import Provider
+from ..data_utils import get_preferred_output
 from ..evaluation.exact_match import ExactMatchEvaluator
 from ..models.few_shot import format_prompt
 from ..models.registry import load_model, get_model_type, clear_gpu_memory
@@ -43,7 +44,9 @@ class ExperimentRunner:
             seed=config.seed,
             augment_factor=config.augment_factor,
         )
-        self.reporter = reporter or ExperimentReporter(output_dir=Path(config.output_dir))
+        self.reporter = reporter or ExperimentReporter(
+            output_dir=Path(config.output_dir)
+        )
 
         # Global seeding for reproducibility
         self._set_global_seed(self.config.seed)
@@ -156,7 +159,7 @@ class ExperimentRunner:
                     "text": [
                         format_prompt(
                             item["input"],
-                            item["output"],
+                            get_preferred_output(item),
                             few_shot=False,
                             model_type=model_type,
                             tokenizer=tokenizer,

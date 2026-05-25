@@ -31,7 +31,7 @@ def test_get_few_shot_examples_excludes_inputs():
 def test_format_few_shot_prompt_includes_examples():
     prompt = few_shot._format_few_shot_section(
         [
-            {"input": "A", "output": "<<A>>F p"},
+            {"input": "A", "output_2": "<<A>>F p"},
             {"input": "B", "output": "<<B>>G q"},
         ]
     )
