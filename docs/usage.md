@@ -106,13 +106,14 @@ Example output:
 Loading model: Qwen/Qwen2.5-3B-Instruct
 Preparing dataset (seed=42)...
   Train: 210 examples (augmented: 2100)
-  Test: 90 examples
+  Validation: 30 examples
+  Test: 60 examples
 
 Running inference...
-Progress: 90/90 [████████████████████] 100% 
+Progress: 60/60 [████████████████████] 100% 
 
 Results:
-  Exact match: 74/90 (82.2%)
+  Exact match: 49/60 (81.7%)
   Mean latency: 520.1 ms
   P95 latency: 910.5 ms
   Total time: 2m 15s
@@ -383,7 +384,7 @@ Each evaluated file contains:
       "gold": "<<User>>F p",
       "prediction": "<<User>>F p",
       "correct": "yes",
-      "reasoning": "Exact match (normalized)",
+      "reasoning": "Exact match against an accepted gold formula.",
       "decision_method": "exact"
     }
   ]
@@ -632,7 +633,7 @@ nl2atl classify-difficulty --input INPUT_FILE [OPTIONS]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--input`, `-i` | path | data/dataset.json | Input dataset |
+| `--input`, `-i` | path | data/dataset_gold_no_difficulty.json | Input dataset |
 | `--output`, `-o` | path | same as input | Output dataset |
 | `--formula-weight`, `-fw` | float | 0.4 | Formula complexity weight |
 | `--nl-weight`, `-nw` | float | 0.6 | NL ambiguity weight |
@@ -643,25 +644,25 @@ nl2atl classify-difficulty --input INPUT_FILE [OPTIONS]
 
 **Basic classification:**
 ```bash
-nl2atl classify-difficulty --input data/dataset.json
+uv run nl2atl classify-difficulty --input data/dataset_gold_no_difficulty.json
 ```
 
 **With detailed output:**
 ```bash
-nl2atl classify-difficulty --input data/dataset.json --verbose
+uv run nl2atl classify-difficulty --input data/dataset_gold_no_difficulty.json --verbose
 ```
 
 **Save to different file:**
 ```bash
-nl2atl classify-difficulty \
-  --input data/dataset.json \
+uv run nl2atl classify-difficulty \
+  --input data/dataset_gold_no_difficulty.json \
   --output data/dataset_labeled.json
 ```
 
 **Custom weights:**
 ```bash
-nl2atl classify-difficulty \
-  --input data/dataset.json \
+uv run nl2atl classify-difficulty \
+  --input data/dataset_gold_no_difficulty.json \
   --formula-weight 0.5 \
   --nl-weight 0.5 \
   --threshold 4.5
@@ -669,8 +670,8 @@ nl2atl classify-difficulty \
 
 **Prioritize NL ambiguity:**
 ```bash
-nl2atl classify-difficulty \
-  --input data/dataset.json \
+uv run nl2atl classify-difficulty \
+  --input data/dataset_gold_no_difficulty.json \
   --formula-weight 0.3 \
   --nl-weight 0.7
 ```

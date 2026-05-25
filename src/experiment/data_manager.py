@@ -12,12 +12,14 @@ class ExperimentDataManager:
     def __init__(
         self,
         data_path: Path,
+        train_size: float,
         test_size: float,
         val_size: float,
         seed: int,
         augment_factor: int,
     ) -> None:
         self.data_path = Path(data_path)
+        self.train_size = train_size
         self.test_size = test_size
         self.val_size = val_size
         self.seed = seed
@@ -40,6 +42,7 @@ class ExperimentDataManager:
         """Split dataset into train/val/test."""
         train, val, test = split_data(
             dataset,
+            train_size=self.train_size,
             test_size=self.test_size,
             val_size=self.val_size,
             seed=self.seed,
@@ -62,7 +65,7 @@ class ExperimentDataManager:
         List[Dict[str, Any]],
         List[Dict[str, Any]],
     ]:
-        """Load, split, and augment dataset."""
+        """Load originals, split them, then augment the training split only."""
         dataset = self.load_dataset()
         train, val, test = self.split_dataset(dataset)
         train_aug = self.augment_training_data(train)

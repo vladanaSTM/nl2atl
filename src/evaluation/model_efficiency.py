@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ..infra.io import load_json, save_json
 
@@ -24,16 +24,22 @@ class EfficiencyWeights:
         }
 
 
-def _safe_mean(values: List[float]) -> Optional[float]:
-    if not values:
-        return None
-    return round(sum(values) / len(values), 6)
+def _numeric_values(values: Iterable[Any]) -> List[float]:
+    return [float(value) for value in values if value is not None]
 
 
-def _safe_sum(values: List[float]) -> Optional[float]:
-    if not values:
+def _safe_mean(values: Iterable[Any]) -> Optional[float]:
+    numeric = _numeric_values(values)
+    if not numeric:
         return None
-    return round(sum(values), 6)
+    return round(sum(numeric) / len(numeric), 6)
+
+
+def _safe_sum(values: Iterable[Any]) -> Optional[float]:
+    numeric = _numeric_values(values)
+    if not numeric:
+        return None
+    return round(sum(numeric), 6)
 
 
 def _normalize(
@@ -516,6 +522,195 @@ def build_efficiency_report_from_aggregate(
     return report
 
 
+def _accuracy_from_judge_summary(
+    prediction_path: Path,
+    judge_summary: Optional[Dict[str, Any]],
+) -> Optional[float]:
+    """Return LLM-judge accuracy for a prediction file when available."""
+    if not judge_summary:
+        return None
+
+    for item in judge_summary.get("per_file", []):
+        if not isinstance(item, dict):
+            continue
+        source_file = item.get("source_file")
+        if source_file not in {prediction_path.name, str(prediction_path)}:
+            continue
+        metrics = item.get("metrics", {})
+        accuracy = metrics.get("accuracy") if isinstance(metrics, dict) else None
+        return float(accuracy) if accuracy is not None else None
+
+    return None
+
+
+def _accuracy_from_predictions(
+    metadata: Dict[str, Any],
+    predictions: List[Dict[str, Any]],
+) -> Optional[float]:
+    """Return exact-match accuracy from metadata or prediction rows."""
+    metrics = metadata.get("metrics", {})
+    if isinstance(metrics, dict) and metrics.get("exact_match") is not None:
+        return float(metrics["exact_match"])
+
+    matches = [row.get("exact_match") for row in predictions if "exact_match" in row]
+    if not matches:
+        return None
+    return round(sum(1 for value in matches if bool(value)) / len(matches), 6)
+
+
+def _prediction_file_entry(
+    prediction_path: Path,
+    judge_summary: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build one efficiency entry from a prediction JSON file."""
+    payload = load_json(prediction_path)
+    metadata = payload.get("metadata", {}) if isinstance(payload, dict) else {}
+    predictions = payload.get("predictions", []) if isinstance(payload, dict) else []
+    if not isinstance(predictions, list):
+        predictions = []
+
+    metrics = metadata.get("metrics", {}) if isinstance(metadata, dict) else {}
+    if not isinstance(metrics, dict):
+        metrics = {}
+
+    judge_accuracy = _accuracy_from_judge_summary(prediction_path, judge_summary)
+    if judge_accuracy is not None:
+        accuracy = judge_accuracy
+        accuracy_source = "llm_judge"
+    else:
+        accuracy = _accuracy_from_predictions(metadata, predictions)
+        accuracy_source = "exact_match" if accuracy is not None else None
+
+    total_samples = metadata.get("total_samples") or len(predictions)
+    latency_total_ms = metadata.get("latency_total_ms")
+    if latency_total_ms is None and metadata.get("duration_seconds") is not None:
+        latency_total_ms = float(metadata["duration_seconds"]) * 1000.0
+    if latency_total_ms is None:
+        latencies = [
+            row.get("latency_ms")
+            for row in predictions
+            if row.get("latency_ms") is not None
+        ]
+        latency_total_ms = _safe_sum([float(value) for value in latencies])
+
+    latency_mean_ms = metadata.get("latency_mean_ms")
+    if latency_mean_ms is None and latency_total_ms is not None and total_samples:
+        latency_mean_ms = round(float(latency_total_ms) / float(total_samples), 6)
+
+    total_tokens_input = metrics.get("total_tokens_input") or sum(
+        int(row.get("tokens_input", 0)) for row in predictions
+    )
+    total_tokens_output = metrics.get("total_tokens_output") or sum(
+        int(row.get("tokens_output", 0)) for row in predictions
+    )
+    total_tokens = (
+        metrics.get("total_tokens") or total_tokens_input + total_tokens_output
+    )
+
+    extracted = {
+        "accuracy": accuracy,
+        "latency_mean_ms": latency_mean_ms,
+        "latency_total_ms": latency_total_ms,
+        "total_tokens": total_tokens,
+        "total_tokens_input": total_tokens_input,
+        "total_tokens_output": total_tokens_output,
+        "n_examples": total_samples,
+    }
+    derived = _calculate_derived_metrics(
+        extracted,
+        gpu_hour_usd=metadata.get("gpu_hour_usd"),
+    )
+
+    entry = {
+        "source_file": str(prediction_path),
+        "run_id": metadata.get("run_id") or prediction_path.stem,
+        "model": metadata.get("model"),
+        "model_short": metadata.get("model_short") or metadata.get("model"),
+        "condition": metadata.get("condition"),
+        "accuracy": accuracy,
+        "accuracy_source": accuracy_source,
+        "latency_mean_ms": latency_mean_ms,
+        "latency_total_ms": latency_total_ms,
+        "total_tokens": total_tokens,
+        "total_tokens_input": total_tokens_input,
+        "total_tokens_output": total_tokens_output,
+        "n_examples": total_samples,
+        "gpu_hour_usd": metadata.get("gpu_hour_usd"),
+        "cost_total_usd": metadata.get("cost_total_usd"),
+        "avg_cost_usd": metadata.get("avg_cost_usd"),
+        "cost_per_1k_tokens_usd": metadata.get("cost_per_1k_tokens_usd"),
+        **derived,
+    }
+
+    for key in ("cost_total_usd", "avg_cost_usd", "cost_per_1k_tokens_usd"):
+        if entry.get(key) is None:
+            entry[key] = derived.get(key)
+
+    return entry
+
+
+def build_efficiency_report(
+    prediction_files: List[Path],
+    judge_summary: Optional[Dict[str, Any]] = None,
+    weights: Optional[EfficiencyWeights] = None,
+    top_k: int = 5,
+) -> Dict[str, Any]:
+    """Build an efficiency report directly from prediction JSON files."""
+    weights = weights or EfficiencyWeights()
+    entries = [
+        _prediction_file_entry(Path(prediction_file), judge_summary)
+        for prediction_file in prediction_files
+    ]
+
+    accuracy_norm = _normalize([entry.get("accuracy") for entry in entries], True)
+    cost_norm = _normalize([entry.get("avg_cost_usd") for entry in entries], False)
+    latency_norm = _normalize(
+        [entry.get("latency_mean_ms") for entry in entries], False
+    )
+
+    for entry, acc_norm, cost_norm_value, latency_norm_value in zip(
+        entries, accuracy_norm, cost_norm, latency_norm
+    ):
+        entry["accuracy_normalized"] = acc_norm
+        entry["cost_normalized"] = cost_norm_value
+        entry["latency_normalized"] = latency_norm_value
+        entry["efficiency_score"] = _weighted_score(
+            acc_norm,
+            cost_norm_value,
+            latency_norm_value,
+            weights,
+        )
+
+    return {
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "weights": weights.to_dict(),
+        "totals": {
+            "models": len(entries),
+            "with_accuracy": sum(
+                1 for entry in entries if entry.get("accuracy") is not None
+            ),
+            "with_cost": sum(
+                1 for entry in entries if entry.get("avg_cost_usd") is not None
+            ),
+            "with_latency": sum(
+                1 for entry in entries if entry.get("latency_mean_ms") is not None
+            ),
+        },
+        "models": entries,
+        "rankings": {
+            "fastest": _rank_by(
+                entries, "latency_mean_ms", higher_is_better=False, top_k=top_k
+            ),
+            "most_accurate": _rank_by(
+                entries, "accuracy", higher_is_better=True, top_k=top_k
+            ),
+            "best_efficiency_score": _rank_by(
+                entries, "efficiency_score", higher_is_better=True, top_k=top_k
+            ),
+        },
+    }
+
+
 def _group_by_condition(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Group entries by condition and calculate aggregate stats."""
     conditions: Dict[str, List[Dict[str, Any]]] = {}
@@ -528,17 +723,9 @@ def _group_by_condition(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     result = {}
     for condition, items in conditions.items():
-        accuracies = [e.get("accuracy") for e in items if e.get("accuracy") is not None]
-        latencies = [
-            e.get("latency_mean_ms")
-            for e in items
-            if e.get("latency_mean_ms") is not None
-        ]
-        efficiencies = [
-            e.get("efficiency_score")
-            for e in items
-            if e.get("efficiency_score") is not None
-        ]
+        accuracies = _numeric_values(e.get("accuracy") for e in items)
+        latencies = _numeric_values(e.get("latency_mean_ms") for e in items)
+        efficiencies = _numeric_values(e.get("efficiency_score") for e in items)
 
         result[condition] = {
             "count": len(items),
@@ -563,17 +750,9 @@ def _group_by_model(entries: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     result = {}
     for model, items in models.items():
-        accuracies = [e.get("accuracy") for e in items if e.get("accuracy") is not None]
-        latencies = [
-            e.get("latency_mean_ms")
-            for e in items
-            if e.get("latency_mean_ms") is not None
-        ]
-        efficiencies = [
-            e.get("efficiency_score")
-            for e in items
-            if e.get("efficiency_score") is not None
-        ]
+        accuracies = _numeric_values(e.get("accuracy") for e in items)
+        latencies = _numeric_values(e.get("latency_mean_ms") for e in items)
+        efficiencies = _numeric_values(e.get("efficiency_score") for e in items)
 
         result[model] = {
             "count": len(items),

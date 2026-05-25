@@ -414,7 +414,7 @@ cli.add_command(my_command_main, name="my-command")
 
 ```bash
 nl2atl my-command --help
-nl2atl my-command --input data/dataset.json
+uv run nl2atl my-command --input data/dataset_gold_no_difficulty.json
 ```
 
 ---

@@ -1,4 +1,4 @@
-# Difficulty classification for NL → ATL
+# Difficulty Classification
 
 This document describes the current difficulty classifier used by NL2ATL to label dataset examples as
 `easy` or `hard`. The implementation lives in [src/evaluation/difficulty.py](../src/evaluation/difficulty.py)
@@ -18,18 +18,18 @@ Each example is assigned a combined score and labeled `hard` if the score is abo
 From the repo root:
 
 ```bash
-nl2atl classify-difficulty --input data/dataset.json --verbose
+uv run nl2atl classify-difficulty --input data/dataset_gold_no_difficulty.json --verbose
 ```
 
 You can also run the module directly:
 
 ```bash
-python -m src.cli.classify_difficulty --input data/dataset.json --verbose
+uv run python -m src.cli.classify_difficulty --input data/dataset_gold_no_difficulty.json --verbose
 ```
 
 Key options (defaults shown):
 
-- `--input/-i`: input JSON (default: `data/dataset.json`)
+- `--input/-i`: input JSON (default: `data/dataset_gold_no_difficulty.json`)
 - `--output/-o`: output JSON (default: same as input)
 - `--formula-weight/-fw`: 0.4
 - `--nl-weight/-nw`: 0.6
@@ -61,9 +61,7 @@ Example output fields:
 
 The combined score is:
 
-$$
-	ext{combined} = w_f \cdot \text{formula\_complexity} + w_{nl} \cdot \text{nl\_ambiguity}
-$$
+`combined = formula_weight * formula_complexity + nl_weight * nl_ambiguity`
 
 Default weights: $w_f = 0.4$, $w_{nl} = 0.6$.
 
@@ -121,7 +119,7 @@ label, scores = classify_difficulty(
 )
 
 dataset = process_dataset(
-    input_path="data/dataset.json",
+    input_path="data/dataset_gold_no_difficulty.json",
     output_path="data/dataset_with_difficulty.json",
     verbose=True,
 )

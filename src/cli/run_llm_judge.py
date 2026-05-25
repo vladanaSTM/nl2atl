@@ -278,15 +278,21 @@ def main():
 
             if evaluated_path.exists() and not args.overwrite:
                 existing_data = load_json(evaluated_path)
-                rows = extract_evaluated_rows(existing_data)
-                metrics = compute_metrics(rows)
-                stats = compute_stats_from_rows(rows)
+                if existing_data.get("prompt_version") == PROMPT_VERSION:
+                    rows = extract_evaluated_rows(existing_data)
+                    metrics = compute_metrics(rows)
+                    stats = compute_stats_from_rows(rows)
 
-                totals["evaluated"] += int(metrics["evaluated"])
-                totals["auto_exact"] += stats.get("auto_exact", 0)
-                totals["llm_calls"] += stats.get("llm_calls", 0)
-                totals["no_llm"] += stats.get("no_llm", 0)
-                continue
+                    totals["evaluated"] += int(metrics["evaluated"])
+                    totals["auto_exact"] += stats.get("auto_exact", 0)
+                    totals["llm_calls"] += stats.get("llm_calls", 0)
+                    totals["no_llm"] += stats.get("no_llm", 0)
+                    continue
+
+                print(
+                    f"Re-evaluating {evaluated_path.name}: "
+                    f"prompt version changed to {PROMPT_VERSION}."
+                )
 
             prediction_data = load_json(pred_path)
             metadata = extract_prediction_metadata(prediction_data)
@@ -299,6 +305,7 @@ def main():
             evaluated_payload = {
                 **metadata,
                 "judge_model": judge_name,
+                "prompt_version": PROMPT_VERSION,
                 "source_file": pred_path.name,
                 "detailed_results": rows,
             }

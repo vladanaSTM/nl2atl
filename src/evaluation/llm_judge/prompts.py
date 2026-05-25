@@ -1,13 +1,15 @@
 """Prompt templates and formatting for LLM judge."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
-PROMPT_VERSION = "v1.0"
+PROMPT_VERSION = "v1.1"
 
 JUDGE_PROMPT_TEMPLATE = (
     "You are an expert judge for ATL (Alternating-time Temporal Logic) formulas.\n"
     "Decide whether the prediction is semantically correct ATL for the given natural-language input.\n"
+    "Some examples have multiple acceptable gold formulas. Mark the prediction correct if it is semantically equivalent to any one gold formula.\n"
+    "Do not require the prediction to satisfy every listed gold formula when alternatives are provided.\n"
     "Be strict about meaning: incorrect if coalition/agent set, temporal operator (X/F/G/U),\n"
     "polarity (!p vs p), or connective (|| vs &&) changes the expressed property.\n\n"
     "Return ONLY machine-parseable JSON with keys correct and reasoning:\n"
@@ -58,12 +60,31 @@ class JudgePromptConfig:
     template: str = JUDGE_PROMPT_TEMPLATE
 
 
+def format_gold_options(gold: Any) -> str:
+    """Format one or more acceptable gold formulas for the judge prompt."""
+    if gold is None:
+        options = []
+    elif isinstance(gold, (list, tuple)):
+        options = [str(item).strip() for item in gold if str(item).strip()]
+    else:
+        options = [str(gold).strip()] if str(gold).strip() else []
+
+    if len(options) <= 1:
+        return options[0] if options else ""
+
+    return "\n".join(f"{index}. {option}" for index, option in enumerate(options, 1))
+
+
 def format_judge_prompt(
     input_text: str,
-    gold: str,
+    gold: Any,
     prediction: str,
     config: Optional[JudgePromptConfig] = None,
 ) -> str:
     """Format a judge evaluation prompt."""
     cfg = config or JudgePromptConfig()
-    return cfg.template.format(input_text=input_text, gold=gold, prediction=prediction)
+    return cfg.template.format(
+        input_text=input_text,
+        gold=format_gold_options(gold),
+        prediction=prediction,
+    )

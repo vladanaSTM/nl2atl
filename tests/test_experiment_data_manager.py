@@ -13,8 +13,9 @@ def test_prepare_data_splits_and_augments(tmp_path):
 
     manager = ExperimentDataManager(
         data_path=dataset_path,
+        train_size=0.7,
+        val_size=0.1,
         test_size=0.2,
-        val_size=0.5,
         seed=1,
         augment_factor=2,
     )
@@ -23,5 +24,5 @@ def test_prepare_data_splits_and_augments(tmp_path):
 
     assert len(full) == 20
     assert len(val) == 2
-    assert len(test) == 2
-    assert len(train_aug) == 32
+    assert len(test) == 4
+    assert len(train_aug) == 28

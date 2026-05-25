@@ -3,6 +3,8 @@
 This guide shows how to wire genVITAMIN’s GUI to use NL2ATL as the backend generator. All changes live in the NL2ATL repo; genVITAMIN only needs a small backend patch.
 If you don’t control genVITAMIN, do not commit changes there—use the patch script or manual patch steps below.
 
+NL2ATL uses uv. Any `requirements.txt` commands in this page apply only to the separate genVITAMIN environment.
+
 Patch compatibility tested with genVITAMIN commit: c5231bcbdaf43c01b2b6dd4c3ad5945224e0c68f
 Repo: https://github.com/MarcoAruta/genVITAMIN (default branch: quyen@optimize_model_checker)
 
@@ -47,10 +49,10 @@ This is faster than `requirements.txt`, which pulls Streamlit/frontend extras.
 
 ## 2) Start the NL2ATL API
 
-Run the NL2ATL API service (see [Usage Guide](../usage.md)) **from the NL2ATL repo root** so config files resolve correctly:
+Run the NL2ATL API service (see [Usage Guide](usage.md)) **from the NL2ATL repo root** so config files resolve correctly:
 
 ```bash
-uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ```
 
 If you start NL2ATL from another working directory, set absolute paths:

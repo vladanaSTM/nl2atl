@@ -11,7 +11,11 @@ from src.evaluation.llm_judge import (
 from src.evaluation.llm_judge.parser import parse_judge_response
 from src.evaluation.llm_judge.prompts import format_judge_prompt
 from src.evaluation.llm_judge.cache import JudgeCache
-from src.evaluation.llm_judge.pipeline import LLMJudge, evaluate_prediction_file
+from src.evaluation.llm_judge.pipeline import (
+    LLMJudge,
+    LLMJudgeEvaluator,
+    evaluate_prediction_file,
+)
 
 
 def test_normalize_text():
@@ -85,6 +89,14 @@ def test_format_judge_prompt_inserts_fields():
     assert "pred" in prompt
 
 
+def test_format_judge_prompt_accepts_multiple_gold_options():
+    prompt = format_judge_prompt("input text", ["gold one", "gold two"], "pred")
+
+    assert "1. gold one" in prompt
+    assert "2. gold two" in prompt
+    assert "semantically equivalent to any one gold formula" in prompt
+
+
 def test_judge_cache_roundtrip(tmp_path):
     cache_path = tmp_path / "cache.json"
     cache = JudgeCache(cache_path)
@@ -109,3 +121,55 @@ def test_evaluate_prediction_file_no_llm(tmp_path):
     assert stats["auto_exact"] == 1
     assert stats["unmatched"] == 1
     assert any(r["decision_method"] == "exact" for r in rows)
+
+
+def test_evaluate_prediction_file_exact_matches_any_gold_option(tmp_path):
+    prediction_path = tmp_path / "pred.json"
+    payload = {
+        "predictions": [
+            {
+                "input": "x",
+                "prediction": "<<A,B>>X p",
+                "expected_options": [
+                    "<<A>>X p_1 && <<B>>X p_2",
+                    "<<A,B>>X p",
+                ],
+                "exact_match": 0,
+            }
+        ]
+    }
+    prediction_path.write_text(json.dumps(payload))
+
+    judge = LLMJudge(judge_model="test", no_llm=True)
+    rows, stats = evaluate_prediction_file(Path(prediction_path), judge, no_llm=True)
+
+    assert stats["auto_exact"] == 1
+    assert rows[0]["correct"] == "yes"
+    assert rows[0]["gold_options"] == [
+        "<<A>>X p_1 && <<B>>X p_2",
+        "<<A,B>>X p",
+    ]
+
+
+def test_llm_judge_evaluator_exact_matches_before_calling_client():
+    class FailingClient:
+        def complete(self, prompt, max_new_tokens=256):
+            raise AssertionError("client should not be called for exact matches")
+
+        def complete_batch(self, prompts, max_new_tokens=256):
+            raise AssertionError("client should not be called for exact matches")
+
+    evaluator = LLMJudgeEvaluator(client=FailingClient())
+    result = evaluator.evaluate_single(
+        {"input": "x", "prediction": "<<A,B>> X p"},
+        {
+            "input": "x",
+            "expected_options": [
+                "<<A>>X p_1 && <<B>>X p_2",
+                "<<A,B>>X p",
+            ],
+        },
+    )
+
+    assert result["correct"] == "yes"
+    assert result["decision_method"] == "exact"

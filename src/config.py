@@ -1,7 +1,7 @@
 """Configuration management for experiments."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .infra.io import load_yaml
 from .constants import (
@@ -58,6 +58,7 @@ class Config:
     models_dir: str = DEFAULT_MODELS_DIR
 
     # Data settings
+    train_size: Optional[float] = None
     test_size: Optional[float] = None
     val_size: Optional[float] = None
     augment_factor: Optional[int] = None
@@ -96,12 +97,16 @@ class Config:
         if seeds:
             seed = seeds[0]
 
+        data_settings = exp_cfg["data"]
+        train_size, val_size, test_size = cls._load_split_sizes(data_settings)
+
         # Build config
         config = cls(
-            data_path=exp_cfg["data"]["path"],
-            test_size=exp_cfg["data"]["test_size"],
-            val_size=exp_cfg["data"]["val_size"],
-            augment_factor=exp_cfg["data"]["augment_factor"],
+            data_path=data_settings["path"],
+            train_size=train_size,
+            val_size=val_size,
+            test_size=test_size,
+            augment_factor=data_settings["augment_factor"],
             seed=seed,
             seeds=seeds,
             num_seeds=num_seeds,
@@ -130,11 +135,35 @@ class Config:
 
         return config
 
+    @staticmethod
+    def _load_split_sizes(
+        data_settings: Dict,
+    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """Load explicit split sizes, converting old holdout-style configs."""
+        if "train_size" in data_settings:
+            return (
+                data_settings["train_size"],
+                data_settings["val_size"],
+                data_settings["test_size"],
+            )
+
+        holdout_size = data_settings.get("test_size")
+        val_share_of_holdout = data_settings.get("val_size")
+        if holdout_size is None or val_share_of_holdout is None:
+            return None, None, None
+
+        val_size = holdout_size * val_share_of_holdout
+        test_size = holdout_size - val_size
+        train_size = 1.0 - holdout_size
+        return train_size, val_size, test_size
+
     def _validate(self) -> None:
         """Validate that required configuration values are present."""
         missing = []
         if self.seed is None:
             missing.append("experiment.seed")
+        if self.train_size is None:
+            missing.append("data.train_size")
         if self.test_size is None:
             missing.append("data.test_size")
         if self.val_size is None:
@@ -145,6 +174,12 @@ class Config:
         if missing:
             raise ValueError(
                 f"Missing required config values in experiments.yaml: {', '.join(missing)}"
+            )
+
+        split_total = self.train_size + self.val_size + self.test_size
+        if not 0.999 <= split_total <= 1.001:
+            raise ValueError(
+                "data.train_size, data.val_size, and data.test_size must sum to 1.0"
             )
 
     def resolve_seeds(self) -> List[int]:

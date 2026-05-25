@@ -1,99 +1,71 @@
 # Architecture
 
-This document summarizes NL2ATL’s current module layout and data flow as implemented in the codebase.
+NL2ATL is organized around one flow: load data, prepare prompts, run a model, evaluate predictions, and save results.
 
-## High‑level flow
+## High-Level Flow
 
-```mermaid
-flowchart TD
-  CLI[nl2atl CLI] --> Runner[ExperimentRunner]
-  Runner --> Data[ExperimentDataManager]
-  Runner --> Models[Model Registry]
-  Runner --> Eval[Exact Match Evaluator]
-  Runner --> Report[ExperimentReporter]
-  Eval --> Outputs[outputs/model_predictions]
-
-  Judge[LLM Judge] --> Outputs
-  Judge --> EvalOut[outputs/LLM-evaluation]
-  Agreement[Judge Agreement] --> EvalOut
-  Efficiency[Model Efficiency] --> EvalOut
+```text
+configs + dataset
+      |
+      v
+Config + ExperimentDataManager
+      |
+      v
+ExperimentRunner
+      |
+      +--> models.registry loads/generates
+      +--> models.few_shot formats prompts
+      +--> evaluation.exact_match scores predictions
+      +--> experiment.reporter saves metadata/results
 ```
 
-## Package structure
+## Main Packages
 
-```
-src/
-  cli/              CLI entry points (run-all, run-single, run-array, judge, etc.)
-  experiment/       experiment orchestration and reporting
-  models/           model loading, prompt formatting, generation
-  evaluation/       exact-match, LLM judge, agreement, efficiency, difficulty
-  infra/            I/O helpers and Azure utilities
-  data_utils.py     dataset split + augmentation helpers
-  api_server.py     FastAPI service
-```
+| Path | Responsibility |
+|---|---|
+| `src/cli/` | Command-line entry points |
+| `src/config.py` | YAML config loading and validation |
+| `src/data_utils.py` | Dataset validation, normalization, splitting, augmentation |
+| `src/experiment/` | Experiment data preparation, orchestration, and reporting |
+| `src/models/` | Prompt formatting, model loading, generation |
+| `src/evaluation/` | Exact match, LLM judge, agreement, efficiency, difficulty tooling |
+| `src/infra/` | JSON/YAML/env helpers and Azure client |
+| `src/api_server.py` | FastAPI generation endpoint |
 
-## Key responsibilities
+## Dataset Boundary
 
-- `src/cli/` — command parsing and task dispatch
-- `src/experiment/` — data splits, training/inference runs, output persistence
-- `src/models/` — model loading (HF/Azure), caching, few‑shot prompt formatting
-- `src/evaluation/` — exact‑match evaluation, LLM‑as‑judge pipeline, agreement, efficiency, difficulty
-- `src/infra/` — I/O helpers, Azure config/client, environment utilities
-- `src/data_utils.py` — stratified split and augmentation utilities
+`src.data_utils.load_data` is the dataset boundary. It validates raw JSON rows, stores every accepted formula in `outputs`, and keeps a preferred `output` for compatibility. Downstream code should use `outputs` or `get_output_options` instead of reading `output_1` or `output_2` directly.
 
-## Execution workflows
+## Experiment Boundary
 
-### Experiment workflow (local or single node)
+`ExperimentRunner` coordinates a run but delegates narrow work:
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant CLI
-    participant Runner
-    participant DataMgr
-    participant Registry
-    participant Evaluator
-    participant Reporter
+- `ExperimentDataManager` loads, splits, and augments data.
+- `models.registry` loads models and generates text.
+- `models.few_shot` builds prompts.
+- `ExactMatchEvaluator` cleans model output and scores exact matches against every accepted formula.
+- `ExperimentReporter` builds metadata and writes JSON files.
 
-    User->>CLI: nl2atl run-all / run-single
-    CLI->>Runner: Config.from_yaml(models.yaml, experiments.yaml)
-    Runner->>DataMgr: prepare_data()
-    DataMgr-->>Runner: train_aug, val, test
-    Runner->>Registry: load_model(...)
-    Runner->>Evaluator: evaluate(model, test_data)
-    Evaluator-->>Runner: metrics + per-sample results
-    Runner->>Reporter: save_result(run_name, result)
+## Evaluation Boundary
+
+Prediction files use:
+
+```json
+{
+  "metadata": {},
+  "predictions": []
+}
 ```
 
-### SLURM array workflow (recommended for sweeps)
+Evaluation tools read those files and write derived outputs under `outputs/LLM-evaluation/`.
 
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant CLI
-    participant Runner
+## API Boundary
 
-    Scheduler->>CLI: nl2atl run-array (task index)
-    CLI->>Runner: Run single (seed, model, condition)
-    Runner-->>CLI: outputs/model_predictions/<run>.json
-```
+The FastAPI app in `src/api_server.py` loads the same configs as the CLI. Environment variables can override config paths and the default model.
 
-`run-array` maps each SLURM array index to exactly one $(seed, model, condition)$ task.
+## Design Principles
 
-## Output artifacts
-
-```
-outputs/
-  model_predictions/<run_name>.json
-  LLM-evaluation/
-    evaluated_datasets/<judge>/...
-    summary__judge-<judge>.json
-    agreement_report.json
-    efficiency_report.json
-```
-
-## Where to extend
-
-- Add models: update `configs/models.yaml` and provider logic in `src/models/registry.py`.
-- Add CLI tasks: create `src/cli/run_*.py` and register in `src/cli/main.py`.
-- Add evaluators: implement `BaseEvaluator` in `src/evaluation/base.py`.
+- Keep dataset normalization in one place: `src/data_utils.py`.
+- Keep config semantics explicit: train/validation/test sizes are final fractions.
+- Keep model-provider differences behind `src/models/registry.py` and `src/infra/azure.py`.
+- Keep generated artifacts under `outputs/`.

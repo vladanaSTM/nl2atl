@@ -14,7 +14,7 @@ from trl import SFTTrainer
 
 from ..config import Config, ModelConfig, ExperimentCondition
 from ..constants import Provider
-from ..data_utils import get_preferred_output
+from ..data_utils import get_output_options
 from ..evaluation.exact_match import ExactMatchEvaluator
 from ..models.few_shot import format_prompt
 from ..models.registry import load_model, get_model_type, clear_gpu_memory
@@ -39,6 +39,7 @@ class ExperimentRunner:
 
         self.data_manager = data_manager or ExperimentDataManager(
             data_path=Path(config.data_path),
+            train_size=config.train_size,
             test_size=config.test_size,
             val_size=config.val_size,
             seed=config.seed,
@@ -63,8 +64,10 @@ class ExperimentRunner:
         self.model_cache: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
         self.reuse_models = os.getenv("REUSE_MODEL_CACHE", "1") != "0"
 
+        train_count = len(self.data_manager.train_data or [])
         print(
-            f"Data loaded: Train={len(self.train_data_aug)}, "
+            f"Data loaded: Train={train_count} "
+            f"(augmented={len(self.train_data_aug)}), "
             f"Val={len(self.val_data)}, Test={len(self.test_data)}"
         )
 
@@ -130,52 +133,52 @@ class ExperimentRunner:
 
         return model, tokenizer
 
-    def _train_model(
+    @staticmethod
+    def _training_max_steps_from_env() -> int:
+        """Return an optional short-run training limit from TRAIN_MAX_STEPS."""
+        raw_value = os.getenv("TRAIN_MAX_STEPS")
+        if not raw_value:
+            return -1
+
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={raw_value}")
+            return -1
+
+        return parsed if parsed > 0 else -1
+
+    @staticmethod
+    def _training_dataset(
+        items: List[Dict[str, Any]],
+        model_type: str,
+        tokenizer: Any,
+    ) -> Dataset:
+        """Build the text dataset consumed by TRL's SFTTrainer."""
+        prompts = []
+        for item in items:
+            outputs = get_output_options(item)
+            if not outputs:
+                raise ValueError(f"Training item is missing output: {item.get('id')}")
+            for output in outputs:
+                prompts.append(
+                    format_prompt(
+                        item["input"],
+                        output,
+                        few_shot=False,
+                        model_type=model_type,
+                        tokenizer=tokenizer,
+                    )
+                )
+        return Dataset.from_dict({"text": prompts})
+
+    def _training_args(
         self,
         model_config: ModelConfig,
-        model_type: str,
-        run_name: str,
-    ) -> str:
-        """Train a model and return the adapter path."""
-        self._assert_finetune_allowed(model_config)
-        print(f"\nTraining {model_config.short_name}...")
-
-        model, tokenizer = load_model(model_config, for_training=True)
-
-        # Optional short-run probe
-        max_steps = -1
-        max_steps_env = os.getenv("TRAIN_MAX_STEPS")
-        if max_steps_env:
-            try:
-                parsed = int(max_steps_env)
-                max_steps = parsed if parsed > 0 else -1
-            except ValueError:
-                print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={max_steps_env}")
-
-        # Prepare datasets
-        def build_dataset(items: List[Dict]) -> Dataset:
-            return Dataset.from_dict(
-                {
-                    "text": [
-                        format_prompt(
-                            item["input"],
-                            get_preferred_output(item),
-                            few_shot=False,
-                            model_type=model_type,
-                            tokenizer=tokenizer,
-                        )
-                        for item in items
-                    ]
-                }
-            )
-
-        train_dataset = build_dataset(self.train_data_aug)
-        val_dataset = build_dataset(self.val_data)
-
-        output_dir = Path(self.config.models_dir) / run_name
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Resolve per-model training overrides
+        output_dir: Path,
+        max_steps: int,
+    ) -> TrainingArguments:
+        """Build Hugging Face training arguments from global and model config."""
         train_batch_size = model_config.train_batch_size or self.config.batch_size
         eval_batch_size = model_config.eval_batch_size or train_batch_size
         grad_accum_steps = (
@@ -183,7 +186,7 @@ class ExperimentRunner:
             or self.config.gradient_accumulation_steps
         )
 
-        training_args = TrainingArguments(
+        return TrainingArguments(
             output_dir=str(output_dir),
             num_train_epochs=self.config.num_epochs,
             per_device_train_batch_size=train_batch_size,
@@ -217,6 +220,30 @@ class ExperimentRunner:
             tf32=True,
         )
 
+    def _train_model(
+        self,
+        model_config: ModelConfig,
+        model_type: str,
+        run_name: str,
+    ) -> str:
+        """Train a model and return the adapter path."""
+        self._assert_finetune_allowed(model_config)
+        print(f"\nTraining {model_config.short_name}...")
+
+        model, tokenizer = load_model(model_config, for_training=True)
+        train_dataset = self._training_dataset(
+            self.train_data_aug, model_type, tokenizer
+        )
+        val_dataset = self._training_dataset(self.val_data, model_type, tokenizer)
+
+        output_dir = Path(self.config.models_dir) / run_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        training_args = self._training_args(
+            model_config=model_config,
+            output_dir=output_dir,
+            max_steps=self._training_max_steps_from_env(),
+        )
+
         trainer = SFTTrainer(
             model=model,
             args=training_args,
@@ -233,6 +260,28 @@ class ExperimentRunner:
         self._cleanup_training(trainer, model, tokenizer, train_dataset, val_dataset)
 
         return str(final_path)
+
+    def _evaluate_model(
+        self,
+        model: Any,
+        tokenizer: Any,
+        model_config: ModelConfig,
+        model_type: str,
+        condition: ExperimentCondition,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Evaluate the loaded model and return metrics plus detailed rows."""
+        metrics = self.evaluator.evaluate(
+            model=model,
+            tokenizer=tokenizer,
+            test_data=self.test_data,
+            model_type=model_type,
+            few_shot=condition.few_shot,
+            num_few_shot=self.config.num_few_shot_examples,
+            verbose=True,
+            price_input_per_1k=model_config.price_input_per_1k,
+            price_output_per_1k=model_config.price_output_per_1k,
+        )
+        return metrics, list(self.evaluator.results)
 
     def _cleanup_training(
         self,
@@ -285,7 +334,6 @@ class ExperimentRunner:
         print(f"Running: {run_name}")
         print(f"{'='*60}")
 
-        # ============== Start experiment timer ==============
         self.reporter.start_timer()
 
         adapter_path = None
@@ -293,34 +341,21 @@ class ExperimentRunner:
         tokenizer = None
 
         try:
-            # Train if needed
             if effective_finetuned:
                 adapter_path = self._train_model(model_config, model_type, run_name)
 
             model, tokenizer = self._load_or_reuse_model(
                 model_config, adapter_path, effective_finetuned
             )
-
-            # Evaluate (with latency tracking)
-            metrics = self.evaluator.evaluate(
+            metrics, detailed_results = self._evaluate_model(
                 model=model,
                 tokenizer=tokenizer,
-                test_data=self.test_data,
+                model_config=model_config,
                 model_type=model_type,
-                few_shot=condition.few_shot,
-                num_few_shot=self.config.num_few_shot_examples,
-                verbose=True,
-                price_input_per_1k=model_config.price_input_per_1k,
-                price_output_per_1k=model_config.price_output_per_1k,
+                condition=condition,
             )
 
-            # ============== Stop timer before building metadata ==============
             self.reporter.stop_timer()
-
-            # ============== Get results with latency info ==============
-            detailed_results = self.evaluator.results
-
-            # ============== Build comprehensive metadata ==============
             metadata = self.reporter.build_run_metadata(
                 config=self.config,
                 run_name=run_name,
@@ -331,8 +366,6 @@ class ExperimentRunner:
                 total_samples=len(self.test_data),
                 results=detailed_results,
             )
-
-            # ============== Add metrics to metadata ==============
             metadata["metrics"] = metrics
 
             print(f"\nResults for {run_name}:")
@@ -342,7 +375,6 @@ class ExperimentRunner:
             if metadata.get("duration_seconds"):
                 print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
 
-            # ============== Restructured result with metadata ==============
             result = {
                 "metadata": metadata,
                 "predictions": detailed_results,

@@ -9,7 +9,7 @@ from typing import Dict, List, Any, Optional, Iterable, Tuple
 
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
-from ..data_utils import get_preferred_output
+from ..data_utils import get_output_options, get_preferred_output
 from ..models.registry import generate, GenerationResult
 from ..models.few_shot import format_prompt
 
@@ -179,20 +179,19 @@ class ExactMatchEvaluator(BaseEvaluator):
             or prediction.get("text")
             or ""
         )
-        reference_text = (
-            reference.get("expected")
-            or reference.get("output")
-            or reference.get("gold")
-            or reference.get("reference")
-            or ""
-        )
+        reference_options = get_output_options(reference)
+        reference_text = reference_options[0] if reference_options else ""
         exact_match = int(
-            self.normalize(prediction_text) == self.normalize(reference_text)
+            any(
+                self.normalize(prediction_text) == self.normalize(reference_text)
+                for reference_text in reference_options
+            )
         )
         result = {
             "id": prediction.get("id") or reference.get("id"),
             "input": prediction.get("input") or reference.get("input"),
             "expected": reference_text,
+            "expected_options": reference_options,
             "generated": prediction_text,
             "difficulty": prediction.get("difficulty") or reference.get("difficulty"),
             "exact_match": exact_match,
@@ -315,9 +314,12 @@ class ExactMatchEvaluator(BaseEvaluator):
             # Calculate latency
             latency_ms = (time.perf_counter() - start_time) * 1000
 
+            expected_options = get_output_options(item)
             exact_match = int(
-                self.normalize(get_preferred_output(item) or "")
-                == self.normalize(generated)
+                any(
+                    self.normalize(expected) == self.normalize(generated)
+                    for expected in expected_options
+                )
             )
 
             # Build result dict
@@ -325,6 +327,7 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "id": item.get("id", i),
                 "input": item["input"],
                 "expected": get_preferred_output(item),
+                "expected_options": expected_options,
                 "generated": generated,
                 "difficulty": item.get("difficulty"),
                 "exact_match": exact_match,

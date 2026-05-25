@@ -1,104 +1,93 @@
 # Dataset
 
-This document describes the NL2ATL dataset structure, schema, and how to use it in experiments.
+NL2ATL uses a JSON list of natural-language requirements and reference ATL formulas.
 
-## Overview
+## Default File
 
-The dataset is stored in [data/dataset.json](../data/dataset.json) as a JSON list. Each item contains a
-natural‑language requirement and its reference ATL formula.
+The default dataset is:
 
-Key properties:
+[../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json)
 
-- Language: English
-- Logic: ATL
-- Labels: `easy` or `hard` (present in the released dataset)
+## Required Fields
 
-## Schema
+Each item must contain:
 
-Each dataset item follows this structure:
+| Field | Type | Meaning |
+|---|---|---|
+| `input` | string | Natural-language requirement |
+| `output` | string | Reference ATL formula |
+
+The loader also accepts `output_1` and `output_2`. When a row has more than one correct formula, the project keeps all accepted formulas in an in-memory `outputs` list and stores the first preferred formula in `output` for compatibility.
+
+Optional fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | string | Stable example identifier |
+| `difficulty` | string | Optional label such as `easy` or `hard` |
+| `difficulty_scores` | object | Optional score breakdown produced by the classifier |
+
+## Example
 
 ```json
 {
   "id": "ex01",
   "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed",
-  "difficulty": "easy"
+  "output": "<<User>>F ticket_printed"
 }
 ```
 
-Field meanings:
+## Loading Data
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Unique identifier |
-| `input` | string | Natural‑language requirement |
-| `output` | string | Reference ATL formula |
-| `difficulty` | string | `easy` or `hard` |
-| `difficulty_scores` | object | Optional score breakdown (only present if you run the classifier) |
+Use `load_data` when the data will be used by experiments. It validates rows and records every accepted formula.
 
-## Difficulty labels
+```python
+from src.data_utils import load_data
 
-Difficulty labels are produced by the rule‑based classifier in
-[src/evaluation/difficulty.py](../src/evaluation/difficulty.py). You can recompute labels (and optionally
-add `difficulty_scores`) with:
+dataset = load_data("data/dataset_gold_no_difficulty.json")
+print(dataset[0]["input"])
+print(dataset[0]["output"])
+print(dataset[0]["outputs"])
+```
+
+Training uses every formula in `outputs`. Evaluation first checks whether the prediction exactly matches any accepted formula. If none match, the LLM judge receives the same list and can approve predictions that are semantically equivalent to any one accepted formula.
+
+## Splitting Data
+
+The project uses seeded shuffle splits. It does not stratify by difficulty.
+
+```python
+from src.data_utils import split_data
+
+train, val, test = split_data(
+    dataset,
+    train_size=0.70,
+    val_size=0.10,
+    test_size=0.20,
+    seed=42,
+)
+```
+
+The three sizes must sum to `1.0`.
+
+## Augmentation
+
+Training data can be augmented with simple paraphrases:
+
+```python
+from src.data_utils import augment_data
+
+train_aug = augment_data(train, augment_factor=10)
+```
+
+The original row is kept, and extra rows keep the same normalized `output` and `outputs` list.
+
+## Difficulty Labels
+
+Difficulty labels are optional. Add them only when you need difficulty analysis:
 
 ```bash
-nl2atl classify-difficulty --input data/dataset.json --verbose
+uv run nl2atl classify-difficulty --input data/dataset_gold_no_difficulty.json --verbose
 ```
 
-See [difficulty_classification.md](difficulty_classification.md) for the scoring model.
-
-## Examples
-
-### Easy example
-
-```json
-{
-  "id": "ex01",
-  "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed",
-  "difficulty": "easy"
-}
-```
-
-### Hard example
-
-```json
-{
-  "id": "ex11",
-  "input": "The machine can guarantee that if the payment has been completed, then at the next step it will print the ticket.",
-  "output": "<<Machine>>G (paid -> X ticket_printed)",
-  "difficulty": "hard"
-}
-```
-
-## Using the dataset
-
-### Load from Python
-
-```python
-from src.infra.io import load_json
-
-dataset = load_json("data/dataset.json")
-for sample in dataset:
-    print(sample["input"], sample["output"], sample.get("difficulty"))
-```
-
-### Split into train, validation, test
-
-```python
-from pathlib import Path
-from src.experiment import ExperimentDataManager
-
-manager = ExperimentDataManager(
-    data_path=Path("data/dataset.json"),
-    test_size=0.30,
-    val_size=0.6667,
-    seed=42,
-    augment_factor=10,
-)
-train_aug, val, test, full = manager.prepare_data()
-```
-
-  The split is stratified by `difficulty` when available. Augmentation uses simple paraphrasing and
-  returns training examples that only include `input` and `output` fields.
+See [difficulty_classification.md](difficulty_classification.md) for the scoring method.

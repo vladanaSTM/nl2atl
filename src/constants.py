@@ -28,7 +28,7 @@ class ModelType(str, Enum):
 TEMPORAL_OPERATORS: FrozenSet[str] = frozenset({"G", "F", "X", "U", "W", "R"})
 
 # Default paths
-DEFAULT_DATA_PATH = "./data/dataset.json"
+DEFAULT_DATA_PATH = "./data/dataset_gold_no_difficulty.json"
 DEFAULT_OUTPUT_DIR = "./outputs"
 DEFAULT_MODELS_DIR = "./models"
 DEFAULT_MODELS_CONFIG = "configs/models.yaml"

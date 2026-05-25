@@ -29,3 +29,21 @@ def test_evaluate_single_preserves_latency():
     reference = {"input": "x", "output": "<<A>>F p"}
     result = evaluator.evaluate_single(prediction, reference)
     assert result["latency_ms"] == 12.3
+
+
+def test_evaluate_single_accepts_any_expected_option():
+    evaluator = ExactMatchEvaluator()
+    prediction = {"input": "x", "generated": "<<A,B>>X p"}
+    reference = {
+        "input": "x",
+        "output_1": "<<A>>X p_1 && <<B>>X p_2",
+        "output_2": "<<A,B>>X p",
+    }
+
+    result = evaluator.evaluate_single(prediction, reference)
+
+    assert result["exact_match"] == 1
+    assert result["expected_options"] == [
+        "<<A,B>>X p",
+        "<<A>>X p_1 && <<B>>X p_2",
+    ]

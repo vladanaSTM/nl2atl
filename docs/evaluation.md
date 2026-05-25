@@ -21,9 +21,11 @@ Exact‑match compares generated formulas to references after normalization:
 
 This is the default baseline metric used across the project.
 
+Rows may have multiple accepted formulas in `expected_options`/`outputs`. Exact match is counted as correct when the generated formula matches any accepted formula.
+
 ## LLM‑as‑judge
 
-The LLM judge checks semantic correctness beyond exact string match.
+The LLM judge checks semantic correctness beyond exact string match. It only runs for examples that did not pass exact match. When multiple gold formulas are available, the prompt lists every accepted formula and tells the judge that matching any one of them is sufficient.
 
 Run:
 
@@ -57,9 +59,10 @@ Each evaluated file contains run metadata plus `detailed_results`:
     {
       "input": "...",
       "gold": "<<User>>F p",
+      "gold_options": ["<<User>>F p"],
       "prediction": "<<User>>F p",
       "correct": "yes",
-      "reasoning": "Exact match \(normalized\)",
+      "reasoning": "Exact match against an accepted gold formula.",
       "decision_method": "exact"
     }
   ]

@@ -14,10 +14,11 @@ import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional, Union
 
+from ..constants import DEFAULT_DATA_PATH
 from ..data_utils import get_preferred_output
 
 # Data path
-DATA = "data/dataset.json"
+DATA = DEFAULT_DATA_PATH
 
 
 # ============================================================================

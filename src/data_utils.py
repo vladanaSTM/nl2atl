@@ -9,21 +9,52 @@ from typing import Any, Dict, List, Optional, Tuple
 from .infra.io import load_json, save_json
 
 
+def _append_unique_output(outputs: List[str], value: Any) -> None:
+    if isinstance(value, list):
+        for item in value:
+            _append_unique_output(outputs, item)
+        return
+
+    if not isinstance(value, str) or not value.strip():
+        return
+
+    cleaned = value.strip()
+    if cleaned not in outputs:
+        outputs.append(cleaned)
+
+
+def get_output_options(item: Dict[str, Any]) -> List[str]:
+    """Return all acceptable output formulas for a dataset or result item."""
+    outputs: List[str] = []
+    for key in ("outputs", "expected_options", "gold_options", "reference_options"):
+        _append_unique_output(outputs, item.get(key))
+
+    for key in ("output", "output_2", "output_1", "expected", "gold", "reference"):
+        _append_unique_output(outputs, item.get(key))
+
+    return outputs
+
+
 def get_preferred_output(item: Dict[str, Any]) -> Optional[str]:
     """Return the preferred output formula for a dataset item."""
-    for key in ("output", "output_2", "output_1"):
-        value = item.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-    return None
+    outputs = get_output_options(item)
+    return outputs[0] if outputs else None
 
 
 def normalize_dataset_item(item: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize dataset rows to the in-memory schema used by the project."""
+    if not isinstance(item.get("input"), str) or not item["input"].strip():
+        raise ValueError("Dataset item is missing a non-empty 'input' field")
+
     normalized = dict(item)
-    preferred_output = get_preferred_output(normalized)
-    if preferred_output is not None:
-        normalized["output"] = preferred_output
+    output_options = get_output_options(normalized)
+    if not output_options:
+        raise ValueError(
+            "Dataset item is missing an output, output_1, or output_2 field"
+        )
+
+    normalized["outputs"] = output_options
+    normalized["output"] = output_options[0]
     return normalized
 
 
@@ -32,7 +63,15 @@ def load_data(filepath: str) -> List[Dict]:
     data = load_json(filepath)
     if not isinstance(data, list):
         raise ValueError(f"Expected dataset list in {filepath}")
-    return [normalize_dataset_item(item) for item in data if isinstance(item, dict)]
+    normalized = []
+    for index, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise ValueError(f"Dataset item {index} is not an object")
+        try:
+            normalized.append(normalize_dataset_item(item))
+        except ValueError as exc:
+            raise ValueError(f"Invalid dataset item {index}: {exc}") from exc
+    return normalized
 
 
 def save_data(data: List[Dict], filepath: str) -> None:
@@ -42,8 +81,9 @@ def save_data(data: List[Dict], filepath: str) -> None:
 
 def split_data(
     data: List[Dict],
+    train_size: float = 0.7,
+    val_size: float = 0.1,
     test_size: float = 0.2,
-    val_size: float = 0.5,
     seed: int = 42,
 ) -> Tuple[List[Dict], List[Dict], List[Dict]]:
     """
@@ -51,8 +91,9 @@ def split_data(
 
     Args:
         data: List of data items
-        test_size: Fraction of data for test+validation combined
-        val_size: Fraction of test+validation to use for validation
+        train_size: Fraction of data for training
+        val_size: Fraction of data for validation
+        test_size: Fraction of data for testing
         seed: Random seed for reproducibility
 
     Returns:
@@ -61,21 +102,21 @@ def split_data(
     if not data:
         return [], [], []
 
+    split_total = train_size + val_size + test_size
+    if not 0.999 <= split_total <= 1.001:
+        raise ValueError("train_size, val_size, and test_size must sum to 1.0")
+
     shuffled = list(data)
     random.Random(seed).shuffle(shuffled)
 
-    temp_count = int(round(len(shuffled) * test_size))
-    temp_count = max(0, min(len(shuffled), temp_count))
-    train_count = len(shuffled) - temp_count
+    train_count = int(round(len(shuffled) * train_size))
+    val_count = int(round(len(shuffled) * val_size))
+    train_count = max(0, min(len(shuffled), train_count))
+    val_count = max(0, min(len(shuffled) - train_count, val_count))
 
     train_data = shuffled[:train_count]
-    temp_data = shuffled[train_count:]
-
-    val_count = int(round(len(temp_data) * val_size))
-    val_count = max(0, min(len(temp_data), val_count))
-
-    val_data = temp_data[:val_count]
-    test_data = temp_data[val_count:]
+    val_data = shuffled[train_count : train_count + val_count]
+    test_data = shuffled[train_count + val_count :]
 
     return train_data, val_data, test_data
 
@@ -132,6 +173,7 @@ def augment_data(data_list: List[Dict], augment_factor: int = 5) -> List[Dict]:
                 {
                     "input": new_input,
                     "output": get_preferred_output(normalized_item),
+                    "outputs": get_output_options(normalized_item),
                 }
             )
 
