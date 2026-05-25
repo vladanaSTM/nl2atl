@@ -22,7 +22,7 @@ NL2ATL uses three configuration sources:
 |------|---------|---------------|
 | `configs/models.yaml` | Model registry and settings | Always |
 | `configs/experiments.yaml` | Experiment conditions and hyperparameters | Always |
-| `.env` | API keys and secrets | When using Azure, HuggingFace, or W&B |
+| `.env` | API keys and secrets | When using Azure or HuggingFace |
 
 ### Configuration Priority
 
@@ -279,11 +279,6 @@ conditions:
   - name: string            # Condition identifier
     finetuned: bool         # Use fine-tuned model
     few_shot: bool          # Enable few-shot prompting
-
-wandb:
-  project: string           # W&B project name
-  entity: string            # W&B entity (username/team)
-  enabled: bool             # Enable W&B logging
 ```
 
 ### Complete Example
@@ -331,11 +326,6 @@ conditions:
   - name: "finetuned_few_shot"
     finetuned: true
     few_shot: true
-
-wandb:
-  project: "nl2atl_300_examples"
-  entity: "your-wandb-username"
-  enabled: true
 ```
 
 ### Field Descriptions
@@ -344,7 +334,7 @@ wandb:
 
 **`experiment.name`** (string, required)
 - Identifier for this experiment set
-- Used in W&B project names and logs
+- Used in run names and saved outputs
 
 **`experiment.seed`** (int, required)
 - Base random seed for reproducibility
@@ -448,19 +438,6 @@ Conditions define experimental configurations to test.
 - `finetuned_zero_shot`: Fine-tuned, no examples
 - `finetuned_few_shot`: Fine-tuned, with examples
 
-#### Weights & Biases
-
-**`wandb.project`** (string, optional)
-- W&B project name
-
-**`wandb.entity`** (string, optional)
-- W&B username or team name
-
-**`wandb.enabled`** (bool, optional, default: false)
-- Enable W&B logging
-
----
-
 ## Environment Variables
 
 ### Core Variables
@@ -488,14 +465,6 @@ AZURE_VERIFY_SSL=false  # Set true in production
 
 ```bash
 HUGGINGFACE_TOKEN=your_hf_token_here
-```
-
-### Weights & Biases
-
-```bash
-WANDB_API_KEY=your_wandb_key_here
-WANDB_PROJECT=nl2atl
-WANDB_ENTITY=your_username
 ```
 
 ### API Service

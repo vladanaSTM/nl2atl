@@ -96,7 +96,6 @@ cp .env.example .env
 # Edit .env and set required variables:
 # - AZURE_API_KEY, AZURE_INFER_ENDPOINT (if using Azure models)
 # - HUGGINGFACE_TOKEN (if using gated models)
-# - WANDB_API_KEY (optional, for experiment tracking)
 ```
 
 ### Run Your First Experiment

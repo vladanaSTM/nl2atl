@@ -43,11 +43,7 @@ class ExperimentRunner:
             seed=config.seed,
             augment_factor=config.augment_factor,
         )
-        self.reporter = reporter or ExperimentReporter(
-            output_dir=Path(config.output_dir),
-            wandb_project=config.wandb_project,
-            wandb_entity=config.wandb_entity,
-        )
+        self.reporter = reporter or ExperimentReporter(output_dir=Path(config.output_dir))
 
         # Global seeding for reproducibility
         self._set_global_seed(self.config.seed)
@@ -205,7 +201,7 @@ class ExperimentRunner:
             greater_is_better=False,
             bf16=self.config.bf16,
             optim="adamw_torch_fused",
-            report_to="wandb",
+            report_to="none",
             max_grad_norm=0.3,
             seed=self.config.seed,
             ddp_find_unused_parameters=False,
@@ -289,10 +285,6 @@ class ExperimentRunner:
         # ============== Start experiment timer ==============
         self.reporter.start_timer()
 
-        self.reporter.init_wandb_run(
-            self.config, run_name, model_config, condition, effective_finetuned
-        )
-
         adapter_path = None
         model = None
         tokenizer = None
@@ -339,9 +331,6 @@ class ExperimentRunner:
 
             # ============== Add metrics to metadata ==============
             metadata["metrics"] = metrics
-
-            self.reporter.log_metrics(metrics)
-            self.reporter.log_predictions_table(detailed_results, run_name)
 
             print(f"\nResults for {run_name}:")
             print(f"  Exact Match: {metrics['exact_match']:.1%}")

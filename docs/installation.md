@@ -24,7 +24,6 @@ This guide will help you set up NL2ATL for research and development. Follow thes
 ### Optional Requirements
 
 - **SLURM**: For parallel experiment execution across GPU nodes
-- **Weights & Biases account**: For experiment tracking
 - **Azure OpenAI subscription**: For cloud inference and judge models
 - **Hugging Face account**: For accessing gated models
 
@@ -219,21 +218,6 @@ HUGGINGFACE_TOKEN=your_huggingface_token_here
 3. Create a token with "Read" permissions
 4. Copy token value
 
-#### Weights & Biases (Optional)
-
-For experiment tracking and visualization:
-
-```bash
-WANDB_API_KEY=your_wandb_api_key_here
-WANDB_PROJECT=nl2atl
-WANDB_ENTITY=your_wandb_username
-```
-
-**How to get API key:**
-1. Create account at [wandb.ai](https://wandb.ai)
-2. Navigate to Settings → API Keys
-3. Copy key value
-
 #### API Service (Required for API Deployment)
 
 ```bash
@@ -254,7 +238,6 @@ from dotenv import load_dotenv
 load_dotenv()
 print('Azure configured:', os.getenv('AZURE_API_KEY') is not None)
 print('HF configured:', os.getenv('HUGGINGFACE_TOKEN') is not None)
-print('W&B configured:', os.getenv('WANDB_API_KEY') is not None)
 "
 ```
 
