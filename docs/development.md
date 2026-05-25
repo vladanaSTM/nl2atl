@@ -31,19 +31,19 @@ This guide covers contributing to NL2ATL, extending its functionality, and best 
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
 
+# Install uv if needed
+python -m pip install uv
+
 # Create virtual environment
-python -m venv .venv
+uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\Activate.ps1
 
 # Install dependencies
-pip install -r requirements.txt
-
-# Install in editable mode (enables 'nl2atl' command)
-pip install -e .
+uv sync --group dev
 
 # Verify installation
 nl2atl --help
-pytest -q
+uv run pytest -q
 ```
 
 ### Development Dependencies
@@ -51,18 +51,18 @@ pytest -q
 For development and testing:
 
 ```bash
-# Install additional dev tools
-pip install pytest pytest-cov black flake8 mypy pre-commit
+# Sync project plus development tools
+uv sync --group dev
 ```
 
 ### Pre-commit Hooks (Optional)
 
 ```bash
 # Install pre-commit hooks for automatic formatting
-pre-commit install
+uv run pre-commit install
 
 # Run manually on all files
-pre-commit run --all-files
+uv run pre-commit run --all-files
 ```
 
 ---
@@ -151,7 +151,7 @@ nl2atl/
 ├── README.md
 ├── nl2atl.py              # CLI entrypoint
 ├── pyproject.toml         # Package configuration
-└── requirements.txt       # Dependencies
+└── uv.lock                # Generated lockfile after `uv lock` or `uv sync`
 ```
 
 ### Module Responsibilities

@@ -474,7 +474,6 @@ print(config.conditions)
 - `models` - Dictionary of model configurations
 - `conditions` - List of experiment conditions
 - `training` - Training hyperparameters
-- `wandb` - Weights & Biases config
 
 ---
 

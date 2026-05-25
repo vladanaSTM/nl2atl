@@ -8,50 +8,167 @@ from typing import List, Dict, Optional
 from ..constants import ModelType
 
 # Curated few-shot examples covering diverse ATL patterns
+  
 FEW_SHOT_EXAMPLES = [
+
     {
-        "input": "Agent A can guarantee that eventually p becomes true",
-        "output": "<<A>>F p",
+
+        "input": "They can guarantee that at the next step the alarm will be sent, the surveillance system and the operator.",
+        "output": "<<System,Operator>>X alarm_sent",
     },
     {
-        "input": "Agents A and B can ensure that q is always true",
-        "output": "<<A,B>>G q",
+
+        "input": "The gate, the machine can guarantee that it will open at the next step.",
+
+        "output": "<<Machine>>X gate_open",
+
     },
+
     {
-        "input": "The robot can guarantee that if error occurs then eventually it recovers",
-        "output": "<<Robot>>G (error -> F recover)",
+
+        "input": "Robot number 1 has a strategy to ensure that eventually position 3 holds, and robot number 2 does too.",
+
+        "output": "<<Robot1>>F pos3 && <<Robot2>>F pos3",
+
     },
+
     {
-        "input": "The system keeps monitoring until the alarm is triggered",
-        "output": "<<System>>(monitoring U alarm_triggered)",
+
+        "input": "Every robot can guarantee that it will eventually reach a safe spot.",
+
+        "output_1": "<<Robot1>>F at_safe_spot_1 && <<Robot2>>F at_safe_spot_2 && <<Robot3>>F at_safe_spot_3",
+
+        "output_2": "<<Robot1,Robot2,Robot3>>F at_safe_spot",
+
     },
+
     {
-        "input": "The controller can guarantee that at the next step the action happens",
-        "output": "<<Controller>>X action",
+
+        "input": "The diplomatic cable system can, but the encryption gateway cannot, guarantee that classified cables will never be routed publicly.",
+
+        "output": "<<DiplomaticCableSystem>>G !classified_cables_routed_publicly && !<<EncryptionGateway>>G !classified_cables_routed_publicly",
+
     },
+
     {
-        "input": "The drone will keep holding position until it receives land command",
-        "output": "<<Drone>>(holding_position U land_command)",
+
+        "input": "The user can guarantee that sooner or later the ticket will be printed.",
+
+        "output": "<<User>>F ticket_printed",
+
     },
+
     {
-        "input": "The security system guarantees that if intrusion detected then alarm sounds forever",
-        "output": "<<Security>>G (intrusion_detected -> G alarm_on)",
+
+        "input": "If we do not wish to fight, we can prevent the enemy from engaging us even though the lines of our encampment be merely traced out on the ground. All we need do is to throw something odd and unaccountable in his way.",
+
+        "output": "<<We>>(!wish_to_fight -> F (throw_something_odd_in_his_way && G !enemy_engages_us))",
+
     },
-    {
-        "input": "The coalition of robots can ensure the task is eventually completed",
-        "output": "<<Robot1,Robot2>>F task_completed",
-    },
+
 ]
 
-SYSTEM_PROMPT_BASE = """You are an expert in Alternating-Time Temporal Logic (ATL). 
-Convert natural language specifications into ATL formulas. Output only the formula without any explanations.
+ 
 
-ATL Syntax Rules:
-- Agent coalition: <<Agent1,Agent2>> or <<Agent>>
+SYSTEM_PROMPT_BASE = """
+
+ 
+
+You are an expert in Alternating-time Temporal Logic (ATL/ATL*).
+
+ 
+
+Convert natural-language strategic specifications into well-formed ATL/ATL* formulas.
+
+ 
+
+Output only the final formula, without explanations.
+
+ 
+
+ATL/ATL* Syntax Rules:
+
+ 
+
+- Agent coalition: <<Agent>> or <<Agent1,Agent2>>
+
+ 
+
+- Coalitions may contain numbers or symbolic names, e.g. <<1>>, <<Machine>>, <<Robot,Operator>>
+
+ 
+
 - Temporal operators: G (always), F (eventually), X (next), U (until), W (weak until), R (release)
-- Logical operators: -> (implies), & (and), | (or), ! (not)
-- Parentheses for grouping: (condition -> result)
+
+ 
+
+- Logical operators: -> (implies), && (and), || (or), ! (not)
+
+ 
+
+- Parentheses are required whenever an operator scopes over a compound formula.
+
+ 
+
+Scope Rules:
+
+ 
+
+- The strategic operator <<A>> scopes over the whole temporal/path formula that follows it.
+
+ 
+
+- Do not merge the strategic operator and the temporal operator conceptually.
+
+ 
+
+- For example, write <<Machine>>G(paid -> ticket_printed), not <<Machine>>(G paid -> ticket_printed).
+
+ 
+
+- If a temporal operator applies to a whole implication or conjunction, place the full compound formula inside its scope.
+
+ 
+
+- Example: "always, if p then q" becomes G(p -> q), not G p -> q.
+
+ 
+
+- Example: "next, p and q" becomes X(p && q), unless the sentence explicitly says that each is next separately.
+
+ 
+
+- Do not introduce negation unless it is explicitly expressed in the natural-language input.
+
+ 
+
+- Do not introduce temporal operators that are not licensed by the natural-language input.
+
+ 
+
+Ambiguity Rules:
+
+ 
+
+- For VP ellipsis, repeat the full recovered strategic-temporal formula for the second agent.
+
+ 
+
+- For Right Node Raising, attach the same shared right-peripheral objective to both coordinated strategic clauses.
+
+ 
+
+- For quantifier-scope ambiguity, preserve the intended distributive or collective reading when specified.
+
+ 
+
+Return only the ATL/ATL* formula.
+
+ 
+
 """
+
+ 
 
 
 def get_few_shot_examples(

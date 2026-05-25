@@ -24,7 +24,6 @@ This guide will help you set up NL2ATL for research and development. Follow thes
 ### Optional Requirements
 
 - **SLURM**: For parallel experiment execution across GPU nodes
-- **Weights & Biases account**: For experiment tracking
 - **Azure OpenAI subscription**: For cloud inference and judge models
 - **Hugging Face account**: For accessing gated models
 
@@ -71,11 +70,12 @@ which python  # Should point to .venv/bin/python
 #### Step 3: Install Dependencies
 
 ```bash
-# Install core dependencies
-pip install -r requirements.txt
+# Install uv if needed
+python -m pip install uv
 
-# Install NL2ATL as editable package (enables 'nl2atl' command)
-pip install -e .
+# Create the uv-managed environment and install project dependencies
+uv venv
+uv sync
 ```
 
 **What gets installed:**
@@ -122,20 +122,21 @@ For contributors or those extending NL2ATL.
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
 
+# Install uv if needed
+python -m pip install uv
+
 # Create virtual environment
-python -m venv .venv
+uv venv
 source .venv/bin/activate
 
 # Install dependencies + dev tools
-pip install -r requirements.txt
-pip install -e .
+uv sync --group dev
 
 # Install pre-commit hooks (optional)
-pip install pre-commit
-pre-commit install
+uv run pre-commit install
 
 # Verify tests pass
-pytest -v
+uv run pytest -v
 ```
 
 ---
@@ -149,15 +150,18 @@ If you only need the API service without experiment infrastructure:
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
 
+# Install uv if needed
+python -m pip install uv
+
 # Create virtual environment
-python -m venv .venv
+uv venv
 source .venv/bin/activate
 
 # Install minimal dependencies
-pip install fastapi uvicorn transformers torch python-dotenv pyyaml
+uv pip install fastapi uvicorn transformers torch python-dotenv pyyaml
 
 # Install NL2ATL
-pip install -e .
+uv pip install -e .
 ```
 
 ---
@@ -219,21 +223,6 @@ HUGGINGFACE_TOKEN=your_huggingface_token_here
 3. Create a token with "Read" permissions
 4. Copy token value
 
-#### Weights & Biases (Optional)
-
-For experiment tracking and visualization:
-
-```bash
-WANDB_API_KEY=your_wandb_api_key_here
-WANDB_PROJECT=nl2atl
-WANDB_ENTITY=your_wandb_username
-```
-
-**How to get API key:**
-1. Create account at [wandb.ai](https://wandb.ai)
-2. Navigate to Settings → API Keys
-3. Copy key value
-
 #### API Service (Required for API Deployment)
 
 ```bash
@@ -254,7 +243,6 @@ from dotenv import load_dotenv
 load_dotenv()
 print('Azure configured:', os.getenv('AZURE_API_KEY') is not None)
 print('HF configured:', os.getenv('HUGGINGFACE_TOKEN') is not None)
-print('W&B configured:', os.getenv('WANDB_API_KEY') is not None)
 "
 ```
 
@@ -313,15 +301,15 @@ wsl --install -d Ubuntu-22.04
 python --version
 
 # Create virtual environment
-python -m venv .venv
+python -m pip install uv
+uv venv
 .venv\Scripts\Activate.ps1
 
 # If execution policy blocked, run as admin:
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -e .
+uv sync
 ```
 
 ### SLURM Cluster
@@ -334,15 +322,17 @@ module load python/3.10
 module load cuda/11.8
 module load gcc/9.3.0
 
+# Install uv if needed
+python -m pip install uv
+
 # Create virtual environment in your home directory
-python -m venv ~/envs/nl2atl
+uv venv ~/envs/nl2atl
 source ~/envs/nl2atl/bin/activate
 
 # Clone and install
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
-pip install -r requirements.txt
-pip install -e .
+uv sync
 
 # Test on login node (no GPU required for this test)
 nl2atl --help
@@ -533,17 +523,17 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 ### Slow Installation
 
-**Problem:** `pip install` takes very long
+**Problem:** `uv sync` takes very long
 
 **Solutions:**
 1. Use faster mirror:
    ```bash
-   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+   uv sync --index-url https://pypi.tuna.tsinghua.edu.cn/simple
    ```
 2. Install PyTorch first (largest package):
    ```bash
-   pip install torch torchvision torchaudio
-   pip install -r requirements.txt
+   uv pip install torch torchvision torchaudio
+   uv sync
    ```
 
 ### Virtual Environment Not Activating
@@ -593,8 +583,7 @@ Before proceeding to experiments, verify:
 
 - [ ] Python 3.10+ installed
 - [ ] Virtual environment created and activated
-- [ ] Dependencies installed (`pip install -r requirements.txt`)
-- [ ] NL2ATL installed (`pip install -e .`)
+- [ ] Dependencies installed (`uv sync`)
 - [ ] CLI works (`nl2atl --help`)
 - [ ] `.env` file configured (if using Azure/HF)
 - [ ] Tests pass (`pytest`)

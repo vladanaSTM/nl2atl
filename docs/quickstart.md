@@ -401,7 +401,7 @@ Congratulations! You've:
 ### Model loading errors
 
 **Problem**: `ModuleNotFoundError: transformers`  
-**Solution**: Ensure dependencies are installed: `pip install -r requirements.txt`
+**Solution**: Ensure dependencies are installed: `uv sync`
 
 ### CUDA out of memory
 

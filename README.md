@@ -78,13 +78,15 @@ For more details, see: https://git-lfs.github.com/
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
 
-# Create and activate virtual environment
-python -m venv .venv
+# Install uv if needed
+python -m pip install uv
+
+# Create and activate uv-managed virtual environment
+uv venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\Activate.ps1
 
 # Install dependencies
-pip install -r requirements.txt
-pip install -e .
+uv sync
 ```
 
 ### Configuration
@@ -96,7 +98,6 @@ cp .env.example .env
 # Edit .env and set required variables:
 # - AZURE_API_KEY, AZURE_INFER_ENDPOINT (if using Azure models)
 # - HUGGINGFACE_TOKEN (if using gated models)
-# - WANDB_API_KEY (optional, for experiment tracking)
 ```
 
 ### Run Your First Experiment

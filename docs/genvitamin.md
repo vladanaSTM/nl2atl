@@ -20,9 +20,9 @@ Create two separate virtual environments and keep them isolated:
 
 ```bash
 cd /path/to/nl2atl
-python -m venv .venv
+uv venv
 source .venv/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
 
 **genVITAMIN venv (repo root):**

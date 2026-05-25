@@ -263,9 +263,6 @@ AZURE_INFER_MODEL=gpt-5.2
 # Hugging Face (for gated models)
 HUGGINGFACE_TOKEN=your_token_here
 
-# Weights & Biases (optional)
-WANDB_API_KEY=your_key_here
-
 # API Service (required for API deployment)
 NL2ATL_DEFAULT_MODEL=qwen-3b
 NL2ATL_MODELS_CONFIG=configs/models.yaml
