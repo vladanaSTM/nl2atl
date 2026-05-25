@@ -29,7 +29,6 @@ def test_from_yaml_and_resolve_seeds(tmp_path):
             "bf16": False,
         },
         "few_shot": {"num_examples": 2},
-        "wandb": {"project": "p", "entity": None},
         "conditions": [
             {"name": "baseline_zero_shot", "finetuned": False, "few_shot": False}
         ],
@@ -69,7 +68,6 @@ def test_resolve_seeds_with_list(tmp_path):
             "bf16": False,
         },
         "few_shot": {"num_examples": 2},
-        "wandb": {"project": "p", "entity": None},
         "conditions": [
             {"name": "baseline_zero_shot", "finetuned": False, "few_shot": False}
         ],
@@ -105,7 +103,6 @@ def test_resolve_seeds_with_num_seeds(tmp_path):
             "bf16": False,
         },
         "few_shot": {"num_examples": 2},
-        "wandb": {"project": "p", "entity": None},
         "conditions": [
             {"name": "baseline_zero_shot", "finetuned": False, "few_shot": False}
         ],
@@ -153,7 +150,6 @@ def test_config_validate_missing_values(tmp_path):
                     "bf16": False,
                 },
                 "few_shot": {"num_examples": 2},
-                "wandb": {"project": "p", "entity": None},
                 "conditions": [
                     {
                         "name": "baseline_zero_shot",
@@ -207,7 +203,6 @@ def test_get_model_and_is_azure(tmp_path):
                     "bf16": False,
                 },
                 "few_shot": {"num_examples": 2},
-                "wandb": {"project": "p", "entity": None},
                 "conditions": [
                     {
                         "name": "baseline_zero_shot",

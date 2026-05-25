@@ -1,6 +1,4 @@
-"""
-Configuration management for experiments.
-"""
+"""Configuration management for experiments."""
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -79,10 +77,6 @@ class Config:
     # Few-shot settings
     num_few_shot_examples: int = 5
 
-    # W&B settings
-    wandb_project: str = "atl-formula-generation"
-    wandb_entity: Optional[str] = None
-
     # Model and experiment configs
     models: Dict[str, ModelConfig] = field(default_factory=dict)
     conditions: List[ExperimentCondition] = field(default_factory=list)
@@ -121,8 +115,6 @@ class Config:
             warmup_ratio=exp_cfg["training"]["warmup_ratio"],
             bf16=exp_cfg["training"]["bf16"],
             num_few_shot_examples=exp_cfg["few_shot"]["num_examples"],
-            wandb_project=exp_cfg["wandb"]["project"],
-            wandb_entity=exp_cfg["wandb"]["entity"],
         )
 
         # Load models
