@@ -4,13 +4,12 @@ Exact-match evaluator with output cleaning for ATL formula generation.
 
 import re
 import time
-from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List, Any, Optional, Iterable, Tuple
+from typing import Any, Dict, List
 
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
 from ..data_utils import get_output_options, get_preferred_output
-from ..models.registry import generate, GenerationResult
+from ..models.registry import generate
 from ..models.few_shot import format_prompt
 
 
@@ -19,10 +18,6 @@ class ExactMatchEvaluator(BaseEvaluator):
 
     def __init__(self):
         self.results: List[Dict] = []
-        self.total_tokens_input: int = 0
-        self.total_tokens_output: int = 0
-        self.price_input_per_1k: Optional[float] = None
-        self.price_output_per_1k: Optional[float] = None
 
     def _has_temporal_operator(self, text: str) -> bool:
         """Check if text contains any temporal operator."""
@@ -245,8 +240,6 @@ class ExactMatchEvaluator(BaseEvaluator):
         few_shot: bool = False,
         num_few_shot: int = 5,
         verbose: bool = True,
-        price_input_per_1k: Optional[float] = None,
-        price_output_per_1k: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Run evaluation on test data.
@@ -264,14 +257,6 @@ class ExactMatchEvaluator(BaseEvaluator):
             Dictionary of metrics
         """
         self.results = []
-        # Reset token counters
-        self.total_tokens_input = 0
-        self.total_tokens_output = 0
-        self.price_input_per_1k = price_input_per_1k
-        self.price_output_per_1k = price_output_per_1k
-
-        # Determine if this is an Azure model (tokenizer is None)
-        is_azure = tokenizer is None
 
         if verbose:
             print(f"\nEvaluating {len(test_data)} examples...")
@@ -292,24 +277,9 @@ class ExactMatchEvaluator(BaseEvaluator):
                 tokenizer=tokenizer,
             )
 
-            # Get response with usage info
-            result = generate(model, tokenizer, prompt, return_usage=True)
+            response = generate(model, tokenizer, prompt)
 
-            tokens_estimated = False
-            if isinstance(result, GenerationResult):
-                response = result.text
-                tokens_input = result.tokens_input
-                tokens_output = result.tokens_output
-                tokens_estimated = getattr(result, "usage_estimated", False)
-                self.total_tokens_input += tokens_input
-                self.total_tokens_output += tokens_output
-            else:
-                # Fallback if generate returns string (shouldn't happen with return_usage=True)
-                response = result
-                tokens_input = None
-                tokens_output = None
-
-            generated = self.clean_output(response, model_type)
+            generated = self.clean_output(str(response), model_type)
 
             # Calculate latency
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -334,37 +304,6 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "latency_ms": round(latency_ms, 2),
             }
 
-            # Add token counts
-            if tokens_input is not None:
-                result_dict["tokens_input"] = tokens_input
-                result_dict["tokens_output"] = tokens_output
-                result_dict["tokens_estimated"] = tokens_estimated
-
-                if price_input_per_1k is not None and price_output_per_1k is not None:
-                    price_in = Decimal(str(price_input_per_1k))
-                    price_out = Decimal(str(price_output_per_1k))
-                    tokens_in = Decimal(tokens_input)
-                    tokens_out = Decimal(tokens_output)
-
-                    cost_input = (tokens_in / Decimal("1000")) * price_in
-                    cost_output = (tokens_out / Decimal("1000")) * price_out
-                    cost_total = cost_input + cost_output
-
-                    q = Decimal("0.000001")
-                    result_dict["cost_input_usd"] = float(
-                        cost_input.quantize(q, rounding=ROUND_HALF_UP)
-                    )
-                    result_dict["cost_output_usd"] = float(
-                        cost_output.quantize(q, rounding=ROUND_HALF_UP)
-                    )
-                    result_dict["cost_usd"] = float(
-                        cost_total.quantize(q, rounding=ROUND_HALF_UP)
-                    )
-                    result_dict["price_input_per_1k"] = price_input_per_1k
-                    result_dict["price_output_per_1k"] = price_output_per_1k
-                    result_dict["price_input_per_token"] = price_input_per_1k / 1000.0
-                    result_dict["price_output_per_token"] = price_output_per_1k / 1000.0
-
             self.results.append(result_dict)
 
             if verbose and (i + 1) % 10 == 0:
@@ -384,46 +323,5 @@ class ExactMatchEvaluator(BaseEvaluator):
             "n_examples": n,
             "exact_match": exact_matches / n,
         }
-
-        # Add token usage if tracked
-        if self.total_tokens_input > 0:
-            metrics["total_tokens_input"] = self.total_tokens_input
-            metrics["total_tokens_output"] = self.total_tokens_output
-            metrics["total_tokens"] = self.total_tokens_input + self.total_tokens_output
-
-        total_cost = sum(Decimal(str(r.get("cost_usd", 0))) for r in self.results)
-        total_cost_input = sum(
-            Decimal(str(r.get("cost_input_usd", 0))) for r in self.results
-        )
-        total_cost_output = sum(
-            Decimal(str(r.get("cost_output_usd", 0))) for r in self.results
-        )
-        if total_cost > 0:
-            q = Decimal("0.000001")
-            metrics["total_cost_usd"] = float(
-                total_cost.quantize(q, rounding=ROUND_HALF_UP)
-            )
-            metrics["total_cost_input_usd"] = float(
-                total_cost_input.quantize(q, rounding=ROUND_HALF_UP)
-            )
-            metrics["total_cost_output_usd"] = float(
-                total_cost_output.quantize(q, rounding=ROUND_HALF_UP)
-            )
-            n_dec = Decimal(n)
-            metrics["avg_cost_usd"] = float(
-                (total_cost / n_dec).quantize(q, rounding=ROUND_HALF_UP)
-            )
-            metrics["avg_cost_input_usd"] = float(
-                (total_cost_input / n_dec).quantize(q, rounding=ROUND_HALF_UP)
-            )
-            metrics["avg_cost_output_usd"] = float(
-                (total_cost_output / n_dec).quantize(q, rounding=ROUND_HALF_UP)
-            )
-
-        if self.price_input_per_1k is not None and self.price_output_per_1k is not None:
-            metrics["price_input_per_1k"] = self.price_input_per_1k
-            metrics["price_output_per_1k"] = self.price_output_per_1k
-            metrics["price_input_per_token"] = self.price_input_per_1k / 1000.0
-            metrics["price_output_per_token"] = self.price_output_per_1k / 1000.0
 
         return metrics

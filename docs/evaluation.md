@@ -1,234 +1,64 @@
-# Evaluation guide
+# Evaluation
 
-This guide explains the evaluation pipeline: exact‑match scoring, LLM‑as‑judge evaluation, agreement metrics, and the efficiency report.
+Evaluation is a two-step correctness check followed by optional judge agreement and reporting.
 
-## Overview
+## Prediction Files
 
-```mermaid
-flowchart LR
-    A[Exact match] --> C[Agreement]
-    B[LLM judge] --> C
-    C --> D[Efficiency report]
-```
+Experiments write JSON files under `outputs/model_predictions/`. Each row includes:
 
-## Exact match
+- `input`
+- `expected`
+- `expected_options`
+- `generated`
+- `exact_match`
+- optional latency and difficulty fields
 
-Exact‑match compares generated formulas to references after normalization:
+## Step 1: Exact Match
 
-- Strip whitespace
-- Normalize operators `∧`, `∨`, `¬`, `→` to ASCII
-- Lowercase the formula
+Exact match runs first. It normalizes formulas by lowercasing, removing whitespace, and normalizing common logical-symbol variants to the project's ASCII form.
 
-This is the default baseline metric used across the project.
+For rows with multiple gold formulas, exact match succeeds if the prediction matches any formula in `expected_options`.
 
-Rows may have multiple accepted formulas in `expected_options`/`outputs`. Exact match is counted as correct when the generated formula matches any accepted formula.
+## Step 2: LLM Judge
 
-## LLM‑as‑judge
-
-The LLM judge checks semantic correctness beyond exact string match. It only runs for examples that did not pass exact match. When multiple gold formulas are available, the prompt lists every accepted formula and tells the judge that matching any one of them is sufficient.
-
-Run:
+The LLM judge runs only for predictions that are not exact matches.
 
 ```bash
-nl2atl llm-judge --datasets all
+uv run nl2atl llm-judge --datasets all
 ```
 
-Use `--overwrite` or `--force` to re‑evaluate existing outputs.
-
-### Judge prompt
-
-The prompt is defined in [src/evaluation/llm_judge/prompts.py](../src/evaluation/llm_judge/prompts.py) and expects JSON like:
+The judge sees the natural-language input, the model prediction, and all accepted gold formulas. It returns:
 
 ```json
-{ "correct": "yes" | "no", "reasoning": "..." }
+{ "correct": "yes", "reasoning": "..." }
 ```
 
-### Output format
+Judged outputs are written to `outputs/LLM-evaluation/evaluated_datasets/<judge>/`.
 
-Each evaluated file contains run metadata plus `detailed_results`:
+## Agreement
 
-```json
-{
-  "run_name": "qwen-3b_baseline_zero_shot",
-  "judge_model": "gpt-5.2",
-  "metrics": {
-    "n_examples": 90,
-    "exact_match": 0.82
-  },
-  "detailed_results": [
-    {
-      "input": "...",
-      "gold": "<<User>>F p",
-      "gold_options": ["<<User>>F p"],
-      "prediction": "<<User>>F p",
-      "correct": "yes",
-      "reasoning": "Exact match against an accepted gold formula.",
-      "decision_method": "exact"
-    }
-  ]
-}
-```
-
-## Judge agreement
-
-Compute agreement across judge outputs:
+Use agreement metrics when multiple judges evaluate the same predictions:
 
 ```bash
-nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
+uv run nl2atl judge-agreement
 ```
 
-The report includes:
+The report includes pairwise Cohen's kappa, Fleiss' kappa, Krippendorff's alpha, and optional disagreement examples.
 
-- Pairwise Cohen’s $\kappa$
-- Fleiss’ $\kappa$ when all judges rate the same items
-- Krippendorff’s $\alpha$
-- Optional disagreement samples
-
-## Model efficiency report
-
-This report aggregates accuracy, latency, and cost across models and derives normalized composite
-scores. This helps quantify trade‑offs between quality and resource usage, enabling comparisons of
-“best overall,” “cheapest,” and “fastest” models.
-
-Run:
+## Combined Reports
 
 ```bash
-nl2atl model-efficiency --predictions_dir outputs/model_predictions
+uv run nl2atl generate-eval-reports
 ```
 
-Outputs:
+This builds judge summaries, agreement reports, seed aggregates, and an accuracy-latency report under `outputs/LLM-evaluation/`.
 
-- `outputs/LLM-evaluation/efficiency_report.json`
-- `outputs/LLM-evaluation/efficiency_report.ipynb`
+## Accuracy-Latency Report
 
-### Metrics and rankings
-
-The report includes:
-
-- Accuracy (LLM‑judge accuracy when available, else exact‑match).
-- Average cost and total cost (USD).
-- Latency statistics and throughput.
-- Composite efficiency score: normalized weighted sum of accuracy, cost, and latency.
-- **Confidence score**: Inter‑rater agreement (Cohen's $\kappa$) across judges, aggregated across all seeds for the model‑condition pair. This indicates how much judges agree on the model's outputs (range 0–1, higher = stronger agreement). The score is computed as the mean pairwise kappa with uncertainty bounds (mean ± std).
-- Rankings for cheapest, fastest, most accurate, and best composite score, all including confidence scores.
-
-### USD cost calculation and pricing sources
-
-Costs are derived from token usage and the per‑1k pricing in `configs/models.yaml`.
-
-For Azure models:
-
-$$
-  ext{cost} = \frac{\text{tokens\_input}}{1000} \cdot \text{price\_input\_per\_1k} +
-\frac{\text{tokens\_output}}{1000} \cdot \text{price\_output\_per\_1k}
-$$
-
-Token usage comes from the Azure API (or is estimated via tiktoken when usage is unavailable). Prices
-should match the official Azure OpenAI and Azure AI Foundry Models pricing page.
-
-For local GPU runs with `gpu_hour_usd`:
-
-$$
-  ext{tokens\_per\_hour} = \frac{\text{tokens\_total}}{\text{hours\_used}},
-\quad
-  ext{cost\_per\_1k\_tokens} = \frac{\text{gpu\_hour\_usd}}{\text{tokens\_per\_hour}} \cdot 1000
-$$
-
-For GPU/local models, you can either provide per‑token prices (`price_input_per_1k`,
-`price_output_per_1k`) or a GPU hourly rate (`gpu_hour_usd`) in `configs/models.yaml`. If none of
-these fields are set, cost‑based rankings are skipped for those models.
-
-If you don’t know your GPU cost, you can estimate it:
-
-1) **GPU amortization per hour**:
-  $\text{gpu\_amort\_hour} = \frac{\text{gpu\_price\_usd}}{\text{lifespan\_years} \times 365 \times 24 \times \text{utilization}}$
-  (use public MSRP or a public cloud on‑demand hourly price for an A100 as a proxy).
-2) **Power cost per hour**:
-  $\text{power\_hour} = \frac{\text{avg\_watts}}{1000} \times \text{electricity\_usd\_per\_kwh}$
-  (average watts from `nvidia-smi` and electricity rate from public utility data).
-3) **Overhead**: add 10–30% for shared infrastructure if you want a conservative estimate.
-
-Then set:
-
-$$
-	ext{gpu\_hour\_usd} = \text{gpu\_amort\_hour} + \text{power\_hour} + \text{overhead\_hour}
-$$
-
-If neither per‑token prices nor `gpu_hour_usd` is set, cost rankings are omitted for that model.
-
-### Confidence scores (judge agreement)
-
-The efficiency report includes **confidence scores** that reflect inter‑rater agreement across judges. This metric helps identify whether model outputs are inherently ambiguous or whether judges consistently agree on correctness.
-
-#### What is a confidence score?
-
-The confidence score is the mean Cohen's $\kappa$ coefficient computed pairwise between all judge pairs, then aggregated across all seeds for a given model‑condition combination. It measures agreement on a scale of 0–1:
-
-- **0.8–1.0**: Very strong agreement (judges almost always agree)
-- **0.6–0.8**: Strong agreement (judges frequently agree)
-- **0.4–0.6**: Moderate agreement (judges sometimes disagree)
-- **0.0–0.4**: Weak or poor agreement (judges often disagree)
-
-#### Interpretation
-
-A **high confidence score** suggests:
-- Model outputs are unambiguous to evaluators
-- Judge disagreements are rare (more reliable accuracy estimates)
-- The accuracy metric is trustworthy
-
-A **low confidence score** suggests:
-- Model outputs are borderline or ambiguous
-- Judges frequently disagree (noisy accuracy estimates)
-- Consider manual review to understand disagreement sources
-
-#### In the efficiency report
-
-Confidence scores appear in:
-
-1. **JSON output** (`efficiency_report.json`): Each model includes `confidence_score` (scalar, range 0–1)
-2. **Notebook tables** (`efficiency_report.ipynb`): Rankings display confidence_score alongside accuracy
-3. **Seed aggregation** (`seed_aggregate_metrics_from_judged.json`): Each model includes `judge_agreement` with mean and std
-
-#### Example workflow
+If you already have an aggregate file, build only the accuracy-latency report:
 
 ```bash
-# Run LLM-as-judge evaluation across multiple judges
-nl2atl llm-judge --datasets all
-
-# Compute inter‑judge agreement
-nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
-
-# Generate efficiency report with confidence scores
-nl2atl model-efficiency --predictions_dir outputs/model_predictions
+uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation
 ```
 
-The confidence scores are automatically integrated into all rankings and visualizations.
-
-## Human annotations
-
-You can add a human‑annotated file as an additional judge during agreement analysis.
-The human file may be either a list of items or a metadata dictionary with an `annotations` list.
-
-Minimal item schema:
-
-```json
-{
-  "input": "...",
-  "gold": "<<A>>F goal",
-  "prediction": "<<A>>F goal",
-  "correct": "yes"
-}
-```
-
-Run with humans:
-
-```bash
-nl2atl judge-agreement \
-  --eval_dir outputs/LLM-evaluation/evaluated_datasets \
-  --human_annotations path/to/human_annotations.json
-```
-
-## Extending evaluation
-
-Implement custom evaluators by extending `BaseEvaluator` in [src/evaluation/base.py](../src/evaluation/base.py) and wiring them into your workflow.
-
+The report keeps accuracy and latency separate, then adds deterministic helper rankings such as fastest model, most accurate model, best accuracy per second, highest throughput, and a Pareto frontier.

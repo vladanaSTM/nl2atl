@@ -1,72 +1,32 @@
-# NL2ATL Documentation
+# NL2ATL Docs
 
-This documentation explains how to install, configure, run, evaluate, and extend NL2ATL.
+NL2ATL translates natural-language strategic requirements into ATL formulas, runs model experiments, and evaluates predictions with exact match plus optional LLM judging.
 
-## Recommended Reading Order
+These are the only docs needed for day-to-day use and development:
 
-1. [Installation](installation.md) - install with uv and configure credentials.
-2. [Quickstart](quickstart.md) - run one experiment and inspect output.
-3. [Dataset](dataset.md) - understand the JSON schema and split behavior.
-4. [Configuration](configuration.md) - edit models, experiments, and split sizes.
-5. [Evaluation](evaluation.md) - exact match, LLM judge, agreement, and efficiency reports.
+1. [Quickstart](quickstart.md) - install the project, run a model, inspect outputs, and start the API.
+2. [Configuration](configuration.md) - edit dataset settings, seeds, conditions, and models.
+3. [Dataset](dataset.md) - understand row format, multiple gold formulas, splits, and augmentation.
+4. [Evaluation](evaluation.md) - understand exact match, LLM judging, agreement, and accuracy-latency reports.
+5. [Architecture](architecture.md) - see how the project is organized and how a run flows through the code.
+6. [Development](development.md) - run tests and find the right module to change.
 
-## Task Navigation
-
-| Task | Read |
-|---|---|
-| Install the project | [Installation](installation.md) |
-| Run a first experiment | [Quickstart](quickstart.md) |
-| Understand ATL syntax | [ATL Primer](atl_primer.md) |
-| Edit the dataset | [Dataset](dataset.md) |
-| Add or change models | [Configuration](configuration.md) |
-| Run large sweeps | [SLURM](slurm.md) |
-| Evaluate predictions | [Evaluation](evaluation.md), [Usage](usage.md) |
-| Use the API | [API](api.md) |
-| Understand internals | [Architecture](architecture.md) |
-| Contribute code | [Development](development.md) |
-| Use genVITAMIN | [genVITAMIN](genvitamin.md) |
-
-## Core Workflow
+## Workflow
 
 ```text
 dataset + configs
-      |
-      v
-seeded train/validation/test split
-      |
-      v
-train or load model
-      |
-      v
-generate ATL formulas
-      |
-      v
-exact-match and optional LLM-judge evaluation
-      |
-      v
-reports under outputs/
+  -> seeded train/validation/test split
+  -> optional training on the training split
+  -> one ATL prediction per test input
+  -> exact match against accepted gold formulas
+  -> LLM judge only for non-exact predictions
+  -> judge agreement and accuracy-latency reports
 ```
 
-## Current Dataset Contract
+## Defaults
 
-The default dataset is [../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json). Rows require `input` plus one formula field: `output`, `output_1`, or `output_2`. The loader keeps all accepted formulas in `outputs` and stores a preferred formula in `output` for compatibility.
-
-Splits are simple seeded shuffles using explicit final proportions:
-
-```yaml
-train_size: 0.70
-val_size: 0.10
-test_size: 0.20
-```
-
-Splits are not stratified by difficulty.
-
-## Main Commands
-
-```bash
-uv run nl2atl run-single --model qwen-3b --few_shot
-uv run nl2atl run-all --models qwen-3b --conditions baseline_zero_shot
-uv run nl2atl llm-judge --datasets all
-uv run nl2atl model-efficiency --predictions_dir outputs/model_predictions
-uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
-```
+- Dataset: [../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json)
+- Split: `train_size=0.70`, `val_size=0.10`, `test_size=0.20`
+- Seeds: `num_seeds=5` unless overridden
+- Augmentation: applied after splitting, to training data only
+- Dependencies: uv and [../pyproject.toml](../pyproject.toml)

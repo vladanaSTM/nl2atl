@@ -1,93 +1,71 @@
 # Dataset
 
-NL2ATL uses a JSON list of natural-language requirements and reference ATL formulas.
+NL2ATL uses a JSON list of natural-language requirements and accepted ATL formulas.
 
 ## Default File
 
-The default dataset is:
-
 [../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json)
 
-## Required Fields
+## Row Schema
 
-Each item must contain:
+Required:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `input` | string | Natural-language requirement |
-| `output` | string | Reference ATL formula |
+| Field | Meaning |
+|---|---|
+| `input` | Natural-language requirement |
+| `output`, `output_1`, or `output_2` | Accepted ATL formula |
 
-The loader also accepts `output_1` and `output_2`. When a row has more than one correct formula, the project keeps all accepted formulas in an in-memory `outputs` list and stores the first preferred formula in `output` for compatibility.
+Optional:
 
-Optional fields:
+| Field | Meaning |
+|---|---|
+| `id` | Stable example identifier |
+| `difficulty` | Optional difficulty label |
+| `difficulty_scores` | Optional classifier details |
 
-| Field | Type | Meaning |
-|---|---|---|
-| `id` | string | Stable example identifier |
-| `difficulty` | string | Optional label such as `easy` or `hard` |
-| `difficulty_scores` | object | Optional score breakdown produced by the classifier |
+Rows may have multiple correct formulas. `load_data` creates:
+
+- `outputs`: all accepted formulas, deduplicated in preferred order
+- `output`: the first preferred formula, kept for compatibility
+
+Preferred order is `output`, then `output_2`, then `output_1`.
 
 ## Example
 
 ```json
 {
-  "id": "ex01",
-  "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed"
+  "id": "ex952",
+  "input": "Every authentication server can guarantee that in the immediately succeeding state the recovery token will be issued.",
+  "output_1": "<<AuthenticationServer1>>X recovery_token_issued_1 && <<AuthenticationServer2>>X recovery_token_issued_2",
+  "output_2": "<<AuthenticationServer1,AuthenticationServer2>>X recovery_token_issued"
 }
 ```
 
-## Loading Data
-
-Use `load_data` when the data will be used by experiments. It validates rows and records every accepted formula.
+## Loading
 
 ```python
 from src.data_utils import load_data
 
-dataset = load_data("data/dataset_gold_no_difficulty.json")
-print(dataset[0]["input"])
-print(dataset[0]["output"])
-print(dataset[0]["outputs"])
+data = load_data("data/dataset_gold_no_difficulty.json")
+print(data[0]["input"])
+print(data[0]["outputs"])
 ```
 
-Training uses every formula in `outputs`. Evaluation first checks whether the prediction exactly matches any accepted formula. If none match, the LLM judge receives the same list and can approve predictions that are semantically equivalent to any one accepted formula.
+## Splits And Augmentation
 
-## Splitting Data
-
-The project uses seeded shuffle splits. It does not stratify by difficulty.
+Splits are seeded shuffles, not stratified by difficulty.
 
 ```python
-from src.data_utils import split_data
+from src.data_utils import split_data, augment_data
 
-train, val, test = split_data(
-    dataset,
-    train_size=0.70,
-    val_size=0.10,
-    test_size=0.20,
-    seed=42,
-)
-```
-
-The three sizes must sum to `1.0`.
-
-## Augmentation
-
-Training data can be augmented with simple paraphrases:
-
-```python
-from src.data_utils import augment_data
-
+train, val, test = split_data(data, train_size=0.70, val_size=0.10, test_size=0.20, seed=42)
 train_aug = augment_data(train, augment_factor=10)
 ```
 
-The original row is kept, and extra rows keep the same normalized `output` and `outputs` list.
+Augmentation happens after splitting and only on the training split. Augmented rows keep the same `outputs` list.
 
-## Difficulty Labels
+## How Multiple Gold Answers Are Used
 
-Difficulty labels are optional. Add them only when you need difficulty analysis:
-
-```bash
-uv run nl2atl classify-difficulty --input data/dataset_gold_no_difficulty.json --verbose
-```
-
-See [difficulty_classification.md](difficulty_classification.md) for the scoring method.
+- Training creates one supervised target per accepted formula.
+- Exact match is correct if the prediction matches any accepted formula after normalization.
+- LLM judging sees all accepted formulas and can approve semantic equivalence to any one of them.

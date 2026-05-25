@@ -5,7 +5,7 @@ Runs all evaluation steps in sequence:
 1. Summarize judge evaluations per model
 2. Generate inter-rater agreement report
 3. Aggregate metrics across seeds
-4. Generate model efficiency report
+4. Generate accuracy-latency report
 """
 
 import argparse
@@ -66,13 +66,7 @@ def main() -> None:
     parser.add_argument(
         "--skip_efficiency",
         action="store_true",
-        help="Skip model efficiency analysis.",
-    )
-    parser.add_argument(
-        "--gpu_hour_usd",
-        type=float,
-        default=None,
-        help="GPU cost per hour in USD for efficiency calculations.",
+        help="Skip accuracy-latency analysis.",
     )
     parser.add_argument(
         "--weight_accuracy",
@@ -81,16 +75,10 @@ def main() -> None:
         help="Weight for accuracy in efficiency scoring (default: 0.5).",
     )
     parser.add_argument(
-        "--weight_cost",
-        type=float,
-        default=0.25,
-        help="Weight for cost in efficiency scoring (default: 0.25).",
-    )
-    parser.add_argument(
         "--weight_latency",
         type=float,
-        default=0.25,
-        help="Weight for latency in efficiency scoring (default: 0.25).",
+        default=0.5,
+        help="Weight for latency in efficiency scoring (default: 0.5).",
     )
     parser.add_argument(
         "--no_notebook",
@@ -192,21 +180,20 @@ def main() -> None:
                 print(f"✗ Error aggregating seeds: {e}")
                 raise
 
-        # Step 4: Generate efficiency report
+        # Step 4: Generate accuracy-latency report
         if not args.skip_efficiency:
             print("\n" + "=" * 70)
-            print("STEP 4: Generating model efficiency report")
+            print("STEP 4: Generating accuracy-latency report")
             print("=" * 70)
             try:
                 agg_path = eval_dir / "seed_aggregate_metrics_from_judged.json"
                 if not agg_path.exists():
                     print(
-                        f"Warning: Aggregation file not found at {agg_path}, skipping efficiency report"
+                        f"Warning: Aggregation file not found at {agg_path}, skipping accuracy-latency report"
                     )
                 else:
                     weights = EfficiencyWeights(
                         accuracy=args.weight_accuracy,
-                        cost=args.weight_cost,
                         latency=args.weight_latency,
                     )
 
@@ -214,7 +201,6 @@ def main() -> None:
                     efficiency_report = build_efficiency_report_from_aggregate(
                         aggregate_path=agg_path,
                         weights=weights,
-                        gpu_hour_usd=args.gpu_hour_usd,
                         agreement_report_path=(
                             agreement_report_path
                             if agreement_report_path.exists()
@@ -224,18 +210,20 @@ def main() -> None:
 
                     eff_output = eval_dir / "efficiency_report.json"
                     save_json(efficiency_report, eff_output)
-                    print(f"✓ Efficiency report saved to {eff_output}")
+                    print(f"✓ Accuracy-latency report saved to {eff_output}")
 
                     if not args.no_notebook:
                         try:
                             build_efficiency_notebook(
                                 eff_output, eval_dir / "efficiency_report.ipynb"
                             )
-                            print(f"✓ Efficiency notebook generated")
+                            print(f"✓ Accuracy-latency notebook generated")
                         except Exception as e:
-                            print(f"Warning: Could not build efficiency notebook: {e}")
+                            print(
+                                f"Warning: Could not build accuracy-latency notebook: {e}"
+                            )
             except Exception as e:
-                print(f"✗ Error generating efficiency report: {e}")
+                print(f"✗ Error generating accuracy-latency report: {e}")
                 raise
 
         print("\n" + "=" * 70)
@@ -247,7 +235,7 @@ def main() -> None:
         print(
             f"  • Seed aggregation: {eval_dir}/seed_aggregate_metrics_from_judged.json"
         )
-        print(f"  • Efficiency report: {eval_dir}/efficiency_report.json")
+        print(f"  • Accuracy-latency report: {eval_dir}/efficiency_report.json")
         if not args.no_notebook:
             print("\nGenerated notebooks:")
             print(f"  • Judge summaries: {eval_dir}/summary__judge-*.ipynb")
@@ -255,7 +243,7 @@ def main() -> None:
             print(
                 f"  • Seed aggregation: {eval_dir}/seed_aggregate_metrics_from_judged.ipynb"
             )
-            print(f"  • Efficiency report: {eval_dir}/efficiency_report.ipynb")
+            print(f"  • Accuracy-latency report: {eval_dir}/efficiency_report.ipynb")
 
     except Exception as e:
         print(f"\n✗ Pipeline failed with error: {e}", file=sys.stderr)

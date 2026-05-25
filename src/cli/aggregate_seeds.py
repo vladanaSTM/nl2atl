@@ -8,7 +8,6 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-
 NUMERIC_FIELDS = [
     "accuracy",
     "exact_match",
@@ -22,9 +21,6 @@ NUMERIC_FIELDS = [
     "accuracy_boost_from_llm",
     "no_llm_fallback_count",
     "n_examples",
-    "total_tokens_input",
-    "total_tokens_output",
-    "total_tokens",
     "latency_mean_ms",
     "latency_p50_ms",
     "latency_p95_ms",

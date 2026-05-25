@@ -1,91 +1,82 @@
 # Quickstart
 
-This page runs one experiment and shows where the output goes.
+Use this page to install NL2ATL, run one model, and find the output files.
 
-## 1. Verify the CLI
+## Install
+
+NL2ATL uses Python 3.10+ and uv.
 
 ```bash
+git clone https://github.com/vladanaSTM/nl2atl.git
+cd nl2atl
+python -m pip install uv
+uv sync --group dev
 uv run nl2atl --help
 ```
 
-You should see commands such as `run-single`, `run-all`, `llm-judge`, `judge-agreement`, `model-efficiency`, `classify-difficulty`, and `slurm`.
+Create `.env` from `.env.example` when you need Azure-hosted models or gated Hugging Face models. Common variables are `AZURE_API_KEY`, `AZURE_INFER_ENDPOINT`, and `HUGGINGFACE_TOKEN`.
 
-## 2. Inspect the Dataset
+## Inspect The Dataset
 
 ```bash
-uv run python -c "from src.data_utils import load_data; data = load_data('data/dataset_gold_no_difficulty.json'); print(len(data)); print(data[0]['input']); print(data[0]['output'])"
+uv run python -c "from src.data_utils import load_data; d=load_data('data/dataset_gold_no_difficulty.json'); print(len(d)); print(d[0]['input']); print(d[0]['outputs'])"
 ```
 
-Rows are loaded from JSON and normalized to `input` and `output` in memory.
+The loader validates rows and records every accepted gold formula in `outputs`.
 
-## 3. Run One Experiment
+## Run One Experiment
 
 ```bash
 uv run nl2atl run-single --model qwen-3b --few_shot
 ```
 
-This will:
+This loads the dataset, creates a seeded split, loads the model, generates formulas for the test split, and writes a prediction file under `outputs/model_predictions/`.
 
-1. Load config from [../configs/experiments.yaml](../configs/experiments.yaml) and [../configs/models.yaml](../configs/models.yaml).
-2. Load and validate the dataset.
-3. Create a seeded train/validation/test split.
-4. Load the selected model.
-5. Generate formulas for the test split.
-6. Save predictions and metadata under `outputs/model_predictions/`.
-
-Default splits are not stratified. They use the explicit proportions in config.
-
-## 4. Inspect Predictions
+## Inspect Predictions
 
 ```bash
-uv run python -c "from src.infra.io import load_json; result = load_json('outputs/model_predictions/qwen-3b_baseline_few_shot.json'); row = result['predictions'][0]; print(row['input']); print(row['expected']); print(row['generated']); print(row['exact_match'])"
+uv run python -c "from src.infra.io import load_json; r=load_json('outputs/model_predictions/qwen-3b_baseline_few_shot.json'); p=r['predictions'][0]; print(p['input']); print(p['expected_options']); print(p['generated']); print(p['exact_match'])"
 ```
 
-Prediction files look like this:
+Each prediction row includes the input, accepted gold formulas, generated formula, exact-match flag, and latency.
 
-```json
-{
-  "metadata": {
-    "run_id": "qwen-3b_baseline_few_shot",
-    "model": "Qwen/Qwen2.5-3B-Instruct",
-    "total_samples": 30,
-    "metrics": {
-      "exact_match": 0.82
-    }
-  },
-  "predictions": [
-    {
-      "input": "...",
-      "expected": "<<User>>F ticket_printed",
-      "generated": "<<User>>F ticket_printed",
-      "exact_match": 1,
-      "latency_ms": 412.7
-    }
-  ]
-}
-```
-
-## 5. Optional LLM Judge
-
-Exact match is strict, but it accepts any listed gold formula for rows with multiple correct answers. Use the LLM judge when you want semantic evaluation for non-exact predictions:
+## Evaluate And Report
 
 ```bash
 uv run nl2atl llm-judge --datasets all
+uv run nl2atl judge-agreement
+uv run nl2atl generate-eval-reports
 ```
 
-Results are written to `outputs/LLM-evaluation/`.
+Exact matches are accepted automatically. The LLM judge is called only for non-exact predictions and receives all accepted gold formulas. Reports are written under `outputs/LLM-evaluation/`.
 
-## 6. Optional Efficiency Report
+## Common Commands
+
+| Command | Purpose |
+|---|---|
+| `uv run nl2atl run-single --model qwen-3b --few_shot` | Run one model and condition |
+| `uv run nl2atl run-all --models qwen-3b --conditions baseline_zero_shot` | Run selected models, conditions, and seeds |
+| `uv run nl2atl llm-judge --datasets all` | Judge non-exact predictions semantically |
+| `uv run nl2atl generate-eval-reports` | Build summaries, agreement, aggregates, and accuracy-latency reports |
+| `uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation` | Rebuild only the accuracy-latency report |
+
+Use `uv run nl2atl COMMAND --help` for the full option list.
+
+## API Service
 
 ```bash
-uv run nl2atl model-efficiency --predictions_dir outputs/model_predictions
+uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
+curl http://localhost:8081/health
 ```
 
-The report combines accuracy, cost, latency, and throughput information when those fields are available.
+`POST /generate` accepts `description`, optional `model`, `few_shot`, `num_few_shot`, `max_new_tokens`, `adapter`, and `return_raw`.
 
-## Next Pages
+## Outputs
 
-- [Dataset](dataset.md)
-- [Configuration](configuration.md)
-- [Evaluation](evaluation.md)
-- [Architecture](architecture.md)
+| Path | Contents |
+|---|---|
+| `outputs/model_predictions/` | Prediction rows and run metadata |
+| `outputs/LLM-evaluation/evaluated_datasets/` | LLM judge decisions |
+| `outputs/LLM-evaluation/agreement_report.json` | Judge agreement report |
+| `outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json` | Metrics aggregated across seeds |
+| `outputs/LLM-evaluation/efficiency_report.json` | Accuracy, latency, rankings, and Pareto frontier |

@@ -1,80 +1,59 @@
 # NL2ATL
 
-NL2ATL translates natural-language strategic requirements into ATL formulas. It provides a compact experiment framework for running Hugging Face or Azure models, evaluating predictions, and serving generation through FastAPI.
+NL2ATL translates natural-language strategic requirements into ATL formulas. The repository contains a small experiment framework for running Hugging Face or Azure models, evaluating predictions, and serving generation through FastAPI.
 
-## What This Repository Contains
+## Workflow
 
-- A CLI named `nl2atl` for experiments and evaluation.
-- Model loading for Hugging Face and Azure-hosted models.
-- Prompt formatting for zero-shot and few-shot generation.
-- Exact-match, LLM-judge, agreement, and efficiency evaluation tools.
-- A JSON dataset of natural-language requirements paired with ATL formulas.
-- Optional integration helpers for genVITAMIN.
+```text
+dataset + configs
+  -> seeded train/validation/test split
+  -> optional training on the training split
+  -> one ATL prediction per test input
+  -> normalized exact match against accepted gold formulas
+  -> LLM judge only for non-exact predictions
+  -> judge agreement and accuracy-latency reports
+```
 
-## Quick Start
+## Install
 
 ```bash
 git clone https://github.com/vladanaSTM/nl2atl.git
 cd nl2atl
-
 python -m pip install uv
 uv sync --group dev
-
 uv run nl2atl --help
 ```
 
-Create a local `.env` from `.env.example` when you need remote or gated models:
+Create `.env` from `.env.example` when you need Azure or gated Hugging Face models.
+
+## Main Commands
 
 ```bash
-cp .env.example .env
-```
-
-Common variables:
-
-- `AZURE_API_KEY` and `AZURE_INFER_ENDPOINT` for Azure models.
-- `HUGGINGFACE_TOKEN` for gated Hugging Face models.
-
-## Common Commands
-
-```bash
-# Run one model/condition
+# One run
 uv run nl2atl run-single --model qwen-3b --few_shot
 
-# Run a local sweep
+# Local sweep across configured models, conditions, and seeds
 uv run nl2atl run-all --models qwen-3b --conditions baseline_zero_shot
 
-# Evaluate generated predictions with an LLM judge
+# Semantic evaluation for non-exact predictions
 uv run nl2atl llm-judge --datasets all
 
-# Summarize cost, latency, and accuracy
-uv run nl2atl model-efficiency --predictions_dir outputs/model_predictions
+# Agreement and accuracy-latency reports
+uv run nl2atl judge-agreement
+uv run nl2atl generate-eval-reports
+uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation
 
-# Start the API service
+# API service
 uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ```
 
 ## Dataset
 
-The checked-in dataset is [data/dataset_gold_no_difficulty.json](data/dataset_gold_no_difficulty.json). Each item must have:
+The default dataset is [data/dataset_gold_no_difficulty.json](data/dataset_gold_no_difficulty.json). Each row needs `input` and at least one gold formula field: `output`, `output_1`, or `output_2`.
 
-- `input`: natural-language requirement.
-- `output`: reference ATL formula.
+Rows can have more than one correct formula. `load_data` normalizes those formulas into `outputs` and keeps the preferred formula in `output` for compatibility. Training uses every formula in `outputs`; exact match accepts any of them; the LLM judge sees all of them when needed.
 
-The loader also accepts `output_1` and `output_2`. When a row has multiple correct formulas, they are preserved in an in-memory `outputs` list and the first preferred formula is kept in `output` for backward compatibility. Training uses every formula in `outputs`, exact match accepts any of them, and the LLM judge receives the full list when semantic judging is needed. Difficulty labels are optional and are not required for splitting.
-
-Example:
-
-```json
-{
-  "id": "ex01",
-  "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed"
-}
-```
-
-## Data Splits
-
-Splits are seeded shuffles, not stratified splits. Configure final proportions directly in [configs/experiments.yaml](configs/experiments.yaml):
+Splits are seeded shuffles, not stratified splits:
 
 ```yaml
 data:
@@ -85,45 +64,34 @@ data:
   augment_factor: 10
 ```
 
-The three split sizes must sum to `1.0`.
+Augmentation is applied only after splitting, and only to the training split.
 
-## Project Layout
+## Code Layout
 
 ```text
-src/
-  cli/          command-line entry points
-  experiment/   data preparation, training, evaluation orchestration, reporting
-  models/       prompt formatting, model loading, generation
-  evaluation/   exact match, LLM judge, agreement, efficiency, difficulty tools
-  infra/        JSON/YAML/env helpers and Azure client
-  api_server.py FastAPI generation service
-configs/        model and experiment configuration
-data/           dataset files
-docs/           user and developer documentation
-tests/          unit tests
+src/cli/          command-line entry points
+src/experiment/   data preparation, training, evaluation orchestration, reporting
+src/models/       prompt formatting, model loading, generation
+src/evaluation/   exact match, LLM judge, agreement, accuracy-latency, difficulty tools
+src/infra/        JSON/YAML/env helpers and Azure client
+src/api_server.py FastAPI generation service
+configs/          model and experiment configuration
+data/             dataset files
+docs/             documentation
+tests/            unit tests
 ```
 
 ## Outputs
 
-Experiment outputs are written under `outputs/`:
-
 ```text
-outputs/model_predictions/      generated formulas and per-run metadata
-outputs/LLM-evaluation/         LLM-judge results, summaries, and reports
+outputs/model_predictions/      model predictions and run metadata
+outputs/LLM-evaluation/         judge outputs, agreement reports, aggregate metrics
+models/                         fine-tuned adapters
 ```
-
-Large output artifacts may be tracked with Git LFS. Install Git LFS and run `git lfs pull` if you need those files after cloning.
 
 ## Documentation
 
-Start with [docs/index.md](docs/index.md). The most useful pages are:
-
-- [docs/installation.md](docs/installation.md)
-- [docs/quickstart.md](docs/quickstart.md)
-- [docs/dataset.md](docs/dataset.md)
-- [docs/configuration.md](docs/configuration.md)
-- [docs/architecture.md](docs/architecture.md)
-- [docs/api.md](docs/api.md)
+Start with [docs/index.md](docs/index.md). The docs are intentionally small: [quickstart](docs/quickstart.md), [configuration](docs/configuration.md), [dataset](docs/dataset.md), [evaluation](docs/evaluation.md), [architecture](docs/architecture.md), and [development](docs/development.md).
 
 ## Development
 
@@ -131,9 +99,5 @@ Start with [docs/index.md](docs/index.md). The most useful pages are:
 uv sync --group dev
 uv run pytest -q
 ```
-
-Keep changes small and run focused tests for the modules you touch before running the full suite.
-
-## License
 
 NL2ATL is released under the MIT License.
