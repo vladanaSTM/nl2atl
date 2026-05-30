@@ -62,10 +62,6 @@ def get_model_type(model_name: str) -> str:
         return ModelType.PHI3
     if "mistral" in model_lower:
         return ModelType.MISTRAL
-    if "llama" in model_lower:
-        return ModelType.LLAMA
-    if "gemma" in model_lower:
-        return ModelType.GEMMA
 
     return ModelType.GENERIC
 
@@ -93,7 +89,7 @@ def _build_bnb_config() -> BitsAndBytesConfig:
     )
 
 
-def _load_tokenizer(model_name: str) -> AutoTokenizer:
+def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoTokenizer:
     """Load tokenizer with fallback handling."""
     hf_token = os.getenv("HUGGINGFACE_TOKEN")
 
@@ -102,6 +98,7 @@ def _load_tokenizer(model_name: str) -> AutoTokenizer:
             model_name,
             trust_remote_code=True,
             token=hf_token,
+            revision=revision,
         )
     except Exception as e:
         error_msg = str(e).lower()
@@ -119,6 +116,7 @@ def _load_tokenizer(model_name: str) -> AutoTokenizer:
                     trust_remote_code=True,
                     use_fast=False,
                     token=hf_token,
+                    revision=revision,
                 )
                 print("Recovered tokenizer with use_fast=False")
             except Exception:
@@ -126,12 +124,14 @@ def _load_tokenizer(model_name: str) -> AutoTokenizer:
                     model_name,
                     trust_remote_code=True,
                     use_fast=False,
+                    revision=revision,
                 )
         else:
             print(f"Warning: {e}. Trying without token...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 trust_remote_code=True,
+                revision=revision,
             )
 
     if tokenizer.pad_token is None:
@@ -150,7 +150,7 @@ def _load_hf_model(
     clear_gpu_memory()
     print(f"Loading model: {model_config.name}")
 
-    tokenizer = _load_tokenizer(model_config.name)
+    tokenizer = _load_tokenizer(model_config.name, model_config.revision)
 
     use_4bit = model_config.load_in_4bit
     bnb_config = _build_bnb_config() if use_4bit else None
@@ -159,9 +159,11 @@ def _load_hf_model(
     while True:
         model_kwargs = {
             "trust_remote_code": True,
-            "torch_dtype": torch.bfloat16,
+            "dtype": torch.bfloat16,
             "device_map": "auto",
         }
+        if model_config.revision:
+            model_kwargs["revision"] = model_config.revision
 
         # Special handling for very large models
         if torch.cuda.is_available() and is_large_model(
@@ -226,13 +228,14 @@ def _load_hf_model(
 
     # Apply LoRA for training
     elif for_training:
-        model = prepare_model_for_kbit_training(model)
+        if use_4bit:
+            model = prepare_model_for_kbit_training(model)
 
         lora_config = LoraConfig(
             r=model_config.lora_r,
             lora_alpha=model_config.lora_alpha,
             target_modules=model_config.target_modules,
-            lora_dropout=0.05,
+            lora_dropout=model_config.lora_dropout,
             bias="none",
             task_type="CAUSAL_LM",
         )

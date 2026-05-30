@@ -63,7 +63,7 @@ def resolve_judge_models(
 ) -> list:
     """Resolve judge models from config or fall back to a fixed allowed set.
 
-    Allowed default judges: `llama-70b`, `gpt-5.2`, `DeepSeek-V3.2`.
+    Allowed default judges: `gpt-5.2`, `DeepSeek-V3.2`.
     If a models config exists and contains matching keys those entries are used;
     otherwise a simple `ModelConfig` with provider="azure" is returned for
     the requested names.
@@ -83,10 +83,6 @@ def resolve_judge_models(
                 for name in judge_models
             ]
         return [
-            (
-                "llama-70b",
-                ModelConfig(name="llama-70b", short_name="llama-70b", provider="azure"),
-            ),
             (
                 "gpt-5.2",
                 ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
@@ -114,8 +110,8 @@ def resolve_judge_models(
                 selected_keys.append(key)
                 seen.add(key)
     else:
-        # Default selection: only the allowed three, in this order.
-        default_keys = ["llama-70b", "gpt-5.2", "DeepSeek-V3.2"]
+        # Default selection: only the allowed API judges, in this order.
+        default_keys = ["gpt-5.2", "DeepSeek-V3.2"]
         selected_keys = [k for k in default_keys if k in models]
         if not selected_keys:
             # If none of the allowed keys exist in the config, fall back to any

@@ -27,6 +27,6 @@ dataset + configs
 
 - Dataset: [../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json)
 - Split: `train_size=0.70`, `val_size=0.10`, `test_size=0.20`
-- Seeds: `num_seeds=1` with `seed=42` unless overridden
+- Seeds: `num_seeds=3` starting at `seed=42` unless overridden
 - Augmentation: applied after splitting, to training data only
 - Dependencies: uv and [../pyproject.toml](../pyproject.toml)

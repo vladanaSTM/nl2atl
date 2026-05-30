@@ -17,6 +17,20 @@ def test_clean_output_extracts_mistral_inst_answer():
     assert cleaned == "<<A>>F p"
 
 
+def test_clean_output_extracts_phi_answer():
+    evaluator = ExactMatchEvaluator()
+    response = "<|assistant|>\nFinal formula: <<A>>G(p -> q)<|end|>"
+    cleaned = evaluator.clean_output(response, model_type="phi3")
+    assert cleaned == "<<A>>G(p -> q)"
+
+
+def test_clean_output_extracts_generic_code_fence_answer():
+    evaluator = ExactMatchEvaluator()
+    response = "Assistant:\n```atl\n<<A,B>>X(p && q)\n```"
+    cleaned = evaluator.clean_output(response, model_type="generic")
+    assert cleaned == "<<A,B>>X(p && q)"
+
+
 def test_normalize_symbols_equivalence():
     evaluator = ExactMatchEvaluator()
     a = "<<A>>G (p ∧ q)"

@@ -1,3 +1,5 @@
+import random
+
 from src.models import few_shot
 from src.constants import ModelType
 
@@ -26,6 +28,16 @@ def test_get_few_shot_examples_excludes_inputs():
         exclude_inputs=[first_input],
     )
     assert all(e["input"] != first_input for e in filtered)
+
+
+def test_get_few_shot_examples_does_not_mutate_global_random():
+    random.seed(1234)
+    expected = random.random()
+
+    random.seed(1234)
+    few_shot.get_few_shot_examples(n=3, seed=99)
+
+    assert random.random() == expected
 
 
 def test_format_few_shot_prompt_includes_examples():
@@ -72,17 +84,50 @@ def test_format_prompt_qwen_tags():
     assert "<|im_start|>assistant" in prompt
 
 
-def test_format_prompt_gemma_uses_tokenizer():
+def test_format_prompt_qwen_uses_tokenizer_template():
     tokenizer = _FakeTokenizer()
     prompt = few_shot.format_prompt(
         input_text="A",
         output_text=None,
         few_shot=False,
-        model_type=ModelType.GEMMA,
+        model_type=ModelType.QWEN,
         tokenizer=tokenizer,
     )
     assert prompt == "TEMPLATE"
     assert tokenizer.seen is not None
+    assert tokenizer.seen["messages"][0]["role"] == "system"
+    assert tokenizer.seen["messages"][1]["role"] == "user"
+    assert tokenizer.seen["add_generation_prompt"] is True
+
+
+def test_format_prompt_phi3_uses_tokenizer_template():
+    tokenizer = _FakeTokenizer()
+    prompt = few_shot.format_prompt(
+        input_text="A",
+        output_text="<<A>>F p",
+        few_shot=False,
+        model_type=ModelType.PHI3,
+        tokenizer=tokenizer,
+    )
+    assert prompt == "TEMPLATE"
+    assert tokenizer.seen is not None
+    assert tokenizer.seen["messages"][-1] == {
+        "role": "assistant",
+        "content": "<<A>>F p",
+    }
+    assert tokenizer.seen["add_generation_prompt"] is False
+
+
+def test_format_prompt_phi3_fallback_uses_phi_tags():
+    prompt = few_shot.format_prompt(
+        input_text="A",
+        output_text="<<A>>F p",
+        few_shot=False,
+        model_type=ModelType.PHI3,
+    )
+    assert "<|system|>" in prompt
+    assert "<|assistant|>" in prompt
+    assert prompt.endswith("<<A>>F p<|end|>")
 
 
 def test_format_prompt_mistral_uses_tokenizer_template():

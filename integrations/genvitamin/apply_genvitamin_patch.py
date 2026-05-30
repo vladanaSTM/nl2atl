@@ -60,7 +60,7 @@ def _upsert_env(env_file: Path) -> None:
         "NL2ATL_URL": "http://localhost:8081",
         "NL2ATL_MODEL": "qwen-3b",
         "NL2ATL_FEW_SHOT": "true",
-        "NL2ATL_ADAPTER": "qwen-3b_finetuned_few_shot/final",
+        "NL2ATL_ADAPTER": "qwen-3b_finetuned/final",
         "NL2ATL_MAX_NEW_TOKENS": "128",
         "NL2ATL_TIMEOUT": "300",
     }

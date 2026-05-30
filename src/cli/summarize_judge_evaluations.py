@@ -116,7 +116,7 @@ def summarize_judge_evaluations(
 
             # Extract source filename (remove judge suffix if present)
             source_file = evaluated_path.name
-            # Remove judge suffix (e.g., __judge-llama-70b) from the filename
+            # Remove judge suffix (e.g., __judge-gpt-5.2) from the filename
             if "__judge-" in source_file:
                 stem = source_file.split("__judge-")[0]
             else:

@@ -9,11 +9,9 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import torch
 from datasets import Dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 from ..config import Config, ModelConfig, ExperimentCondition
-from ..constants import Provider
 from ..data_utils import get_output_options
 from ..evaluation.exact_match import ExactMatchEvaluator
 from ..models.few_shot import format_prompt
@@ -82,15 +80,40 @@ class ExperimentRunner:
         model_config = self.config.models[model_key]
         return f"{model_config.short_name}_{condition.name}{self._seed_suffix()}"
 
+    def _build_adapter_run_name(self, model_key: str) -> str:
+        """Build the shared fine-tuned adapter run name for a model and seed."""
+        model_config = self.config.models[model_key]
+        return f"{model_config.short_name}_finetuned{self._seed_suffix()}"
+
+    def _adapter_final_path(self, model_key: str) -> Path:
+        """Get the shared adapter path for a model and seed."""
+        return (
+            Path(self.config.models_dir)
+            / self._build_adapter_run_name(model_key)
+            / "final"
+        )
+
     def _set_global_seed(self, seed: int) -> None:
         """Set random seeds for reproducibility."""
         random.seed(seed)
         np.random.seed(seed)
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass
+        if torch.cuda.is_available():
+            try:
+                torch.backends.cuda.enable_flash_sdp(False)
+                torch.backends.cuda.enable_mem_efficient_sdp(False)
+                torch.backends.cuda.enable_math_sdp(True)
+            except Exception:
+                pass
 
     def _assert_finetune_allowed(self, model_config: ModelConfig) -> None:
         """Check if finetuning is allowed for this model."""
@@ -149,6 +172,19 @@ class ExperimentRunner:
         return parsed if parsed > 0 else -1
 
     @staticmethod
+    def _cuda_supports_tf32() -> bool:
+        """Return whether the active CUDA device supports TF32 kernels."""
+        if not torch.cuda.is_available():
+            return False
+        major, _minor = torch.cuda.get_device_capability()
+        return major >= 8
+
+    @staticmethod
+    def _cuda_supports_bf16() -> bool:
+        """Return whether the active CUDA device supports BF16 training."""
+        return torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+
+    @staticmethod
     def _training_dataset(
         items: List[Dict[str, Any]],
         model_type: str,
@@ -177,7 +213,7 @@ class ExperimentRunner:
         model_config: ModelConfig,
         output_dir: Path,
         max_steps: int,
-    ) -> TrainingArguments:
+    ) -> SFTConfig:
         """Build Hugging Face training arguments from global and model config."""
         train_batch_size = model_config.train_batch_size or self.config.batch_size
         eval_batch_size = model_config.eval_batch_size or train_batch_size
@@ -186,7 +222,7 @@ class ExperimentRunner:
             or self.config.gradient_accumulation_steps
         )
 
-        return TrainingArguments(
+        return SFTConfig(
             output_dir=str(output_dir),
             num_train_epochs=self.config.num_epochs,
             per_device_train_batch_size=train_batch_size,
@@ -195,29 +231,32 @@ class ExperimentRunner:
             learning_rate=self.config.learning_rate,
             weight_decay=self.config.weight_decay,
             warmup_ratio=self.config.warmup_ratio,
-            lr_scheduler_type="cosine",
-            logging_steps=100,
-            eval_strategy="steps",
-            eval_steps=200,
-            save_strategy="steps",
-            save_steps=200,
-            save_total_limit=2,
+            lr_scheduler_type=self.config.lr_scheduler_type,
+            logging_strategy="steps",
+            logging_steps=10,
+            eval_strategy=self.config.eval_strategy,
+            save_strategy=self.config.save_strategy,
+            save_total_limit=self.config.save_total_limit,
             load_best_model_at_end=True,
             metric_for_best_model="eval_loss",
             greater_is_better=False,
-            bf16=self.config.bf16,
-            optim="adamw_torch_fused",
+            bf16=self.config.bf16 and self._cuda_supports_bf16(),
+            optim=self.config.optim,
             report_to="none",
-            max_grad_norm=0.3,
+            max_grad_norm=self.config.max_grad_norm,
             seed=self.config.seed,
+            data_seed=self.config.seed,
             ddp_find_unused_parameters=False,
-            gradient_checkpointing=True,
+            gradient_checkpointing=self.config.gradient_checkpointing,
             gradient_checkpointing_kwargs={"use_reentrant": False},
             max_steps=max_steps,
-            dataloader_num_workers=4,
-            dataloader_pin_memory=True,
-            group_by_length=True,
-            tf32=True,
+            dataloader_num_workers=self.config.dataloader_num_workers,
+            dataloader_pin_memory=self.config.dataloader_pin_memory,
+            group_by_length=self.config.group_by_length,
+            tf32=self.config.tf32 and self._cuda_supports_tf32(),
+            max_length=model_config.max_seq_length,
+            packing=self.config.packing,
+            dataset_text_field="text",
         )
 
     def _train_model(
@@ -260,6 +299,30 @@ class ExperimentRunner:
         self._cleanup_training(trainer, model, tokenizer, train_dataset, val_dataset)
 
         return str(final_path)
+
+    def _ensure_shared_adapter(
+        self,
+        model_key: str,
+        model_config: ModelConfig,
+        model_type: str,
+        overwrite: bool,
+    ) -> Tuple[str, bool, Optional[float]]:
+        """Train or reuse the shared adapter for all fine-tuned conditions."""
+        self._assert_finetune_allowed(model_config)
+
+        adapter_path = self._adapter_final_path(model_key)
+        if adapter_path.exists() and not overwrite:
+            print(f"Reusing fine-tuned adapter at {adapter_path}")
+            return str(adapter_path), True, None
+
+        start_time = time.perf_counter()
+        trained_path = self._train_model(
+            model_config,
+            model_type,
+            self._build_adapter_run_name(model_key),
+        )
+        duration = round(time.perf_counter() - start_time, 2)
+        return trained_path, False, duration
 
     def _evaluate_model(
         self,
@@ -311,11 +374,54 @@ class ExperimentRunner:
         del model, tokenizer
         clear_gpu_memory()
 
-    def run_single_experiment(
+    def _record_result(
+        self,
+        model_config: ModelConfig,
+        condition: ExperimentCondition,
+        effective_finetuned: bool,
+        run_name: str,
+        metrics: Dict[str, Any],
+        detailed_results: List[Dict[str, Any]],
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
+        """Persist one evaluated condition and record its metadata."""
+        self.reporter.stop_timer()
+        metadata = self.reporter.build_run_metadata(
+            config=self.config,
+            run_name=run_name,
+            model_config=model_config,
+            condition=condition,
+            effective_finetuned=effective_finetuned,
+            dataset_path=str(self.config.data_path),
+            total_samples=len(self.test_data),
+            results=detailed_results,
+        )
+        metadata["metrics"] = metrics
+        if extra_metadata:
+            metadata.update(extra_metadata)
+
+        print(f"\nResults for {run_name}:")
+        print(f"  Exact Match: {metrics['exact_match']:.1%}")
+        if "latency_mean_ms" in metadata:
+            print(f"  Mean Latency: {metadata['latency_mean_ms']:.1f}ms")
+        if metadata.get("duration_seconds"):
+            print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
+
+        result = {
+            "metadata": metadata,
+            "predictions": detailed_results,
+        }
+
+        self.all_results.append(result)
+        self.reporter.save_result(run_name, result)
+        return result
+
+    def _run_condition(
         self,
         model_key: str,
         condition: ExperimentCondition,
-        save_model: bool = True,
+        adapter_path: Optional[str] = None,
+        adapter_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """Run a single experiment (one model, one condition)."""
         model_key = resolve_model_key(model_key, self.config.models)
@@ -334,12 +440,12 @@ class ExperimentRunner:
 
         self.reporter.start_timer()
 
-        adapter_path = None
         model = None
         tokenizer = None
 
         try:
-            if effective_finetuned:
+            adapter_reused = adapter_path is not None
+            if effective_finetuned and adapter_path is None:
                 adapter_path = self._train_model(model_config, model_type, run_name)
 
             model, tokenizer = self._load_or_reuse_model(
@@ -353,33 +459,24 @@ class ExperimentRunner:
                 condition=condition,
             )
 
-            self.reporter.stop_timer()
-            metadata = self.reporter.build_run_metadata(
-                config=self.config,
-                run_name=run_name,
+            metadata = dict(adapter_metadata or {})
+            if effective_finetuned:
+                metadata.update(
+                    {
+                        "adapter_path": adapter_path,
+                        "adapter_reused": adapter_reused,
+                    }
+                )
+
+            result = self._record_result(
                 model_config=model_config,
                 condition=condition,
                 effective_finetuned=effective_finetuned,
-                dataset_path=str(self.config.data_path),
-                total_samples=len(self.test_data),
-                results=detailed_results,
+                run_name=run_name,
+                metrics=metrics,
+                detailed_results=detailed_results,
+                extra_metadata=metadata,
             )
-            metadata["metrics"] = metrics
-
-            print(f"\nResults for {run_name}:")
-            print(f"  Exact Match: {metrics['exact_match']:.1%}")
-            if "latency_mean_ms" in metadata:
-                print(f"  Mean Latency: {metadata['latency_mean_ms']:.1f}ms")
-            if metadata.get("duration_seconds"):
-                print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
-
-            result = {
-                "metadata": metadata,
-                "predictions": detailed_results,
-            }
-
-            self.all_results.append(result)
-            self.reporter.save_result(run_name, result)
 
         finally:
             if not (self.reuse_models and not effective_finetuned):
@@ -391,74 +488,108 @@ class ExperimentRunner:
 
         return result
 
-    def run_all_experiments(
+    def run_model_experiments(
         self,
-        models: Optional[List[str]] = None,
+        model_key: str,
         conditions: Optional[List[str]] = None,
-        model_provider: str = "hf",
         overwrite: bool = False,
     ) -> None:
-        """Run all specified experiments."""
-        if models is None:
-            models = list(self.config.models.keys())
+        """Run selected conditions for one model, sharing fine-tuning work."""
+        model_key = resolve_model_key(model_key, self.config.models)
+        model_config = self.config.models[model_key]
+        model_type = get_model_type(model_config.name)
 
-        if model_provider not in ("hf", "azure", "all"):
-            raise ValueError(
-                f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
-            )
-
-        # Filter by provider
-        if model_provider != "all":
-            filtered = []
-            for model_key in models:
-                resolved_key = resolve_model_key(model_key, self.config.models)
-                model_cfg = self.config.models[resolved_key]
-                is_azure = model_cfg.is_azure
-
-                if (model_provider == "azure" and is_azure) or (
-                    model_provider == "hf" and not is_azure
-                ):
-                    filtered.append(model_key)
-            models = filtered
-
-        # Resolve conditions
         if conditions is None:
-            run_conditions = self.config.conditions
+            run_conditions = list(self.config.conditions)
         else:
-            run_conditions = [c for c in self.config.conditions if c.name in conditions]
+            requested = set(conditions)
+            run_conditions = [c for c in self.config.conditions if c.name in requested]
+            missing = requested.difference({c.name for c in run_conditions})
+            if missing:
+                raise ValueError(f"No conditions matched: {sorted(missing)}")
 
-        total = len(models) * len(run_conditions)
-        current = 0
+        baseline_conditions = [c for c in run_conditions if not c.finetuned]
+        finetuned_conditions = [c for c in run_conditions if c.finetuned]
 
-        print(f"\n{'='*60}")
-        print(f"RUNNING {total} EXPERIMENTS")
-        print(f"Models: {models}")
-        print(f"Conditions: {[c.name for c in run_conditions]}")
-        print(f"{'='*60}")
+        for condition in baseline_conditions:
+            run_name = self._build_run_name(model_key, condition)
+            result_path = self.reporter.get_result_path(run_name)
+            if result_path.exists() and not overwrite:
+                print(f"Skipping {run_name}: results exist at {result_path}")
+                continue
+            self._run_condition(model_key, condition)
 
-        for model_key in models:
-            for condition in run_conditions:
-                current += 1
-                print(f"\n[{current}/{total}] ", end="")
+        if not finetuned_conditions:
+            self._release_model_cache()
+            return
 
-                try:
-                    resolved_key = resolve_model_key(model_key, self.config.models)
-                    run_name = self._build_run_name(resolved_key, condition)
-                    result_path = self.reporter.get_result_path(run_name)
+        self._assert_finetune_allowed(model_config)
 
-                    if result_path.exists() and not overwrite:
-                        print(f"Skipping {run_name}: results exist at {result_path}")
-                        continue
+        missing_finetuned = []
+        for condition in finetuned_conditions:
+            run_name = self._build_run_name(model_key, condition)
+            result_path = self.reporter.get_result_path(run_name)
+            if result_path.exists() and not overwrite:
+                print(f"Skipping {run_name}: results exist at {result_path}")
+                continue
+            missing_finetuned.append(condition)
 
-                    print(f"Running {run_name}: writing results to {result_path}")
-                    self.run_single_experiment(resolved_key, condition)
+        if not missing_finetuned:
+            self._release_model_cache()
+            return
 
-                except Exception as e:
-                    print(f"ERROR: {e}")
-                    self.reporter.finalize()
-                    clear_gpu_memory()
+        adapter_path, adapter_reused, training_duration = self._ensure_shared_adapter(
+            model_key=model_key,
+            model_config=model_config,
+            model_type=model_type,
+            overwrite=overwrite,
+        )
+        adapter_metadata = {
+            "adapter_path": adapter_path,
+            "adapter_reused": adapter_reused,
+            "shared_adapter_run_id": self._build_adapter_run_name(model_key),
+        }
+        if training_duration is not None:
+            adapter_metadata["adapter_training_duration_seconds"] = training_duration
 
-        self._release_model_cache()
+        model = None
+        tokenizer = None
+        try:
+            model, tokenizer = self._load_or_reuse_model(
+                model_config,
+                adapter_path,
+                effective_finetuned=True,
+            )
+            for condition in missing_finetuned:
+                run_name = self._build_run_name(model_key, condition)
+
+                print(f"\n{'='*60}")
+                print(f"Running: {run_name}")
+                print(f"{'='*60}")
+
+                self.reporter.start_timer()
+                metrics, detailed_results = self._evaluate_model(
+                    model=model,
+                    tokenizer=tokenizer,
+                    model_config=model_config,
+                    model_type=model_type,
+                    condition=condition,
+                )
+                self._record_result(
+                    model_config=model_config,
+                    condition=condition,
+                    effective_finetuned=True,
+                    run_name=run_name,
+                    metrics=metrics,
+                    detailed_results=detailed_results,
+                    extra_metadata=adapter_metadata,
+                )
+        finally:
+            del model
+            del tokenizer
+            clear_gpu_memory()
+            self.reporter.finalize()
+            self._release_model_cache()
 
     def _release_model_cache(self) -> None:
         """Free all cached models."""
@@ -474,14 +605,3 @@ class ExperimentRunner:
 
         self.model_cache.clear()
         clear_gpu_memory()
-
-    def run(self) -> Dict[str, Any]:
-        """Run all experiments with defaults and return results."""
-        self.run_all_experiments()
-        return {"results": self.all_results}
-
-
-def run_experiment(config: Config) -> Dict[str, Any]:
-    """Run experiment with given config."""
-    runner = ExperimentRunner(config)
-    return runner.run()

@@ -9,7 +9,6 @@ from typing import Any, Dict, List
 from .base import BaseEvaluator
 from ..constants import TEMPORAL_OPERATORS
 from ..data_utils import get_output_options, get_preferred_output
-from ..models.registry import generate
 from ..models.few_shot import format_prompt
 
 
@@ -51,20 +50,10 @@ class ExactMatchEvaluator(BaseEvaluator):
                 response = response.split("<|assistant|>")[-1]
             response = response.replace("<|end|>", "")
 
-        elif model_type == "llama":
-            if "<|start_header_id|>assistant<|end_header_id|>" in response:
-                response = response.split(
-                    "<|start_header_id|>assistant<|end_header_id|>"
-                )[-1]
-            response = response.replace("<|eot_id|>", "")
-
-        elif model_type == "gemma":
-            if "<start_of_turn>model" in response:
-                response = response.split("<start_of_turn>model")[-1]
-            elif "<start_of_turn>assistant" in response:
-                response = response.split("<start_of_turn>assistant")[-1]
-            for tag in ("<start_of_turn>", "<end_of_turn>", "<eos>", "</s>"):
-                response = response.replace(tag, "")
+        else:
+            for marker in ("Assistant:", "assistant:"):
+                if marker in response:
+                    response = response.rsplit(marker, 1)[-1]
 
         return response
 
@@ -83,6 +72,28 @@ class ExactMatchEvaluator(BaseEvaluator):
         response = re.sub(r"</?think>", "", response, flags=re.IGNORECASE)
         return response
 
+    def _strip_formatting_artifacts(self, response: str) -> str:
+        """Remove common wrappers while preserving ATL syntax."""
+        for token in (
+            "<|im_end|>",
+            "<|im_start|>",
+            "<|end|>",
+            "<|endoftext|>",
+            "</s>",
+            "<s>",
+        ):
+            response = response.replace(token, "")
+
+        response = re.sub(r"```(?:atl|text|plaintext)?\s*", "", response, flags=re.I)
+        response = response.replace("```", "")
+        response = re.sub(
+            r"^\s*(?:final\s+)?(?:formula|output|answer)\s*:\s*",
+            "",
+            response,
+            flags=re.IGNORECASE,
+        )
+        return response
+
     def clean_output(self, response: str, model_type: str) -> str:
         """Extract generated formula from model response."""
         # Extract assistant response
@@ -91,11 +102,11 @@ class ExactMatchEvaluator(BaseEvaluator):
         # Clean thinking blocks
         response = self._clean_think_tags(response)
 
-        # Remove special tokens
+        # Remove wrappers and special tokens without damaging ATL operators
+        response = self._strip_formatting_artifacts(response)
         response = re.sub(
             r"<[^>]*end[^>]*sentence[^>]*>", "", response, flags=re.IGNORECASE
         )
-        response = response.replace("<|endoftext|>", "")
 
         # Clean up whitespace and quotes
         response = re.sub(r"\n\s*\n+", "\n", response)
@@ -211,8 +222,8 @@ class ExactMatchEvaluator(BaseEvaluator):
         """
         Evaluate predictions.
 
-        Supports both legacy model-based evaluation and
-        BaseEvaluator-style prediction/reference evaluation.
+        Supports both live model evaluation and precomputed
+        prediction/reference evaluation.
         """
         if args and isinstance(args[0], list):
             predictions = args[0]
@@ -270,6 +281,8 @@ class ExactMatchEvaluator(BaseEvaluator):
             print(f"Few-shot: {few_shot}, Model type: {model_type}")
 
         excluded_inputs = [item["input"] for item in test_data] if few_shot else None
+
+        from ..models.registry import generate
 
         for i, item in enumerate(test_data):
             # Start timing

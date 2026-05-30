@@ -46,6 +46,55 @@ def test_from_yaml_and_resolve_seeds(tmp_path):
     assert cfg.resolve_seeds() == [42]
 
 
+def test_from_yaml_loads_paths_and_training_strategy(tmp_path):
+    models_yaml = tmp_path / "models.yaml"
+    experiments_yaml = tmp_path / "experiments.yaml"
+
+    models = {"m1": {"name": "m1", "short_name": "m1", "provider": "huggingface"}}
+    models_yaml.write_text(yaml.dump({"models": models}))
+
+    experiments = {
+        "paths": {"output_dir": "outputs/tuning", "models_dir": "models/tuning"},
+        "experiment": {"seed": 42, "seeds": [], "num_seeds": 1},
+        "data": {
+            "path": "data/dataset_gold_no_difficulty.json",
+            "train_size": 0.8,
+            "val_size": 0.1,
+            "test_size": 0.1,
+            "augment_factor": 2,
+        },
+        "training": {
+            "num_epochs": 1,
+            "batch_size": 2,
+            "gradient_accumulation_steps": 1,
+            "learning_rate": 1e-4,
+            "weight_decay": 0.0,
+            "warmup_ratio": 0.0,
+            "bf16": False,
+            "optim": "paged_adamw_8bit",
+            "eval_strategy": "epoch",
+            "save_strategy": "epoch",
+            "gradient_checkpointing": True,
+            "packing": False,
+        },
+        "few_shot": {"num_examples": 2},
+        "conditions": [
+            {"name": "baseline_zero_shot", "finetuned": False, "few_shot": False}
+        ],
+    }
+    experiments_yaml.write_text(yaml.dump(experiments))
+
+    cfg = Config.from_yaml(str(models_yaml), str(experiments_yaml))
+
+    assert cfg.output_dir == "outputs/tuning"
+    assert cfg.models_dir == "models/tuning"
+    assert cfg.optim == "paged_adamw_8bit"
+    assert cfg.eval_strategy == "epoch"
+    assert cfg.save_strategy == "epoch"
+    assert cfg.gradient_checkpointing is True
+    assert cfg.packing is False
+
+
 def test_resolve_seeds_with_list(tmp_path):
     models_yaml = tmp_path / "models.yaml"
     experiments_yaml = tmp_path / "experiments.yaml"

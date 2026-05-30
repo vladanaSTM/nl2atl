@@ -4,7 +4,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
-from typing import Optional, Union, Dict, Any  # <-- ADD Union, Dict, Any
+from typing import Optional, Union, Dict, List
 
 import requests
 
@@ -24,7 +24,6 @@ load_env()
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
-# ============== Add GenerationResult dataclass ==============
 @dataclass
 class GenerationResult:
     """Result from model generation including usage stats."""
@@ -181,6 +180,26 @@ class AzureClient:
         base_url = f"{self.endpoint}/openai/deployments/{self.model}/chat/completions"
         return f"{base_url}?api-version={self.api_version}"
 
+    def _build_messages(self, prompt: str) -> List[Dict[str, str]]:
+        """Convert serialized prompts into chat-completion messages."""
+        system_prefix = "System:\n"
+        user_marker = "\n\nUser:\n"
+        assistant_marker = "\n\nAssistant:\n"
+
+        if prompt.startswith(system_prefix) and user_marker in prompt:
+            system_and_user = prompt[len(system_prefix) :]
+            system_text, user_part = system_and_user.split(user_marker, 1)
+            if assistant_marker in user_part:
+                user_text = user_part.split(assistant_marker, 1)[0]
+            else:
+                user_text = user_part
+            return [
+                {"role": "system", "content": system_text.strip()},
+                {"role": "user", "content": user_text.strip()},
+            ]
+
+        return [{"role": "user", "content": prompt}]
+
     def generate(
         self,
         prompt: str,
@@ -201,7 +220,7 @@ class AzureClient:
         url = self._build_url()
         payload = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": self._build_messages(prompt),
             "max_tokens": max_new_tokens,
             "temperature": 0,
             "stream": False,
@@ -236,7 +255,6 @@ class AzureClient:
                 return GenerationResult(text=response.text, usage=None)
             return response.text
 
-        # ============== Extract usage information ==============
         usage = None
         usage_estimated = False
         usage_data = data.get("usage")
@@ -260,7 +278,6 @@ class AzureClient:
         if content is None:
             content = json.dumps(data)
 
-        # ============== Return based on return_usage flag ==============
         if return_usage:
             if usage is None:
                 tokens_input = _estimate_token_count(prompt, self.model)

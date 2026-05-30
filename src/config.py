@@ -20,10 +20,12 @@ class ModelConfig:
     short_name: str
     provider: str = Provider.HUGGINGFACE
     api_model: Optional[str] = None
+    revision: Optional[str] = None
     max_seq_length: int = 512
     load_in_4bit: bool = True
     lora_r: int = 64
     lora_alpha: int = 128
+    lora_dropout: float = 0.05
     train_batch_size: Optional[int] = None
     eval_batch_size: Optional[int] = None
     gradient_accumulation_steps: Optional[int] = None
@@ -71,6 +73,18 @@ class Config:
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
     bf16: bool = True
+    optim: str = "paged_adamw_8bit"
+    lr_scheduler_type: str = "cosine"
+    eval_strategy: str = "epoch"
+    save_strategy: str = "epoch"
+    save_total_limit: int = 1
+    max_grad_norm: float = 0.3
+    gradient_checkpointing: bool = True
+    dataloader_num_workers: int = 2
+    dataloader_pin_memory: bool = True
+    group_by_length: bool = True
+    tf32: bool = True
+    packing: bool = False
 
     # Few-shot settings
     num_few_shot_examples: int = 5
@@ -84,6 +98,8 @@ class Config:
         """Load configuration from YAML files."""
         models_cfg = load_yaml(models_path)
         exp_cfg = load_yaml(experiments_path)
+
+        paths = exp_cfg.get("paths", {})
 
         # Extract experiment settings
         exp_settings = exp_cfg.get("experiment", {})
@@ -99,7 +115,9 @@ class Config:
 
         # Build config
         config = cls(
-            data_path=data_settings["path"],
+            data_path=paths.get("data_path", data_settings["path"]),
+            output_dir=paths.get("output_dir", DEFAULT_OUTPUT_DIR),
+            models_dir=paths.get("models_dir", DEFAULT_MODELS_DIR),
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
@@ -116,6 +134,30 @@ class Config:
             weight_decay=exp_cfg["training"]["weight_decay"],
             warmup_ratio=exp_cfg["training"]["warmup_ratio"],
             bf16=exp_cfg["training"]["bf16"],
+            optim=exp_cfg["training"].get("optim", cls.optim),
+            lr_scheduler_type=exp_cfg["training"].get(
+                "lr_scheduler_type", cls.lr_scheduler_type
+            ),
+            eval_strategy=exp_cfg["training"].get("eval_strategy", cls.eval_strategy),
+            save_strategy=exp_cfg["training"].get("save_strategy", cls.save_strategy),
+            save_total_limit=exp_cfg["training"].get(
+                "save_total_limit", cls.save_total_limit
+            ),
+            max_grad_norm=exp_cfg["training"].get("max_grad_norm", cls.max_grad_norm),
+            gradient_checkpointing=exp_cfg["training"].get(
+                "gradient_checkpointing", cls.gradient_checkpointing
+            ),
+            dataloader_num_workers=exp_cfg["training"].get(
+                "dataloader_num_workers", cls.dataloader_num_workers
+            ),
+            dataloader_pin_memory=exp_cfg["training"].get(
+                "dataloader_pin_memory", cls.dataloader_pin_memory
+            ),
+            group_by_length=exp_cfg["training"].get(
+                "group_by_length", cls.group_by_length
+            ),
+            tf32=exp_cfg["training"].get("tf32", cls.tf32),
+            packing=exp_cfg["training"].get("packing", cls.packing),
             num_few_shot_examples=exp_cfg["few_shot"]["num_examples"],
         )
 

@@ -168,8 +168,8 @@ def aggregate_predictions(
 
         # Add agreement scores if available for this source file
         # The agreement report keys use base filename (without judge suffix)
-        # e.g., "ds-r1-qwen-32b_baseline_few_shot_seed42.json"
-        # matches prediction file "ds-r1-qwen-32b_baseline_few_shot_seed42__judge-ds-v3.2.json"
+        # e.g., "qwen-coder-7b_baseline_few_shot_seed42.json"
+        # matches prediction file "qwen-coder-7b_baseline_few_shot_seed42__judge-ds-v3.2.json"
         source_file = path.name
         base_source = (
             source_file.split("__judge-")[0] + ".json"

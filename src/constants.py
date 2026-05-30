@@ -19,8 +19,6 @@ class ModelType(str, Enum):
     QWEN = "qwen"
     PHI3 = "phi3"
     MISTRAL = "mistral"
-    LLAMA = "llama"
-    GEMMA = "gemma"
     GENERIC = "generic"
 
 
