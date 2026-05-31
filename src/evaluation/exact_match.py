@@ -25,9 +25,127 @@ class ExactMatchEvaluator(BaseEvaluator):
             for op in TEMPORAL_OPERATORS
         )
 
+    def _has_balanced_delimiters(self, text: str) -> bool:
+        """Check structural delimiters that commonly break in run-on outputs."""
+        if text.count("<<") != text.count(">>"):
+            return False
+        paren_depth = 0
+        for char in text:
+            if char == "(":
+                paren_depth += 1
+            elif char == ")":
+                paren_depth -= 1
+                if paren_depth < 0:
+                    return False
+        return paren_depth == 0
+
+    def _is_degenerate_repetition(self, text: str) -> bool:
+        """Detect repeated-token collapses such as Phi's whowho/cancer loops."""
+        stripped = re.sub(r"\s+", " ", text.strip().lower())
+        if not stripped:
+            return False
+
+        repeated_word = re.search(
+            r"\b([a-z][a-z0-9_-]{1,24})\b(?:\s+\1\b){7,}", stripped
+        )
+        if repeated_word:
+            return True
+
+        compact = re.sub(r"[^a-z0-9_<>!&|()\[\],-]+", "", stripped)
+        if len(compact) < 24:
+            return False
+        for width in range(2, min(16, len(compact) // 8) + 1):
+            unit = compact[:width]
+            if not unit.strip("0123456789"):
+                continue
+            repeated = unit * (len(compact) // width)
+            remainder = compact[len(repeated) :]
+            if compact.startswith(repeated) and len(repeated) >= len(compact) * 0.9:
+                return True
+            if remainder and (repeated + unit).startswith(compact):
+                return True
+        return False
+
     def _is_valid_formula(self, text: str) -> bool:
         """Check if text looks like a valid ATL formula."""
-        return "<<" in text and ">>" in text and self._has_temporal_operator(text)
+        text = text.strip()
+        return (
+            "<<" in text
+            and ">>" in text
+            and self._has_temporal_operator(text)
+            and self._has_balanced_delimiters(text)
+            and not text.rstrip().endswith((",", "&&", "||", "->", "<->"))
+            and not self._is_degenerate_repetition(text)
+        )
+
+    def _extract_first_formula(self, response: str) -> str:
+        """Extract the first ATL formula while dropping explanations/candidates."""
+        coalition_start = response.find("<<")
+        if coalition_start < 0:
+            return ""
+
+        formula_start = coalition_start
+        prefix_index = coalition_start - 1
+        while prefix_index >= 0 and response[prefix_index].isspace():
+            prefix_index -= 1
+        if prefix_index >= 0 and response[prefix_index] == "!":
+            formula_start = prefix_index
+
+        explanation_start = re.compile(
+            r"\s*(?:[,;]\s*)?(?:"
+            r"where\b|which\b|meaning\b|that\s+is\b|"
+            r"i\.e\.|e\.g\.|or\s+equivalently\b|"
+            r"and\s+equivalently\b|equivalently\b|represents\b|denotes\b"
+            r")",
+            flags=re.IGNORECASE,
+        )
+        next_candidate_start = re.compile(
+            r"\s*(?:\band\b|\bor\b)\s*(?=!?.*?<<)", flags=re.IGNORECASE
+        )
+
+        end = len(response)
+        paren_depth = 0
+        in_coalition = False
+        index = formula_start
+
+        while index < len(response):
+            if response.startswith("<<", index):
+                in_coalition = True
+                index += 2
+                continue
+
+            if in_coalition:
+                if response.startswith(">>", index):
+                    in_coalition = False
+                    index += 2
+                    continue
+                index += 1
+                continue
+
+            char = response[index]
+            if char == "(":
+                paren_depth += 1
+            elif char == ")":
+                paren_depth = max(0, paren_depth - 1)
+
+            if paren_depth == 0:
+                remainder = response[index:]
+                if char in "\r\n.,;":
+                    end = index
+                    break
+                if explanation_start.match(remainder):
+                    end = index
+                    break
+                if next_candidate_start.match(remainder):
+                    end = index
+                    break
+
+            index += 1
+
+        if in_coalition or paren_depth != 0:
+            return ""
+
+        return response[formula_start:end].strip().rstrip(",;:")
 
     def _extract_assistant_response(self, response: str, model_type: str) -> str:
         """Extract assistant response based on model type."""
@@ -127,28 +245,23 @@ class ExactMatchEvaluator(BaseEvaluator):
         formula_tag = re.search(
             r"<formula>(.*?)</formula>", response, flags=re.DOTALL | re.IGNORECASE
         )
-        if formula_tag and self._is_valid_formula(formula_tag.group(1)):
-            return formula_tag.group(1).strip()
+        if formula_tag:
+            tagged_formula = self._extract_first_formula(formula_tag.group(1))
+            if self._is_valid_formula(tagged_formula):
+                return tagged_formula
 
-        # Method 2: First coalition fragment
-        formula_match = re.search(r"<<[^>]+>>[^\.\r\n]*", response)
-        if formula_match and self._is_valid_formula(formula_match.group(0)):
-            return formula_match.group(0).strip()
+        # Method 2: First complete ATL formula before explanations/alternatives
+        first_formula = self._extract_first_formula(response)
+        if self._is_valid_formula(first_formula):
+            return first_formula
 
         # Method 3: Line-based heuristics
         formula_like = [line for line in lines if self._is_valid_formula(line)]
-        if not formula_like:
-            formula_like = [line for line in lines if line.startswith("<<")]
-        if not formula_like:
-            formula_like = [line for line in lines if ">>" in line]
 
         if formula_like:
-            response = formula_like[0]
-        elif lines:
-            response = lines[0]
+            return formula_like[0].strip()
 
-        response = re.sub(r"(\\n)+$", "", response)
-        return response.strip()
+        return ""
 
     def _normalize_symbols(self, formula: str) -> str:
         """Normalize Unicode/ASCII logical symbols to a common form."""
@@ -338,10 +451,13 @@ class ExactMatchEvaluator(BaseEvaluator):
             return {"n_examples": 0, "exact_match": 0.0}
 
         exact_matches = sum(r["exact_match"] for r in self.results)
+        invalid_outputs = sum(1 for r in self.results if not r.get("generated"))
 
         metrics = {
             "n_examples": n,
             "exact_match": exact_matches / n,
+            "invalid_outputs": invalid_outputs,
+            "invalid_output_rate": invalid_outputs / n,
         }
 
         return metrics

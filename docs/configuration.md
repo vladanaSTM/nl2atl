@@ -133,15 +133,17 @@ Use `nl2atl run` for local runs, task inspection, and SLURM submission:
 
 ```bash
 uv run nl2atl run --list-tasks --models all --conditions all --model_provider hf
-uv run nl2atl run --slurm --max-parallel-gpus 2 --models all --conditions all --model_provider hf
+uv run nl2atl run --slurm --models all --conditions all --model_provider hf
 ```
 
 SLURM tasks are grouped by model and seed. If both fine-tuned conditions are selected for the same model, the runner trains one shared adapter and evaluates both prompting conditions from it. Azure/API models automatically skip fine-tuned conditions.
 
+SLURM arrays are uncapped by default. Add `--max-parallel-gpus N` only when you want to throttle the array to `N` concurrent one-GPU tasks.
+
 For OOM smoke tests, cap training steps without changing the YAML files:
 
 ```bash
-uv run nl2atl run --slurm --max-parallel-gpus 2 \
+uv run nl2atl run --slurm \
   --models_config configs/models_finetune_sweep.yaml \
   --experiments_config configs/experiments_finetune_sweep.yaml \
   --models all --conditions all --model_provider hf \

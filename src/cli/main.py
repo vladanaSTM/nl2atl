@@ -9,6 +9,7 @@ from typing import Callable, Dict, Tuple
 _COMMANDS: Dict[str, Tuple[str, str]] = {
     "run": ("src.cli.run_experiments", "main"),
     "aggregate-seeds": ("src.cli.aggregate_seeds", "main"),
+    "genvitamin": ("src.cli.genvitamin", "main"),
     "llm-judge": ("src.cli.run_llm_judge", "main"),
     "judge-agreement": ("src.cli.run_judge_agreement", "main"),
     "classify-difficulty": ("src.cli.classify_difficulty", "main"),

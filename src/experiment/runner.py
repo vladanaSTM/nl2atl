@@ -189,24 +189,58 @@ class ExperimentRunner:
         items: List[Dict[str, Any]],
         model_type: str,
         tokenizer: Any,
+        max_seq_length: Optional[int] = None,
     ) -> Dataset:
-        """Build the text dataset consumed by TRL's SFTTrainer."""
+        """Build prompt/completion pairs consumed by TRL's SFTTrainer."""
         prompts = []
+        completions = []
         for item in items:
             outputs = get_output_options(item)
             if not outputs:
                 raise ValueError(f"Training item is missing output: {item.get('id')}")
             for output in outputs:
-                prompts.append(
-                    format_prompt(
-                        item["input"],
-                        output,
-                        few_shot=False,
-                        model_type=model_type,
-                        tokenizer=tokenizer,
-                    )
+                prompt = format_prompt(
+                    item["input"],
+                    output_text=None,
+                    few_shot=False,
+                    model_type=model_type,
+                    tokenizer=tokenizer,
                 )
-        return Dataset.from_dict({"text": prompts})
+                full_prompt = format_prompt(
+                    item["input"],
+                    output,
+                    few_shot=False,
+                    model_type=model_type,
+                    tokenizer=tokenizer,
+                )
+                if not full_prompt.startswith(prompt):
+                    raise ValueError(
+                        "Training prompt template did not produce a prompt prefix; "
+                        f"cannot isolate completion for item {item.get('id')}"
+                    )
+                if tokenizer is not None and max_seq_length is not None:
+                    prompt_tokens = tokenizer(prompt, add_special_tokens=False)[
+                        "input_ids"
+                    ]
+                    full_tokens = tokenizer(full_prompt, add_special_tokens=False)[
+                        "input_ids"
+                    ]
+                    if len(prompt_tokens) >= max_seq_length:
+                        raise ValueError(
+                            "Training prompt exceeds max_seq_length before the "
+                            f"completion starts for item {item.get('id')}: "
+                            f"prompt_tokens={len(prompt_tokens)}, "
+                            f"max_seq_length={max_seq_length}"
+                        )
+                    if len(full_tokens) > max_seq_length:
+                        raise ValueError(
+                            "Training prompt+completion exceeds max_seq_length for "
+                            f"item {item.get('id')}: full_tokens={len(full_tokens)}, "
+                            f"max_seq_length={max_seq_length}"
+                        )
+                prompts.append(prompt)
+                completions.append(full_prompt[len(prompt) :])
+        return Dataset.from_dict({"prompt": prompts, "completion": completions})
 
     def _training_args(
         self,
@@ -255,6 +289,7 @@ class ExperimentRunner:
             group_by_length=self.config.group_by_length,
             tf32=self.config.tf32 and self._cuda_supports_tf32(),
             max_length=model_config.max_seq_length,
+            completion_only_loss=True,
             packing=self.config.packing,
             dataset_text_field="text",
         )
@@ -271,9 +306,11 @@ class ExperimentRunner:
 
         model, tokenizer = load_model(model_config, for_training=True)
         train_dataset = self._training_dataset(
-            self.train_data_aug, model_type, tokenizer
+            self.train_data_aug, model_type, tokenizer, model_config.max_seq_length
         )
-        val_dataset = self._training_dataset(self.val_data, model_type, tokenizer)
+        val_dataset = self._training_dataset(
+            self.val_data, model_type, tokenizer, model_config.max_seq_length
+        )
 
         output_dir = Path(self.config.models_dir) / run_name
         output_dir.mkdir(parents=True, exist_ok=True)

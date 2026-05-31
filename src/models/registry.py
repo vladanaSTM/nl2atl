@@ -20,6 +20,9 @@ from ..infra.azure import AzureClient, AzureConfig, GenerationResult
 load_env()
 
 
+CHAT_STOP_TOKENS = ("<|end|>", "<|im_end|>")
+
+
 def clear_gpu_memory() -> None:
     """Aggressively clear GPU memory."""
     # Multiple gc passes for circular references
@@ -221,7 +224,8 @@ def _load_hf_model(
 
         # Only merge if NOT using 4-bit (merge corrupts weights with 4-bit)
         if not use_4bit:
-            model = model.merge_and_unload()
+            merge_and_unload = getattr(model, "merge_and_unload")
+            model = merge_and_unload()
             print("Adapter merged into base model")
         else:
             print("Keeping adapter separate (4-bit mode)")
@@ -277,6 +281,32 @@ def load_model(
     return _load_hf_model(model_config, for_training, load_adapter)
 
 
+def _generation_eos_token_ids(tokenizer: Any) -> list[int]:
+    """Return all special-token ids that should stop chat generation."""
+    eos_token_ids: list[int] = []
+
+    def append_token_id(token_id: Any) -> None:
+        if (
+            isinstance(token_id, int)
+            and token_id >= 0
+            and token_id not in eos_token_ids
+        ):
+            eos_token_ids.append(token_id)
+
+    append_token_id(getattr(tokenizer, "eos_token_id", None))
+
+    unk_token_id = getattr(tokenizer, "unk_token_id", None)
+    for token in CHAT_STOP_TOKENS:
+        if not hasattr(tokenizer, "convert_tokens_to_ids"):
+            continue
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id is None or token_id == unk_token_id:
+            continue
+        append_token_id(token_id)
+
+    return eos_token_ids
+
+
 def generate(
     model: Any,
     tokenizer: Any,
@@ -316,12 +346,16 @@ def generate(
             max_new_tokens=max_new_tokens,
             temperature=0.1,
             do_sample=False,
+            repetition_penalty=1.1,
+            no_repeat_ngram_size=4,
+            renormalize_logits=True,
             pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
+            eos_token_id=_generation_eos_token_ids(tokenizer),
             use_cache=use_cache,
         )
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=False)
+    generated_tokens = outputs[0][input_length:]
+    text = tokenizer.decode(generated_tokens, skip_special_tokens=False)
 
     # ============== Return usage info if requested ==============
     if return_usage:

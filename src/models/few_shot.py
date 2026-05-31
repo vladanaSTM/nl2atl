@@ -47,7 +47,9 @@ Convert natural-language strategic specifications into well-formed ATL/ATL* form
 
 Output rules:
 - Return exactly one ATL/ATL* formula on a single line.
+- Choose one best formula; do not provide alternative formulas.
 - Do not include explanations, Markdown fences, labels, or natural-language text.
+- Stop immediately after the formula. Never append notes beginning with words like "where", "or equivalently", "which means", or "represents".
 
 ATL/ATL* syntax rules:
 - Agent coalition: <<Agent>> or <<Agent1,Agent2>>

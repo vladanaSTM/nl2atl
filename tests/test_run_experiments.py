@@ -94,15 +94,27 @@ def test_build_tasks_skips_finetuning_for_azure_models():
     ]
 
 
-def test_format_slurm_array_range_caps_parallel_tasks():
+def test_format_slurm_array_range_is_uncapped_by_default():
+    assert format_slurm_array_range(task_count=5, max_parallel_gpus=None) == "0-4"
+
+
+def test_format_slurm_array_range_allows_zero_as_uncapped():
+    assert format_slurm_array_range(task_count=5, max_parallel_gpus=0) == "0-4"
+
+
+def test_format_slurm_array_range_caps_parallel_tasks_when_requested():
     assert format_slurm_array_range(task_count=5, max_parallel_gpus=2) == "0-4%2"
+
+
+def test_format_slurm_array_range_omits_unneeded_cap():
+    assert format_slurm_array_range(task_count=5, max_parallel_gpus=5) == "0-4"
 
 
 def test_format_slurm_array_range_rejects_invalid_counts():
     with pytest.raises(ValueError):
         format_slurm_array_range(task_count=0, max_parallel_gpus=2)
     with pytest.raises(ValueError):
-        format_slurm_array_range(task_count=1, max_parallel_gpus=0)
+        format_slurm_array_range(task_count=1, max_parallel_gpus=-1)
 
 
 def test_render_sbatch_script_includes_tuning_controls(tmp_path):
@@ -110,7 +122,7 @@ def test_render_sbatch_script_includes_tuning_controls(tmp_path):
         logs_dir="logs",
         output=None,
         error=None,
-        max_parallel_gpus=2,
+        max_parallel_gpus=None,
         models_config="configs/models_finetune_sweep.yaml",
         experiments_config="configs/experiments_finetune_sweep.yaml",
         overwrite=False,
@@ -136,7 +148,7 @@ def test_render_sbatch_script_includes_tuning_controls(tmp_path):
         task_count=3,
     )
 
-    assert "#SBATCH --array=0-2%2" in script
+    assert "#SBATCH --array=0-2" in script
     assert "module load python/3.12.3 cuda/12.4.1" in script
     assert "source .venv/bin/activate" in script
     assert "export TRAIN_MAX_STEPS=20" in script

@@ -20,7 +20,7 @@ from ..experiment.reporter import get_git_commit
 from ..models.utils import resolve_model_key
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MAX_PARALLEL_GPUS = 2
+DEFAULT_MAX_PARALLEL_GPUS: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -210,12 +210,19 @@ def build_tasks(
     return tasks, skipped
 
 
-def format_slurm_array_range(task_count: int, max_parallel_gpus: int) -> str:
-    """Format a SLURM array range capped by concurrent GPU tasks."""
+def format_slurm_array_range(
+    task_count: int,
+    max_parallel_gpus: Optional[int],
+) -> str:
+    """Format a SLURM array range, optionally capped by concurrent GPU tasks."""
     if task_count <= 0:
         raise ValueError("No runnable experiment tasks were selected.")
-    if max_parallel_gpus <= 0:
-        raise ValueError("--max-parallel-gpus must be greater than 0.")
+    if max_parallel_gpus is None or max_parallel_gpus == 0:
+        return f"0-{task_count - 1}"
+    if max_parallel_gpus < 0:
+        raise ValueError("--max-parallel-gpus must be non-negative.")
+    if max_parallel_gpus >= task_count:
+        return f"0-{task_count - 1}"
     return f"0-{task_count - 1}%{max_parallel_gpus}"
 
 
@@ -363,7 +370,7 @@ def submit_slurm(
     tasks: Sequence[TaskSpec],
     skipped: Sequence[SkippedSpec],
 ) -> None:
-    """Submit the selected tasks as a capped SLURM array."""
+    """Submit the selected tasks as a SLURM array."""
     repo_root = Path(args.repo_root).resolve()
     if not tasks:
         raise ValueError("No runnable experiment tasks were selected.")
@@ -482,7 +489,7 @@ def _load_plan(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run NL2ATL experiments locally or as a capped SLURM array."
+        description="Run NL2ATL experiments locally or as a SLURM array."
     )
     parser.add_argument(
         "--models",
@@ -531,7 +538,10 @@ def main() -> None:
         "--max-parallel",
         type=int,
         default=DEFAULT_MAX_PARALLEL_GPUS,
-        help="Maximum concurrent one-GPU SLURM array tasks (default: 2).",
+        help=(
+            "Maximum concurrent one-GPU SLURM array tasks; omit or use 0 "
+            "to run all selected tasks as soon as resources are available."
+        ),
     )
     parser.add_argument("--job-name", default="nl2atl-experiments")
     parser.add_argument("--partition", default="A100")
@@ -591,7 +601,7 @@ def main() -> None:
 
     print(
         f"Running {len(tasks)} model/seed tasks locally "
-        f"for seeds={seeds}. Use --slurm for capped SLURM parallelism."
+        f"for seeds={seeds}. Use --slurm for SLURM parallelism."
     )
     if skipped:
         print(f"Skipping {len(skipped)} incompatible combinations.")

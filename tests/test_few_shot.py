@@ -73,6 +73,12 @@ def test_system_prompt_includes_few_shot_and_excludes():
     assert excluded[0] not in prompt
 
 
+def test_system_prompt_forbids_explanations_and_alternatives():
+    prompt = few_shot.get_system_prompt(few_shot=False)
+    assert "Choose one best formula" in prompt
+    assert "Never append notes" in prompt
+
+
 def test_format_prompt_qwen_tags():
     prompt = few_shot.format_prompt(
         input_text="A",
