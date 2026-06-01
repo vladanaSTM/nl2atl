@@ -58,7 +58,7 @@ uv run nl2atl run --slurm \
 uv run python -c "from src.infra.io import load_json; r=load_json('outputs/model_predictions/qwen-3b_baseline_few_shot.json'); p=r['predictions'][0]; print(p['input']); print(p['expected_options']); print(p['generated']); print(p['exact_match'])"
 ```
 
-Each prediction row includes the input, accepted gold formulas, generated formula, exact-match flag, and latency.
+Each prediction row includes the input, accepted gold formulas, minimally cleaned model output, exact-match flag, and latency.
 
 ## Evaluate And Report
 

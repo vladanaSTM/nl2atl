@@ -17,6 +17,8 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 
 Exact match runs first. It normalizes formulas by lowercasing, removing whitespace, and normalizing common logical-symbol variants to the project's ASCII form.
 
+Before comparison, model text is cleaned only at chat boundaries: prompt echoes and explicit assistant stop tokens are removed when present. The evaluator does not parse, repair, validate, or extract a best-looking ATL formula from a longer answer; malformed or verbose model output is kept in `generated` and evaluated as-is.
+
 For rows with multiple gold formulas, exact match succeeds if the prediction matches any formula in `expected_options`.
 
 ## Step 2: LLM Judge

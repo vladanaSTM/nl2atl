@@ -1,13 +1,10 @@
-"""
-Exact-match evaluator with output cleaning for ATL formula generation.
-"""
+"""Exact-match evaluator for ATL formula generation."""
 
 import re
 import time
 from typing import Any, Dict, List
 
 from .base import BaseEvaluator
-from ..constants import TEMPORAL_OPERATORS
 from ..data_utils import get_output_options, get_preferred_output
 from ..models.few_shot import format_prompt
 
@@ -18,250 +15,52 @@ class ExactMatchEvaluator(BaseEvaluator):
     def __init__(self):
         self.results: List[Dict] = []
 
-    def _has_temporal_operator(self, text: str) -> bool:
-        """Check if text contains any temporal operator."""
-        return any(
-            re.search(rf"(?<![a-zA-Z_]){op}(?![a-zA-Z_])", text)
-            for op in TEMPORAL_OPERATORS
-        )
-
-    def _has_balanced_delimiters(self, text: str) -> bool:
-        """Check structural delimiters that commonly break in run-on outputs."""
-        if text.count("<<") != text.count(">>"):
-            return False
-        paren_depth = 0
-        for char in text:
-            if char == "(":
-                paren_depth += 1
-            elif char == ")":
-                paren_depth -= 1
-                if paren_depth < 0:
-                    return False
-        return paren_depth == 0
-
-    def _is_degenerate_repetition(self, text: str) -> bool:
-        """Detect repeated-token collapses such as Phi's whowho/cancer loops."""
-        stripped = re.sub(r"\s+", " ", text.strip().lower())
-        if not stripped:
-            return False
-
-        repeated_word = re.search(
-            r"\b([a-z][a-z0-9_-]{1,24})\b(?:\s+\1\b){7,}", stripped
-        )
-        if repeated_word:
-            return True
-
-        compact = re.sub(r"[^a-z0-9_<>!&|()\[\],-]+", "", stripped)
-        if len(compact) < 24:
-            return False
-        for width in range(2, min(16, len(compact) // 8) + 1):
-            unit = compact[:width]
-            if not unit.strip("0123456789"):
-                continue
-            repeated = unit * (len(compact) // width)
-            remainder = compact[len(repeated) :]
-            if compact.startswith(repeated) and len(repeated) >= len(compact) * 0.9:
-                return True
-            if remainder and (repeated + unit).startswith(compact):
-                return True
-        return False
-
-    def _is_valid_formula(self, text: str) -> bool:
-        """Check if text looks like a valid ATL formula."""
-        text = text.strip()
-        return (
-            "<<" in text
-            and ">>" in text
-            and self._has_temporal_operator(text)
-            and self._has_balanced_delimiters(text)
-            and not text.rstrip().endswith((",", "&&", "||", "->", "<->"))
-            and not self._is_degenerate_repetition(text)
-        )
-
-    def _extract_first_formula(self, response: str) -> str:
-        """Extract the first ATL formula while dropping explanations/candidates."""
-        coalition_start = response.find("<<")
-        if coalition_start < 0:
-            return ""
-
-        formula_start = coalition_start
-        prefix_index = coalition_start - 1
-        while prefix_index >= 0 and response[prefix_index].isspace():
-            prefix_index -= 1
-        if prefix_index >= 0 and response[prefix_index] == "!":
-            formula_start = prefix_index
-
-        explanation_start = re.compile(
-            r"\s*(?:[,;]\s*)?(?:"
-            r"where\b|which\b|meaning\b|that\s+is\b|"
-            r"i\.e\.|e\.g\.|or\s+equivalently\b|"
-            r"and\s+equivalently\b|equivalently\b|represents\b|denotes\b"
-            r")",
-            flags=re.IGNORECASE,
-        )
-        next_candidate_start = re.compile(
-            r"\s*(?:\band\b|\bor\b)\s*(?=!?.*?<<)", flags=re.IGNORECASE
-        )
-
-        end = len(response)
-        paren_depth = 0
-        in_coalition = False
-        index = formula_start
-
-        while index < len(response):
-            if response.startswith("<<", index):
-                in_coalition = True
-                index += 2
-                continue
-
-            if in_coalition:
-                if response.startswith(">>", index):
-                    in_coalition = False
-                    index += 2
-                    continue
-                index += 1
-                continue
-
-            char = response[index]
-            if char == "(":
-                paren_depth += 1
-            elif char == ")":
-                paren_depth = max(0, paren_depth - 1)
-
-            if paren_depth == 0:
-                remainder = response[index:]
-                if char in "\r\n.,;":
-                    end = index
-                    break
-                if explanation_start.match(remainder):
-                    end = index
-                    break
-                if next_candidate_start.match(remainder):
-                    end = index
-                    break
-
-            index += 1
-
-        if in_coalition or paren_depth != 0:
-            return ""
-
-        return response[formula_start:end].strip().rstrip(",;:")
-
     def _extract_assistant_response(self, response: str, model_type: str) -> str:
-        """Extract assistant response based on model type."""
+        """Keep only the model answer bounded by chat start/stop tokens."""
         if model_type == "qwen":
             if "<|im_start|>assistant" in response:
-                response = response.split("<|im_start|>assistant")[-1]
-            response = response.replace("<|im_end|>", "")
-            response = response.replace("<|im_start|>", "")
-            response = response.replace("</s>", "")
+                response = response.rsplit("<|im_start|>assistant", 1)[-1]
+            response = self._truncate_at_first_stop(
+                response, ("<|im_end|>", "<|endoftext|>")
+            )
 
         elif model_type == "mistral":
             if "[/INST]" in response:
-                response = response.split("[/INST]")[-1]
-            response = response.replace("[INST]", "")
-            response = response.replace("</s>", "")
-            response = response.replace("<s>", "")
+                response = response.rsplit("[/INST]", 1)[-1]
+            response = self._truncate_at_first_stop(response, ("</s>",))
 
         elif model_type == "phi3":
             if "<|assistant|>" in response:
-                response = response.split("<|assistant|>")[-1]
-            response = response.replace("<|end|>", "")
+                response = response.rsplit("<|assistant|>", 1)[-1]
+            response = self._truncate_at_first_stop(
+                response, ("<|end|>", "<|endoftext|>")
+            )
 
         else:
             for marker in ("Assistant:", "assistant:"):
                 if marker in response:
                     response = response.rsplit(marker, 1)[-1]
-
-        return response
-
-    def _clean_think_tags(self, response: str) -> str:
-        """Remove thinking/reasoning blocks."""
-        # Handle closing </think> without opening tag
-        if re.search(r"</think>", response, flags=re.IGNORECASE):
-            response = re.split(r"</think>", response, flags=re.IGNORECASE)[-1]
-        else:
-            response = re.sub(
-                r"<think>.*?</think>",
-                "",
+            response = self._truncate_at_first_stop(
                 response,
-                flags=re.DOTALL | re.IGNORECASE,
+                ("<|im_end|>", "<|end|>", "<|endoftext|>", "</s>"),
             )
-        response = re.sub(r"</?think>", "", response, flags=re.IGNORECASE)
+
         return response
 
-    def _strip_formatting_artifacts(self, response: str) -> str:
-        """Remove common wrappers while preserving ATL syntax."""
-        for token in (
-            "<|im_end|>",
-            "<|im_start|>",
-            "<|end|>",
-            "<|endoftext|>",
-            "</s>",
-            "<s>",
-        ):
-            response = response.replace(token, "")
-
-        response = re.sub(r"```(?:atl|text|plaintext)?\s*", "", response, flags=re.I)
-        response = response.replace("```", "")
-        response = re.sub(
-            r"^\s*(?:final\s+)?(?:formula|output|answer)\s*:\s*",
-            "",
-            response,
-            flags=re.IGNORECASE,
-        )
+    def _truncate_at_first_stop(
+        self, response: str, stop_tokens: tuple[str, ...]
+    ) -> str:
+        """Truncate at the first explicit model stop token, if present."""
+        stops = [response.find(token) for token in stop_tokens if token in response]
+        if stops:
+            return response[: min(stops)]
         return response
 
     def clean_output(self, response: str, model_type: str) -> str:
-        """Extract generated formula from model response."""
-        # Extract assistant response
+        """Return the minimally cleaned model answer for evaluation."""
         response = self._extract_assistant_response(response, model_type)
-
-        # Clean thinking blocks
-        response = self._clean_think_tags(response)
-
-        # Remove wrappers and special tokens without damaging ATL operators
-        response = self._strip_formatting_artifacts(response)
-        response = re.sub(
-            r"<[^>]*end[^>]*sentence[^>]*>", "", response, flags=re.IGNORECASE
-        )
-
-        # Clean up whitespace and quotes
         response = re.sub(r"\n\s*\n+", "\n", response)
-        response = response.strip().strip('"').strip("'")
-
-        # Try to extract formula using various methods
-        lines = [line.strip() for line in response.split("\n") if line.strip()]
-
-        # Deduplicate consecutive identical lines
-        if lines:
-            deduped = [lines[0]]
-            for line in lines[1:]:
-                if line != deduped[-1]:
-                    deduped.append(line)
-            lines = deduped
-
-        # Method 1: Explicit <FORMULA> tags
-        formula_tag = re.search(
-            r"<formula>(.*?)</formula>", response, flags=re.DOTALL | re.IGNORECASE
-        )
-        if formula_tag:
-            tagged_formula = self._extract_first_formula(formula_tag.group(1))
-            if self._is_valid_formula(tagged_formula):
-                return tagged_formula
-
-        # Method 2: First complete ATL formula before explanations/alternatives
-        first_formula = self._extract_first_formula(response)
-        if self._is_valid_formula(first_formula):
-            return first_formula
-
-        # Method 3: Line-based heuristics
-        formula_like = [line for line in lines if self._is_valid_formula(line)]
-
-        if formula_like:
-            return formula_like[0].strip()
-
-        return ""
+        return response.strip().strip('"').strip("'")
 
     def _normalize_symbols(self, formula: str) -> str:
         """Normalize Unicode/ASCII logical symbols to a common form."""
@@ -451,13 +250,10 @@ class ExactMatchEvaluator(BaseEvaluator):
             return {"n_examples": 0, "exact_match": 0.0}
 
         exact_matches = sum(r["exact_match"] for r in self.results)
-        invalid_outputs = sum(1 for r in self.results if not r.get("generated"))
 
         metrics = {
             "n_examples": n,
             "exact_match": exact_matches / n,
-            "invalid_outputs": invalid_outputs,
-            "invalid_output_rate": invalid_outputs / n,
         }
 
         return metrics

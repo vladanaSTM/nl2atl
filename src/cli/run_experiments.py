@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -552,7 +553,7 @@ def main() -> None:
     parser.add_argument("--logs-dir", default="logs")
     parser.add_argument("--output", default=None)
     parser.add_argument("--error", default=None)
-    parser.add_argument("--python-bin", default="python3")
+    parser.add_argument("--python-bin", default=sys.executable)
     parser.add_argument("--repo-root", default=str(REPO_ROOT))
     parser.add_argument("--manifest-dir", default="outputs/manifests")
     parser.add_argument("--script-path", default=None)

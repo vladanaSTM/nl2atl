@@ -23,6 +23,11 @@ load_env()
 CHAT_STOP_TOKENS = ("<|end|>", "<|im_end|>")
 
 
+def _trust_remote_code(model_name: str) -> bool:
+    """Use built-in Transformers code for Phi; remote code loops under this stack."""
+    return "phi" not in model_name.lower()
+
+
 def clear_gpu_memory() -> None:
     """Aggressively clear GPU memory."""
     # Multiple gc passes for circular references
@@ -95,11 +100,12 @@ def _build_bnb_config() -> BitsAndBytesConfig:
 def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoTokenizer:
     """Load tokenizer with fallback handling."""
     hf_token = os.getenv("HUGGINGFACE_TOKEN")
+    trust_remote_code = _trust_remote_code(model_name)
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
             model_name,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
             token=hf_token,
             revision=revision,
         )
@@ -116,7 +122,7 @@ def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoToke
             try:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_name,
-                    trust_remote_code=True,
+                    trust_remote_code=trust_remote_code,
                     use_fast=False,
                     token=hf_token,
                     revision=revision,
@@ -125,7 +131,7 @@ def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoToke
             except Exception:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_name,
-                    trust_remote_code=True,
+                    trust_remote_code=trust_remote_code,
                     use_fast=False,
                     revision=revision,
                 )
@@ -133,7 +139,7 @@ def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoToke
             print(f"Warning: {e}. Trying without token...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
                 revision=revision,
             )
 
@@ -161,7 +167,7 @@ def _load_hf_model(
 
     while True:
         model_kwargs = {
-            "trust_remote_code": True,
+            "trust_remote_code": _trust_remote_code(model_config.name),
             "dtype": torch.bfloat16,
             "device_map": "auto",
         }
@@ -247,6 +253,9 @@ def _load_hf_model(
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
 
+    if not for_training:
+        model.eval()
+
     print(f"Model loaded. GPU Memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
 
     return model, tokenizer
@@ -307,6 +316,13 @@ def _generation_eos_token_ids(tokenizer: Any) -> list[int]:
     return eos_token_ids
 
 
+def _requires_cache_disabled(model: Any) -> bool:
+    """Disable cache only for the broken remote-code Phi implementation."""
+    model_type = getattr(getattr(model, "config", None), "model_type", "")
+    module_name = model.__class__.__module__
+    return model_type == "phi3" and module_name.startswith("transformers_modules.")
+
+
 def generate(
     model: Any,
     tokenizer: Any,
@@ -336,22 +352,14 @@ def generate(
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_length = inputs.input_ids.shape[1]  # Track input length
 
-    # Phi-3 sometimes has cache issues; disable for safety
-    model_type = getattr(getattr(model, "config", None), "model_type", "")
-    use_cache = model_type != "phi3"
-
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            temperature=0.1,
             do_sample=False,
-            repetition_penalty=1.1,
-            no_repeat_ngram_size=4,
-            renormalize_logits=True,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=_generation_eos_token_ids(tokenizer),
-            use_cache=use_cache,
+            use_cache=not _requires_cache_disabled(model),
         )
 
     generated_tokens = outputs[0][input_length:]
