@@ -1,11 +1,11 @@
 """Main LLM judge evaluation pipeline."""
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base import BaseEvaluator
+from ..exact_match import ExactMatchEvaluator
 from ...config import ModelConfig
 from ...data_utils import get_output_options
 from ...infra.io import load_json, save_json
@@ -20,6 +20,8 @@ from .metrics import (
 )
 from .parser import JudgeVerdict, parse_judge_response
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
+
+_EXACT_MATCH_EVALUATOR = ExactMatchEvaluator()
 
 
 @dataclass
@@ -204,21 +206,7 @@ def normalize_text(text: Optional[str]) -> str:
 
 def normalize_formula_for_match(text: Optional[str]) -> str:
     """Normalize ATL formulas using the same rules as exact-match evaluation."""
-    normalized = normalize_text(text)
-    normalized = (
-        normalized.replace("∧", "&&")
-        .replace("∨", "||")
-        .replace("¬", "!")
-        .replace("→", "->")
-        .replace("⇒", "->")
-        .replace("↔", "<->")
-        .replace("⇔", "<->")
-    )
-    normalized = re.sub(r"\band\b", "&&", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bor\b", "||", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\|\|+", "||", normalized)
-    normalized = re.sub(r"&&+", "&&", normalized)
-    return re.sub(r"\s+", "", normalized.strip().lower())
+    return _EXACT_MATCH_EVALUATOR.normalize(normalize_text(text))
 
 
 def matches_any_gold_option(prediction: str, gold_options: List[str]) -> bool:

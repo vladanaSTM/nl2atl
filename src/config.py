@@ -20,6 +20,7 @@ class ModelConfig:
     short_name: str
     provider: str = Provider.HUGGINGFACE
     api_model: Optional[str] = None
+    generation_enabled: bool = True
     revision: Optional[str] = None
     max_seq_length: int = 512
     load_in_4bit: bool = True

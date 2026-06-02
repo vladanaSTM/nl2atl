@@ -88,6 +88,10 @@ def _model_provider(model_config: ModelConfig) -> str:
     return str(model_config.provider).lower()
 
 
+def _model_generation_enabled(model_config: ModelConfig) -> bool:
+    return bool(getattr(model_config, "generation_enabled", True))
+
+
 def can_finetune(model_config: ModelConfig) -> Tuple[bool, str]:
     """Return whether the local LoRA runner supports fine-tuning this model."""
     if model_config.is_azure:
@@ -108,7 +112,9 @@ def select_models(
             f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
         )
 
-    if _wants_all(model_args):
+    wants_all = _wants_all(model_args)
+
+    if wants_all:
         selected = list(config.models.keys())
     else:
         selected = _dedupe(
@@ -118,17 +124,33 @@ def select_models(
             ]
         )
 
-    if model_provider == "all":
-        return selected
+    if model_provider != "all":
+        provider = (
+            Provider.HUGGINGFACE.value
+            if model_provider == "hf"
+            else Provider.AZURE.value
+        )
+        selected = [
+            model_key
+            for model_key in selected
+            if _model_provider(config.models[model_key]) == provider
+        ]
 
-    provider = (
-        Provider.HUGGINGFACE.value if model_provider == "hf" else Provider.AZURE.value
-    )
-    return [
+    disabled = [
         model_key
         for model_key in selected
-        if _model_provider(config.models[model_key]) == provider
+        if not _model_generation_enabled(config.models[model_key])
     ]
+    if wants_all:
+        return [model_key for model_key in selected if model_key not in disabled]
+
+    if disabled:
+        joined = ", ".join(disabled)
+        raise ValueError(
+            f"Model(s) are disabled for generation and reserved for judging: {joined}"
+        )
+
+    return selected
 
 
 def select_conditions(

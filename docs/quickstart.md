@@ -80,7 +80,7 @@ Exact matches are accepted automatically. The LLM judge is called only for non-e
 | `uv run nl2atl run --list-tasks --models all --conditions all` | Inspect the planned model/seed tasks |
 | `uv run nl2atl llm-judge --datasets all` | Judge non-exact predictions semantically |
 | `uv run nl2atl generate-eval-reports` | Build summaries, agreement, aggregates, and accuracy-latency reports |
-| `uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation` | Rebuild only the accuracy-latency report |
+| `uv run nl2atl model-efficiency` | Rebuild only the accuracy-latency report |
 
 Use `uv run nl2atl COMMAND --help` for the full option list.
 

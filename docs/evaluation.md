@@ -29,6 +29,8 @@ The LLM judge runs only for predictions that are not exact matches.
 uv run nl2atl llm-judge --datasets all
 ```
 
+By default, judge runs use GPT-5.2 and DeepSeek V3.2. GPT-4.1 and GPT-5.4 are reserved for generation baselines, so the strongest generator is not also the only evaluator in the main comparison.
+
 The judge sees the natural-language input, the model prediction, and all accepted gold formulas. It returns:
 
 ```json
@@ -55,12 +57,14 @@ uv run nl2atl generate-eval-reports
 
 This builds judge summaries, agreement reports, seed aggregates, and an accuracy-latency report under `outputs/LLM-evaluation/`.
 
+Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
+
 ## Accuracy-Latency Report
 
 If you already have an aggregate file, build only the accuracy-latency report:
 
 ```bash
-uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation
+uv run nl2atl model-efficiency
 ```
 
 The report keeps accuracy and latency separate, then adds deterministic helper rankings such as fastest model, most accurate model, best accuracy per second, highest throughput, and a Pareto frontier.

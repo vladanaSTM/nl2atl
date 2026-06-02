@@ -6,6 +6,7 @@ from src.cli.run_experiments import (
     _render_sbatch_script,
     build_tasks,
     format_slurm_array_range,
+    select_models,
 )
 from src.config import Config, ExperimentCondition, ModelConfig
 
@@ -25,10 +26,22 @@ def _config():
             provider="huggingface",
             params_b=3,
         ),
+        "gpt-5.4": ModelConfig(
+            name="gpt-5.4",
+            short_name="gpt-5.4",
+            provider="azure",
+        ),
         "gpt-5.2": ModelConfig(
             name="gpt-5.2",
             short_name="gpt-5.2",
             provider="azure",
+            generation_enabled=False,
+        ),
+        "DeepSeek-V3.2": ModelConfig(
+            name="DeepSeek-V3.2",
+            short_name="ds-v3.2",
+            provider="azure",
+            generation_enabled=False,
         ),
     }
     config.conditions = [
@@ -86,12 +99,26 @@ def test_build_tasks_skips_finetuning_for_azure_models():
         model_provider="all",
     )
 
-    azure_task = next(task for task in tasks if task.model_key == "gpt-5.2")
+    model_keys = [task.model_key for task in tasks]
+
+    assert "gpt-5.2" not in model_keys
+    assert "DeepSeek-V3.2" not in model_keys
+
+    azure_task = next(task for task in tasks if task.model_key == "gpt-5.4")
     assert azure_task.condition_names == ["baseline_zero_shot", "baseline_few_shot"]
     assert [item.condition_name for item in skipped] == [
         "finetuned_zero_shot",
         "finetuned_few_shot",
     ]
+
+
+def test_select_models_keeps_judge_only_models_out_of_generation_all():
+    assert select_models(_config(), ["all"], "azure") == ["gpt-5.4"]
+
+
+def test_select_models_rejects_explicit_judge_only_generation_model():
+    with pytest.raises(ValueError, match="reserved for judging"):
+        select_models(_config(), ["gpt-5.2"], "azure")
 
 
 def test_format_slurm_array_range_is_uncapped_by_default():

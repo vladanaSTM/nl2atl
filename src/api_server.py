@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, Optional, Tuple, Any
 from pathlib import Path
+from threading import Lock
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .config import Config, ModelConfig
 from .evaluation.exact_match import ExactMatchEvaluator
@@ -33,7 +35,7 @@ class GenerateRequest(BaseModel):
     )
     few_shot: bool = Field(default=False, description="Enable few-shot prompting")
     num_few_shot: Optional[int] = Field(
-        default=None, description="Number of few-shot examples to include"
+        default=None, ge=0, description="Number of few-shot examples to include"
     )
     max_new_tokens: int = Field(
         default=128, ge=1, le=2048, description="Maximum new tokens to generate"
@@ -49,6 +51,22 @@ class GenerateRequest(BaseModel):
         default=False, description="Include raw model output in response"
     )
 
+    @field_validator("description")
+    @classmethod
+    def normalize_description(cls, value: str) -> str:
+        description = value.strip()
+        if not description:
+            raise ValueError("Description cannot be empty")
+        return description
+
+    @field_validator("model", "adapter")
+    @classmethod
+    def normalize_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
 
 class GenerateResponse(BaseModel):
     """Response schema for NL2ATL generation."""
@@ -61,7 +79,19 @@ class GenerateResponse(BaseModel):
     raw_output: Optional[str] = None
 
 
-_MODEL_CACHE: Dict[str, Tuple[Any, Any, ModelConfig, str]] = {}
+@dataclass
+class ModelEntry:
+    """Loaded model resources kept by the API service."""
+
+    model: Any
+    tokenizer: Any
+    model_config: ModelConfig
+    model_type: str
+    generation_lock: Lock = field(default_factory=Lock)
+
+
+_MODEL_CACHE: Dict[str, ModelEntry] = {}
+_MODEL_CACHE_LOCK = Lock()
 _EVALUATOR = ExactMatchEvaluator()
 
 
@@ -85,19 +115,53 @@ def _get_default_model_key(config: Config) -> str:
     return next(iter(config.models.keys()))
 
 
-def _load_cached_model(model_key: str) -> Tuple[Any, Any, ModelConfig, str]:
-    config = _get_config()
-    resolved_key = resolve_model_key(model_key, config.models)
+def _resolve_request_model_key(config: Config, requested_model: Optional[str]) -> str:
+    if requested_model:
+        return resolve_model_key(requested_model, config.models)
+    return _get_default_model_key(config)
 
-    if resolved_key in _MODEL_CACHE:
-        return _MODEL_CACHE[resolved_key]
 
-    model_config = config.get_model(resolved_key)
-    model, tokenizer = load_model(model_config, for_training=False)
-    model_type = get_model_type(model_config.name)
+def _build_model_entry(
+    model_config: ModelConfig,
+    model_type: str,
+    *,
+    load_adapter: Optional[str] = None,
+) -> ModelEntry:
+    model, tokenizer = load_model(
+        model_config,
+        for_training=False,
+        load_adapter=load_adapter,
+    )
+    return ModelEntry(
+        model=model,
+        tokenizer=tokenizer,
+        model_config=model_config,
+        model_type=model_type,
+    )
 
-    _MODEL_CACHE[resolved_key] = (model, tokenizer, model_config, model_type)
-    return _MODEL_CACHE[resolved_key]
+
+def _load_cached_model(model_key: str) -> ModelEntry:
+    with _MODEL_CACHE_LOCK:
+        if model_key in _MODEL_CACHE:
+            return _MODEL_CACHE[model_key]
+
+        config = _get_config()
+        model_config = config.get_model(model_key)
+        model_type = get_model_type(model_config.name)
+        _MODEL_CACHE[model_key] = _build_model_entry(model_config, model_type)
+        return _MODEL_CACHE[model_key]
+
+
+def _resolve_adapter_path(adapter: str, config: Config) -> Path:
+    candidate = Path(adapter).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path(config.models_dir).expanduser() / candidate
+    if not candidate.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Adapter not found: {candidate}",
+        )
+    return candidate.resolve()
 
 
 @app.get("/health")
@@ -106,83 +170,78 @@ async def health_check() -> Dict[str, str]:
 
 
 @app.post("/generate", response_model=GenerateResponse)
-async def generate_formula(request: GenerateRequest) -> GenerateResponse:
-    description = request.description.strip()
-    if not description:
-        raise HTTPException(status_code=400, detail="Description cannot be empty")
-
+def generate_formula(request: GenerateRequest) -> GenerateResponse:
     config = _get_config()
-    model_key = request.model or _get_default_model_key(config)
+
+    try:
+        model_key = _resolve_request_model_key(config, request.model)
+        model_config = config.get_model(model_key)
+    except KeyError as exc:
+        status_code = 400 if request.model else 500
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+    model_type = get_model_type(model_config.name)
 
     adapter_path: Optional[str] = None
     if request.adapter:
-        models_dir = Path(config.models_dir)
-        candidate = Path(request.adapter)
-        if not candidate.is_absolute():
-            candidate = models_dir / candidate
-        if not candidate.exists():
-            raise HTTPException(
-                status_code=400,
-                detail=f"Adapter not found: {candidate}",
-            )
-        adapter_path = str(candidate)
-
-    try:
-        model, tokenizer, model_config, model_type = _load_cached_model(model_key)
-    except KeyError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Model load failed: {exc}"
-        ) from exc
-
-    if adapter_path:
         if model_config.is_azure:
             raise HTTPException(
                 status_code=400,
                 detail="Adapters are only supported for HuggingFace models",
             )
-        try:
-            model, tokenizer = load_model(
-                model_config, for_training=False, load_adapter=adapter_path
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500, detail=f"Adapter load failed: {exc}"
-            ) from exc
+        adapter_path = str(_resolve_adapter_path(request.adapter, config))
 
-    num_few_shot = request.num_few_shot or config.num_few_shot_examples
+    try:
+        model_entry = (
+            _build_model_entry(
+                model_config,
+                model_type,
+                load_adapter=adapter_path,
+            )
+            if adapter_path
+            else _load_cached_model(model_key)
+        )
+    except Exception as exc:
+        failure = "Adapter load failed" if adapter_path else "Model load failed"
+        raise HTTPException(status_code=500, detail=f"{failure}: {exc}") from exc
+
+    num_few_shot = (
+        request.num_few_shot
+        if request.num_few_shot is not None
+        else config.num_few_shot_examples
+    )
 
     prompt = format_prompt(
-        description,
+        request.description,
         output_text=None,
         few_shot=request.few_shot,
         num_examples=num_few_shot,
-        model_type=model_type,
-        tokenizer=tokenizer,
+        model_type=model_entry.model_type,
+        tokenizer=model_entry.tokenizer,
     )
 
     start_time = time.perf_counter()
     try:
-        raw_output = generate(
-            model,
-            tokenizer,
-            prompt,
-            max_new_tokens=request.max_new_tokens,
-        )
+        with model_entry.generation_lock:
+            raw_output = generate(
+                model_entry.model,
+                model_entry.tokenizer,
+                prompt,
+                max_new_tokens=request.max_new_tokens,
+            )
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail=f"Generation failed: {exc}"
         ) from exc
     latency_ms = (time.perf_counter() - start_time) * 1000
 
-    formula = _EVALUATOR.clean_output(str(raw_output), model_type)
+    formula = _EVALUATOR.clean_output(str(raw_output), model_entry.model_type)
 
     response = GenerateResponse(
         formula=formula,
         model_key=model_key,
-        model_name=model_config.name,
-        provider=model_config.provider,
+        model_name=model_entry.model_config.name,
+        provider=model_entry.model_config.provider,
         latency_ms=latency_ms,
         raw_output=str(raw_output) if request.return_raw else None,
     )

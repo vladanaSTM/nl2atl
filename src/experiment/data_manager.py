@@ -54,7 +54,11 @@ class ExperimentDataManager:
         self, train_data: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """Augment training data."""
-        self.train_data_aug = augment_data(train_data, self.augment_factor)
+        self.train_data_aug = augment_data(
+            train_data,
+            self.augment_factor,
+            seed=self.seed,
+        )
         return self.train_data_aug
 
     def prepare_data(

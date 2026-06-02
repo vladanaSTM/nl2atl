@@ -8,6 +8,17 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from ..constants import DEFAULT_LLM_EVAL_DIR
+
+DEFAULT_EVALUATED_DATASETS_DIR = f"{DEFAULT_LLM_EVAL_DIR}/evaluated_datasets"
+DEFAULT_AGREEMENT_REPORT_PATH = f"{DEFAULT_LLM_EVAL_DIR}/agreement_report.json"
+DEFAULT_SEED_AGGREGATE_PATH = (
+    f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.json"
+)
+DEFAULT_SEED_AGGREGATE_NOTEBOOK_PATH = (
+    f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.ipynb"
+)
+
 NUMERIC_FIELDS = [
     "accuracy",
     "exact_match",
@@ -139,14 +150,18 @@ def _load_agreement_scores(
 def aggregate_predictions(
     input_dir: Path,
     agreement_report_path: Optional[Path] = None,
+    combine_judges: bool = False,
 ) -> List[Dict[str, Any]]:
     """Aggregate predictions with optional agreement scores.
 
     Args:
         input_dir: Directory with prediction files
         agreement_report_path: Optional path to agreement_report.json
+        combine_judges: Combine files from different judges into one group
     """
-    grouped: Dict[Tuple[str, str, bool, bool], List[Dict[str, Any]]] = defaultdict(list)
+    grouped: Dict[Tuple[str, str, bool, bool, Optional[str]], List[Dict[str, Any]]] = (
+        defaultdict(list)
+    )
 
     # Load agreement scores if provided
     agreement_scores = _load_agreement_scores(agreement_report_path)
@@ -163,6 +178,12 @@ def aggregate_predictions(
         finetuned = bool(metadata.get("finetuned", False))
         few_shot = bool(metadata.get("few_shot", False))
         seed = metadata.get("seed")
+        judge_model = (
+            metadata.get("judge_model")
+            or metadata.get("judge")
+            or (path.parent.name if path.parent != input_dir else None)
+        )
+        group_judge = None if combine_judges else str(judge_model or "unknown")
 
         metrics = _extract_metrics(payload)
 
@@ -180,9 +201,10 @@ def aggregate_predictions(
         if base_source in agreement_scores:
             metrics["judge_agreement"] = agreement_scores[base_source]
 
-        grouped[(model_short, condition, finetuned, few_shot)].append(
+        grouped[(model_short, condition, finetuned, few_shot, group_judge)].append(
             {
                 "seed": seed,
+                "judge_model": judge_model,
                 "model": metadata.get("model"),
                 "model_short": model_short,
                 "condition": condition,
@@ -194,7 +216,13 @@ def aggregate_predictions(
         )
 
     aggregates: List[Dict[str, Any]] = []
-    for (model_short, condition, finetuned, few_shot), items in grouped.items():
+    for (
+        model_short,
+        condition,
+        finetuned,
+        few_shot,
+        judge_model,
+    ), items in grouped.items():
         agg_metrics: Dict[str, Dict[str, float]] = {}
         for field in NUMERIC_FIELDS:
             values = [
@@ -229,16 +257,27 @@ def aggregate_predictions(
                     "std": _safe_std(values),
                 }
 
+        unique_seeds = sorted(
+            {item["seed"] for item in items if item.get("seed") is not None}
+        )
+        judge_models = sorted(
+            {str(item["judge_model"]) for item in items if item.get("judge_model")}
+        )
+
         aggregate_entry = {
             "model_short": model_short,
             "condition": condition,
             "finetuned": finetuned,
             "few_shot": few_shot,
-            "num_seeds": len(items),
+            "judge_model": judge_model,
+            "judge_models": judge_models,
+            "num_seeds": len(unique_seeds) if unique_seeds else len(items),
+            "num_runs": len(items),
             "metrics": agg_metrics,
             "per_seed": [
                 {
                     "seed": i["seed"],
+                    "judge_model": i["judge_model"],
                     "metrics": i["metrics"],
                     "source": i["source"],
                 }
@@ -381,18 +420,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--input_dir",
-        default="outputs/LLM-evaluation/evaluated_datasets",
+        default=DEFAULT_EVALUATED_DATASETS_DIR,
         help="Directory containing evaluated JSON files.",
     )
     parser.add_argument(
         "--agreement_report",
-        default="outputs/LLM-evaluation/agreement_report.json",
+        default=DEFAULT_AGREEMENT_REPORT_PATH,
         help="Optional path to agreement_report.json for judge agreement scores.",
     )
     parser.add_argument(
         "--output",
-        default="outputs/seed_aggregate_metrics_from_judged.json",
+        default=DEFAULT_SEED_AGGREGATE_PATH,
         help="Path to write aggregated metrics JSON.",
+    )
+    parser.add_argument(
+        "--combine_judges",
+        action="store_true",
+        help="Combine evaluated files from different judges into one aggregate group.",
     )
     # Notebook enabled by default; provide --no-notebook to disable
     parser.set_defaults(notebook=True)
@@ -410,7 +454,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--notebook_output",
-        default="outputs/seed_aggregate_metrics_from_judged.ipynb",
+        default=DEFAULT_SEED_AGGREGATE_NOTEBOOK_PATH,
         help="Path to write the generated Jupyter notebook.",
     )
     args = parser.parse_args()
@@ -423,7 +467,11 @@ def main() -> None:
         Path(args.agreement_report) if args.agreement_report else None
     )
 
-    aggregates = aggregate_predictions(input_dir, agreement_report_path)
+    aggregates = aggregate_predictions(
+        input_dir,
+        agreement_report_path,
+        combine_judges=args.combine_judges,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

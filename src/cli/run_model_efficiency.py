@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
+from ..constants import DEFAULT_LLM_EVAL_DIR
 from ..infra.io import save_json
 from ..evaluation.model_efficiency import (
     EfficiencyWeights,
@@ -14,18 +15,21 @@ from ..evaluation.model_efficiency import (
 
 
 def main() -> None:
+    default_aggregate_file = (
+        f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.json"
+    )
     parser = argparse.ArgumentParser(
         description="Generate accuracy-latency report from seed aggregate metrics"
     )
     parser.add_argument(
         "--aggregate_file",
-        default="outputs/seed_aggregate_metrics_from_judged.json",
+        default=default_aggregate_file,
         help="Path to seed_aggregate_metrics_from_judged.json",
     )
     parser.add_argument(
         "--output_dir",
-        default="outputs",
-        help="Directory for output files (default: outputs)",
+        default=DEFAULT_LLM_EVAL_DIR,
+        help=f"Directory for output files (default: {DEFAULT_LLM_EVAL_DIR})",
     )
     parser.add_argument(
         "--output",

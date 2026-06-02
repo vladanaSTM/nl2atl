@@ -26,3 +26,39 @@ def test_prepare_data_splits_and_augments(tmp_path):
     assert len(val) == 2
     assert len(test) == 4
     assert len(train_aug) == 28
+
+
+def test_prepare_data_augmentation_uses_manager_seed(tmp_path):
+    dataset_path = tmp_path / "dataset.json"
+    data = [
+        {
+            "input": f"item {index} can guarantee that eventually p",
+            "output": "<<A>>F p",
+        }
+        for index in range(10)
+    ]
+    dataset_path.write_text(json.dumps(data))
+
+    def prepare_inputs_after_global_noise():
+        manager = ExperimentDataManager(
+            data_path=dataset_path,
+            train_size=0.7,
+            val_size=0.1,
+            test_size=0.2,
+            seed=11,
+            augment_factor=3,
+        )
+        train_aug, _, _, _ = manager.prepare_data()
+        return [item["input"] for item in train_aug]
+
+    first = prepare_inputs_after_global_noise()
+
+    import random
+
+    random.seed(999)
+    for _ in range(20):
+        random.random()
+
+    second = prepare_inputs_after_global_noise()
+
+    assert first == second

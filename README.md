@@ -44,7 +44,7 @@ uv run nl2atl llm-judge --datasets all
 # Agreement and accuracy-latency reports
 uv run nl2atl judge-agreement
 uv run nl2atl generate-eval-reports
-uv run nl2atl model-efficiency --aggregate_file outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json --output_dir outputs/LLM-evaluation
+uv run nl2atl model-efficiency
 
 # API service
 uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081

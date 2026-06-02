@@ -125,7 +125,7 @@ models:
     params_b: 3
 ```
 
-Common fields are `name`, `short_name`, `provider`, pinned Hugging Face `revision`, optional training batch settings, optional Azure API name, and optional parameter-count metadata.
+Common fields are `name`, `short_name`, `provider`, pinned Hugging Face `revision`, optional training batch settings, optional Azure API name, optional `generation_enabled`, and optional parameter-count metadata. Set `generation_enabled: false` for judge-only API models that should remain available to `nl2atl llm-judge` but stay out of generation experiments.
 
 ## Experiment Launching
 
@@ -134,9 +134,10 @@ Use `nl2atl run` for local runs, task inspection, and SLURM submission:
 ```bash
 uv run nl2atl run --list-tasks --models all --conditions all --model_provider hf
 uv run nl2atl run --slurm --models all --conditions all --model_provider hf
+uv run nl2atl run --list-tasks --models all --conditions baseline_zero_shot baseline_few_shot --model_provider azure
 ```
 
-SLURM tasks are grouped by model and seed. If both fine-tuned conditions are selected for the same model, the runner trains one shared adapter and evaluates both prompting conditions from it. Azure/API models automatically skip fine-tuned conditions.
+SLURM tasks are grouped by model and seed. If both fine-tuned conditions are selected for the same model, the runner trains one shared adapter and evaluates both prompting conditions from it. Azure/API generation baselines automatically skip fine-tuned conditions. The default Azure generation set is GPT-4.1 and GPT-5.4; GPT-5.2 and DeepSeek V3.2 are kept judge-only.
 
 SLURM arrays are uncapped by default. Add `--max-parallel-gpus N` only when you want to throttle the array to `N` concurrent one-GPU tasks.
 

@@ -49,6 +49,23 @@ def test_augment_data_preserves_and_expands():
     assert all("output" in item for item in augmented)
 
 
+def test_augment_data_seed_is_independent_of_global_random_state():
+    data = [
+        {"input": "The system can guarantee that eventually p", "output_2": "<<S>>F p"}
+    ]
+
+    random.seed(1)
+    random.random()
+    first = data_utils.augment_data(data, augment_factor=4, seed=123)
+
+    random.seed(999)
+    for _ in range(10):
+        random.random()
+    second = data_utils.augment_data(data, augment_factor=4, seed=123)
+
+    assert [item["input"] for item in first] == [item["input"] for item in second]
+
+
 def test_augment_data_no_change_when_factor_one():
     data = [{"input": "The system will always stay safe", "output_2": "<<S>>G safe"}]
     augmented = data_utils.augment_data(data, augment_factor=1)

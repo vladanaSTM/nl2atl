@@ -134,13 +134,17 @@ _PARAPHRASE_TEMPLATES = [
 ]
 
 
-def _apply_paraphrase(text: str) -> str:
+def _apply_paraphrase(
+    text: str,
+    random_generator: Optional[random.Random] = None,
+) -> str:
     """Apply the first matching paraphrase to the text."""
+    chooser = random_generator or random
     for phrase, replacements in _PARAPHRASE_TEMPLATES:
         if phrase in text.lower():
             return re.sub(
                 re.escape(phrase),
-                random.choice(replacements),
+                chooser.choice(replacements),
                 text,
                 flags=re.IGNORECASE,
                 count=1,
@@ -148,17 +152,30 @@ def _apply_paraphrase(text: str) -> str:
     return text
 
 
-def augment_data(data_list: List[Dict], augment_factor: int = 5) -> List[Dict]:
+def augment_data(
+    data_list: List[Dict],
+    augment_factor: int = 5,
+    seed: Optional[int] = None,
+    random_generator: Optional[random.Random] = None,
+) -> List[Dict]:
     """
     Augment training data by applying paraphrasing.
 
     Args:
         data_list: Original data items
         augment_factor: Total copies of each item (including original)
+        seed: Optional seed for deterministic augmentation independent of global state
+        random_generator: Optional random generator supplied by the caller
 
     Returns:
         Augmented list with original + paraphrased versions
     """
+    if seed is not None and random_generator is not None:
+        raise ValueError("Pass either seed or random_generator, not both")
+
+    local_random = random_generator or (
+        random.Random(seed) if seed is not None else None
+    )
     augmented = []
 
     for item in data_list:
@@ -168,7 +185,10 @@ def augment_data(data_list: List[Dict], augment_factor: int = 5) -> List[Dict]:
 
         # Add paraphrased versions
         for _ in range(augment_factor - 1):
-            new_input = _apply_paraphrase(normalized_item["input"])
+            new_input = _apply_paraphrase(
+                normalized_item["input"],
+                random_generator=local_random,
+            )
             augmented.append(
                 {
                     "input": new_input,
