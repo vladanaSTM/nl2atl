@@ -118,7 +118,6 @@ class ExactMatchEvaluator(BaseEvaluator):
             "expected": reference_text,
             "expected_options": reference_options,
             "generated": prediction_text,
-            "difficulty": prediction.get("difficulty") or reference.get("difficulty"),
             "exact_match": exact_match,
         }
         # Preserve latency if it was already computed
@@ -231,7 +230,6 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "expected": get_preferred_output(item),
                 "expected_options": expected_options,
                 "generated": generated,
-                "difficulty": item.get("difficulty"),
                 "exact_match": exact_match,
                 "latency_ms": round(latency_ms, 2),
             }

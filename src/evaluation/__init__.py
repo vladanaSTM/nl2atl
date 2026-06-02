@@ -1,13 +1,11 @@
 """Evaluation subpackage."""
 
 from .base import BaseEvaluator
-from .difficulty import DifficultyClassifier
 from .judge_agreement import generate_agreement_report
 
 __all__ = [
     "BaseEvaluator",
     "ExactMatchEvaluator",
-    "DifficultyClassifier",
     "generate_agreement_report",
     "LLMJudgeEvaluator",
     "run_llm_judge",

@@ -48,6 +48,21 @@ def _safe_std(values: List[float]) -> float:
     return statistics.pstdev(values) if len(values) > 1 else 0.0
 
 
+def _aggregate_numeric(values: List[float]) -> Dict[str, float]:
+    mean = _safe_mean(values)
+    std = _safe_std(values)
+    n = len(values)
+    sem = std / (n**0.5) if n > 1 else 0.0
+    ci95 = 1.96 * sem if n > 1 else 0.0
+    return {
+        "mean": mean,
+        "std": std,
+        "n": n,
+        "sem": sem,
+        "ci95": ci95,
+    }
+
+
 def _iter_prediction_files(input_dir: Path) -> Iterable[Path]:
     # Search recursively so files inside dataset subdirectories are included
     return sorted(p for p in input_dir.rglob("*.json") if p.is_file())
@@ -231,10 +246,7 @@ def aggregate_predictions(
                 if i["metrics"].get(field) is not None
             ]
             if values:
-                agg_metrics[field] = {
-                    "mean": _safe_mean(values),
-                    "std": _safe_std(values),
-                }
+                agg_metrics[field] = _aggregate_numeric(values)
 
         # Aggregate judge agreement scores if present
         agg_agreement_temp: Dict[str, List[float]] = {}
@@ -252,10 +264,7 @@ def aggregate_predictions(
         for key in agg_agreement_temp:
             values = agg_agreement_temp[key]
             if values:
-                agg_agreement[key] = {
-                    "mean": _safe_mean(values),
-                    "std": _safe_std(values),
-                }
+                agg_agreement[key] = _aggregate_numeric(values)
 
         unique_seeds = sorted(
             {item["seed"] for item in items if item.get("seed") is not None}
@@ -342,10 +351,12 @@ def _build_notebook(
         "    aggregates = json.load(fh)\n",
         "rows = []\n",
         "for g in aggregates:\n",
-        "    row = {k: g.get(k) for k in ('model_short','condition','finetuned','few_shot','num_seeds')}\n",
+        "    row = {k: g.get(k) for k in ('model_short','condition','finetuned','few_shot','judge_model','num_seeds','num_runs')}\n",
         "    for metric,vals in (g.get('metrics') or {}).items():\n",
         "        row[f'{metric}_mean'] = vals.get('mean')\n",
         "        row[f'{metric}_std'] = vals.get('std')\n",
+        "        row[f'{metric}_ci95'] = vals.get('ci95')\n",
+        "        row[f'{metric}_n'] = vals.get('n')\n",
         "    # Add confidence score (mean if aggregated)\n",
         "    judge_agreement = g.get('judge_agreement', {})\n",
         "    conf_score = judge_agreement.get('confidence_score')\n",
@@ -359,15 +370,61 @@ def _build_notebook(
         "# Show top models by accuracy with confidence scores\n",
         "if 'accuracy_mean' in df.columns:\n",
         "    top_models = df.sort_values('accuracy_mean', ascending=False).head(10)\n",
-        "    display_cols = ['model_short', 'condition', 'accuracy_mean', 'confidence_score', 'num_seeds']\n",
+        "    display_cols = ['model_short', 'condition', 'judge_model', 'accuracy_mean', 'accuracy_ci95', 'confidence_score', 'num_seeds']\n",
         "    print('\\n=== Top 10 Most Accurate Models (with Confidence Scores) ===')\n",
         "    display(top_models[[c for c in display_cols if c in top_models.columns]])\n",
         "    plot_df = top_models\n",
         "    plt.figure(figsize=(12,6))\n",
         "    sns.barplot(data=plot_df, x='accuracy_mean', y='model_short', hue='condition', dodge=False)\n",
-        "    plt.title('Top 10 Groups by Accuracy (with Judge Agreement Scores)')\n",
+        "    if 'accuracy_ci95' in plot_df.columns:\n",
+        "        for idx, row in enumerate(plot_df.itertuples()):\n",
+        "            ci = getattr(row, 'accuracy_ci95', None)\n",
+        "            if pd.notna(ci):\n",
+        "                plt.errorbar(row.accuracy_mean, idx, xerr=ci, fmt='none', color='black', capsize=3)\n",
+        "    plt.title('Top 10 Groups by Accuracy with Approx. 95% CI')\n",
         "    plt.tight_layout()\n",
         "    plt.show()\n",
+    ]
+
+    paired_comparison = [
+        "# Paired seed comparisons for models evaluated on shared seeds\n",
+        "seed_rows = []\n",
+        "for g in aggregates:\n",
+        "    for item in g.get('per_seed', []):\n",
+        "        metrics = item.get('metrics') or {}\n",
+        "        seed_rows.append({\n",
+        "            'model_short': g.get('model_short'),\n",
+        "            'condition': g.get('condition'),\n",
+        "            'judge_model': g.get('judge_model'),\n",
+        "            'seed': item.get('seed'),\n",
+        "            'accuracy': metrics.get('accuracy'),\n",
+        "        })\n",
+        "seed_df = pd.DataFrame(seed_rows).dropna(subset=['seed', 'accuracy'])\n",
+        "comparisons = []\n",
+        "for (condition, judge_model), part in seed_df.groupby(['condition', 'judge_model'], dropna=False):\n",
+        "    pivot = part.pivot_table(index='seed', columns='model_short', values='accuracy', aggfunc='mean')\n",
+        "    models = list(pivot.columns)\n",
+        "    for i, left in enumerate(models):\n",
+        "        for right in models[i + 1:]:\n",
+        "            paired = pivot[[left, right]].dropna()\n",
+        "            if paired.empty:\n",
+        "                continue\n",
+        "            delta = paired[left] - paired[right]\n",
+        "            comparisons.append({\n",
+        "                'condition': condition,\n",
+        "                'judge_model': judge_model,\n",
+        "                'model_a': left,\n",
+        "                'model_b': right,\n",
+        "                'shared_seeds': len(delta),\n",
+        "                'mean_accuracy_delta_a_minus_b': delta.mean(),\n",
+        "                'wins_a': int((delta > 0).sum()),\n",
+        "                'ties': int((delta == 0).sum()),\n",
+        "            })\n",
+        "comparison_df = pd.DataFrame(comparisons)\n",
+        "if comparison_df.empty:\n",
+        "    print('No paired seed comparisons available.')\n",
+        "else:\n",
+        "    display(comparison_df.sort_values('mean_accuracy_delta_a_minus_b', ascending=False).head(30))\n",
     ]
 
     # Display table sorted by accuracy_mean if available, otherwise fallback
@@ -398,6 +455,16 @@ def _build_notebook(
             "execution_count": None,
             "outputs": [],
             "source": display_wrapper,
+        }
+    )
+
+    nb_cells.append(
+        {
+            "cell_type": "code",
+            "metadata": {"language": "python"},
+            "execution_count": None,
+            "outputs": [],
+            "source": paired_comparison,
         }
     )
 

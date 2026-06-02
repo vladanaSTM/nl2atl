@@ -20,8 +20,6 @@ Optional:
 | Field | Meaning |
 |---|---|
 | `id` | Stable example identifier |
-| `difficulty` | Optional difficulty label |
-| `difficulty_scores` | Optional classifier details |
 
 Rows may have multiple correct formulas. `load_data` creates:
 
@@ -53,7 +51,7 @@ print(data[0]["outputs"])
 
 ## Splits And Augmentation
 
-Splits are seeded shuffles, not stratified by difficulty.
+Splits are seeded shuffles.
 
 ```python
 from src.data_utils import split_data, augment_data

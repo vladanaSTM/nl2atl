@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.evaluation.model_efficiency import (
     build_efficiency_report,
+    build_efficiency_notebook,
     resolve_prediction_files,
 )
 
@@ -93,3 +94,18 @@ def test_build_efficiency_report_with_summary(tmp_path):
     assert entry["efficiency_score"] is not None
     assert report["totals"]["with_latency"] == 1
     assert "pareto_frontier" in report
+
+
+def test_efficiency_notebook_cells_have_language_metadata(tmp_path):
+    report_path = tmp_path / "efficiency_report.json"
+    report_path.write_text(
+        json.dumps({"models": [], "pareto_frontier": [], "rankings": {}}),
+        encoding="utf-8",
+    )
+    notebook_path = tmp_path / "efficiency_report.ipynb"
+
+    build_efficiency_notebook(report_path, notebook_path)
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+
+    assert notebook["cells"]
+    assert all(cell["metadata"].get("language") for cell in notebook["cells"])

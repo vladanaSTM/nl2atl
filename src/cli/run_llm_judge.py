@@ -4,6 +4,8 @@ Run the ATL LLM-as-a-judge evaluator over prediction files.
 """
 
 import argparse
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,20 @@ from ..evaluation.llm_judge import (
     evaluate_prediction_file,
 )
 from ..models.utils import resolve_model_key
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
@@ -313,7 +329,17 @@ def main():
                 **metadata,
                 "judge_model": judge_name,
                 "prompt_version": PROMPT_VERSION,
+                "judge_provider": model_config.provider,
+                "judge_api_model": api_model,
+                "judge_decoding": {
+                    "temperature": 0,
+                    "max_new_tokens": 256,
+                },
                 "source_file": pred_path.name,
+                "source_sha256": _sha256_file(pred_path),
+                "models_config": str(Path(args.models_config)),
+                "models_config_sha256": _sha256_file(Path(args.models_config)),
+                "evaluated_at": _utc_now(),
                 "detailed_results": rows,
             }
             save_json(evaluated_payload, evaluated_path)

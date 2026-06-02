@@ -590,7 +590,7 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
         "cells": [
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": [
                     "# Model Accuracy-Latency Report\n",
                     f"Report file: `{report_path.name}`\n",
@@ -601,7 +601,7 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
             {
                 "cell_type": "code",
                 "execution_count": None,
-                "metadata": {},
+                "metadata": {"language": "python"},
                 "outputs": [],
                 "source": [
                     "import json\n",
@@ -619,13 +619,13 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": ["## Accuracy vs Latency\n"],
             },
             {
                 "cell_type": "code",
                 "execution_count": None,
-                "metadata": {},
+                "metadata": {"language": "python"},
                 "outputs": [],
                 "source": [
                     "plt.figure(figsize=(10, 6))\n",
@@ -641,13 +641,13 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": ["## Pareto Frontier\n"],
             },
             {
                 "cell_type": "code",
                 "execution_count": None,
-                "metadata": {},
+                "metadata": {"language": "python"},
                 "outputs": [],
                 "source": [
                     "display(pd.DataFrame(report.get('pareto_frontier', [])))\n"
@@ -655,13 +655,13 @@ def build_efficiency_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": ["## Rankings\n"],
             },
             {
                 "cell_type": "code",
                 "execution_count": None,
-                "metadata": {},
+                "metadata": {"language": "python"},
                 "outputs": [],
                 "source": [
                     "for name, rows in report['rankings'].items():\n",

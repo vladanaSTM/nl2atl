@@ -534,7 +534,7 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
         "cells": [
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": [
                     "# Inter-rater Agreement Report\n",
                     f"Agreement report: {report_path.name}\n",
@@ -542,7 +542,9 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "import json\n",
                     "from pathlib import Path\n",
@@ -567,9 +569,12 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "# Pairwise Cohen's Kappa\n",
+                    "display(df_pairs)\n",
                     "plt.figure(figsize=(8,4))\n",
                     "if not df_pairs.empty:\n",
                     "    df_pairs = df_pairs.sort_values('kappa', ascending=False)\n",
@@ -586,7 +591,9 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "# Fleiss' Kappa and Krippendorff's Alpha\n",
                     "print('Fleiss kappa:', report.get('fleiss_kappa'))\n",
@@ -595,7 +602,9 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "# Agreement breakdown\n",
                     "breakdown = report.get('agreement_breakdown', {})\n",
@@ -610,7 +619,9 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "# Per-source mean kappa (top sources)\n",
                     "per_source = report.get('per_source_file', {})\n",
@@ -630,7 +641,9 @@ def build_agreement_notebook(report_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "# Sample disagreements\n",
                     "dis = report.get('disagreements', {})\n",

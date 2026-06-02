@@ -9,7 +9,10 @@ Runs all evaluation steps in sequence:
 """
 
 import argparse
+import hashlib
+import platform
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -25,7 +28,61 @@ from ..evaluation.model_efficiency import (
     build_efficiency_notebook,
     EfficiencyWeights,
 )
+from ..experiment.reporter import get_git_commit
 from ..infra.io import save_json
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _file_manifest(root: Path, pattern: str) -> list[dict]:
+    if not root.exists():
+        return []
+    files = []
+    for path in sorted(root.rglob(pattern)):
+        if not path.is_file():
+            continue
+        files.append(
+            {
+                "path": str(path),
+                "sha256": _sha256_file(path),
+                "bytes": path.stat().st_size,
+            }
+        )
+    return files
+
+
+def write_reproducibility_manifest(eval_dir: Path, predictions_dir: Path) -> Path:
+    """Write a machine-readable manifest for reproducing evaluation reports."""
+    manifest = {
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "git_commit": get_git_commit(),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "inputs": {
+            "prediction_files": _file_manifest(predictions_dir, "*.json"),
+            "evaluated_files": _file_manifest(
+                eval_dir / "evaluated_datasets", "*.json"
+            ),
+        },
+        "reports": _file_manifest(eval_dir, "*.json")
+        + _file_manifest(eval_dir, "*.ipynb"),
+        "limitations": [
+            "Azure judge calls request temperature=0, but exact reproducibility also depends on provider-side deployment stability.",
+            "Local GPU fine-tuning can still vary across CUDA, driver, hardware, and library versions despite deterministic settings.",
+            "Conference-ready claims should preserve raw predictions, judged outputs, prompts, configs, package lockfile, and human-validation samples.",
+        ],
+    }
+    manifest_path = eval_dir / "reproducibility_manifest.json"
+    save_json(manifest, manifest_path)
+    return manifest_path
 
 
 def main() -> None:
@@ -225,6 +282,9 @@ def main() -> None:
             except Exception as e:
                 print(f"✗ Error generating accuracy-latency report: {e}")
                 raise
+
+        manifest_path = write_reproducibility_manifest(eval_dir, predictions_dir)
+        print(f"✓ Reproducibility manifest saved to {manifest_path}")
 
         print("\n" + "=" * 70)
         print("✓ Evaluation pipeline completed successfully!")

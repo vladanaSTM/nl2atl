@@ -11,7 +11,7 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 - `expected_options`
 - `generated`
 - `exact_match`
-- optional latency and difficulty fields
+- optional latency fields
 
 ## Step 1: Exact Match
 
@@ -55,9 +55,11 @@ The report includes pairwise Cohen's kappa, Fleiss' kappa, Krippendorff's alpha,
 uv run nl2atl generate-eval-reports
 ```
 
-This builds judge summaries, agreement reports, seed aggregates, and an accuracy-latency report under `outputs/LLM-evaluation/`.
+This builds judge summaries, agreement reports, seed aggregates, an accuracy-latency report, generated notebooks, and a `reproducibility_manifest.json` under `outputs/LLM-evaluation/`.
 
 Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
+
+The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, judged outputs, configs, lockfile, prompt version, judge agreement report, and any human-validation sample used to calibrate the judges.
 
 ## Accuracy-Latency Report
 

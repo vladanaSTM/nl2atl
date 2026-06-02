@@ -15,9 +15,7 @@ from .client import JudgeClient, AzureJudgeClient
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
 from .parser import JudgeVerdict, parse_judge_response
 from .metrics import (
-    JudgeMetrics,
     compute_metrics,
-    compute_metrics_with_difficulty,
     _empty_metrics,
 )
 
@@ -32,9 +30,7 @@ __all__ = [
     "PROMPT_VERSION",
     "JudgeVerdict",
     "parse_judge_response",
-    "JudgeMetrics",
     "compute_metrics",
-    "compute_metrics_with_difficulty",
     "_empty_metrics",
     "normalize_text",
     "extract_prediction_items",

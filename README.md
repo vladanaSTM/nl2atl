@@ -75,7 +75,7 @@ Augmentation is applied only after splitting, and only to the training split.
 src/cli/          command-line entry points
 src/experiment/   data preparation, training, evaluation orchestration, reporting
 src/models/       prompt formatting, model loading, generation
-src/evaluation/   exact match, LLM judge, agreement, accuracy-latency, difficulty tools
+src/evaluation/   exact match, LLM judge, agreement, accuracy-latency
 src/infra/        JSON/YAML/env helpers and Azure client
 src/api_server.py FastAPI generation service
 configs/          model and experiment configuration

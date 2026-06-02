@@ -20,7 +20,7 @@ configs + dataset
 | `src/data_utils.py` | Dataset validation, normalization, splitting, augmentation |
 | `src/experiment/` | Experiment orchestration and result writing |
 | `src/models/` | Prompt formatting, model loading, generation utilities |
-| `src/evaluation/` | Exact match, LLM judge, judge agreement, accuracy-latency, difficulty tools |
+| `src/evaluation/` | Exact match, LLM judge, judge agreement, accuracy-latency tools |
 | `src/infra/` | JSON/YAML/env helpers and Azure client wrapper |
 | `src/api_server.py` | FastAPI generation service |
 

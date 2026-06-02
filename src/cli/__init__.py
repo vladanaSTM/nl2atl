@@ -8,6 +8,5 @@ __all__ = [
     "genvitamin",
     "run_llm_judge",
     "run_judge_agreement",
-    "classify_difficulty",
     "run_model_efficiency",
 ]

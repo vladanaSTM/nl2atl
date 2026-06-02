@@ -1,12 +1,11 @@
 """Infrastructure utilities subpackage."""
 
-from .io import load_json, load_json_safe, load_yaml, save_json
+from .io import load_json, load_yaml, save_json
 
 __all__ = [
     "AzureConfig",
     "AzureClient",
     "load_json",
-    "load_json_safe",
     "load_yaml",
     "save_json",
     "load_env",

@@ -14,7 +14,6 @@ from ...infra.azure import AzureConfig
 from .client import AzureJudgeClient, JudgeClient
 from .metrics import (
     compute_metrics,
-    compute_metrics_with_difficulty,
     _empty_metrics,
     build_summary,
 )
@@ -269,7 +268,6 @@ def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Any]]:
                 "gold_options": gold_options,
                 "exact_match": item.get("exact_match"),
                 "id": item.get("id"),
-                "difficulty": item.get("difficulty"),
             }
         )
 
@@ -348,7 +346,6 @@ def evaluate_prediction_file(
                 "reasoning": decision.reasoning,
                 "decision_method": decision.decision_method,
                 "id": item.get("id"),
-                "difficulty": item.get("difficulty"),
             }
         )
 
@@ -361,7 +358,7 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
         "cells": [
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": [
                     "# ATL LLM Judge Summary\n",
                     f"Summary file: {summary_path.name}\n",
@@ -369,7 +366,9 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "import json\n",
                     "from pathlib import Path\n",
@@ -394,14 +393,17 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
                     "    }\n",
                     "    for item in summary['per_file']\n",
                     "])\n",
-                    "df.sort_values('accuracy', ascending=False)\n",
+                    "display(pd.DataFrame([summary.get('overall', {})]))\n",
+                    "display(df.sort_values('accuracy', ascending=False))\n",
                 ],
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
-                    "plt.figure(figsize=(100, 40))\n",
+                    "plt.figure(figsize=(12, max(4, min(14, len(df) * 0.35))))\n",
                     "plt.bar(df['source_file'], df['accuracy'])\n",
                     "plt.xticks(rotation=45, ha='right')\n",
                     "plt.ylabel('Accuracy')\n",
@@ -461,7 +463,6 @@ __all__ = [
     "extract_prediction_items",
     "evaluate_prediction_file",
     "compute_metrics",
-    "compute_metrics_with_difficulty",
     "_empty_metrics",
     "build_summary",
     "build_summary_notebook",
