@@ -11,7 +11,7 @@ from .pipeline import (
     build_summary_notebook,
     run_llm_judge,
 )
-from .client import JudgeClient, AzureJudgeClient, LocalJudgeClient, get_client
+from .client import JudgeClient, AzureJudgeClient
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
 from .parser import JudgeVerdict, parse_judge_response
 from .metrics import (
@@ -27,8 +27,6 @@ __all__ = [
     "JudgeDecision",
     "JudgeClient",
     "AzureJudgeClient",
-    "LocalJudgeClient",
-    "get_client",
     "JudgePromptConfig",
     "format_judge_prompt",
     "PROMPT_VERSION",

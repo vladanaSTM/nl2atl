@@ -42,12 +42,10 @@ Add `--max-parallel-gpus N` only when you want to throttle the array to `N` conc
 
 The SLURM runner writes a frozen task manifest under `outputs/manifests/` so array tasks use the same model, condition, and seed plan that was submitted.
 
-For bounded fine-tuning smoke tests, keep production configs untouched and use the tuning configs with a short step cap:
+For fine-tuning smoke tests, use a short step cap:
 
 ```bash
 uv run nl2atl run --slurm \
-	--models_config configs/models_finetune_sweep.yaml \
-	--experiments_config configs/experiments_finetune_sweep.yaml \
 	--models all --conditions all --model_provider hf \
 	--train-max-steps 20
 ```
@@ -55,7 +53,7 @@ uv run nl2atl run --slurm \
 ## Inspect Predictions
 
 ```bash
-uv run python -c "from src.infra.io import load_json; r=load_json('outputs/model_predictions/qwen-3b_baseline_few_shot.json'); p=r['predictions'][0]; print(p['input']); print(p['expected_options']); print(p['generated']); print(p['exact_match'])"
+uv run python -c "from src.infra.io import load_json; r=load_json('outputs/model_predictions/qwen-3b_baseline_few_shot_seed42.json'); p=r['predictions'][0]; print(p['input']); print(p['expected_options']); print(p['generated']); print(p['exact_match'])"
 ```
 
 Each prediction row includes the input, accepted gold formulas, minimally cleaned model output, exact-match flag, and latency.

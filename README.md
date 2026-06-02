@@ -96,8 +96,6 @@ models/                         fine-tuned adapters
 
 The default fine-tuning configuration is tuned for reproducible, memory-aware LoRA/QLoRA runs on one GPU per task: pinned Hugging Face model revisions, 8 epochs, 1024-token SFT windows, learning rate `1e-4`, cosine schedule, gradient checkpointing, paged 8-bit AdamW, epoch validation, one retained checkpoint, and uncapped SLURM arrays unless `--max-parallel-gpus` is explicitly provided. Fine-tuned zero-shot and fine-tuned few-shot conditions share one adapter for each model and seed. The frozen profiles are Qwen 3B r64/b8, Phi-3.5 r32/b6, Qwen Coder 7B QLoRA r64/b4, and Mistral 7B QLoRA r32/b2.
 
-Use `configs/models_finetune_sweep.yaml` and `configs/experiments_finetune_sweep.yaml` for bounded parameter tests; they write to `models/tuning/` and `outputs/tuning/`.
-
 ## Documentation
 
 Start with [docs/index.md](docs/index.md). The docs are intentionally small: [quickstart](docs/quickstart.md), [configuration](docs/configuration.md), [dataset](docs/dataset.md), [evaluation](docs/evaluation.md), [architecture](docs/architecture.md), and [development](docs/development.md).

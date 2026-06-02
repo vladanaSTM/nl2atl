@@ -11,7 +11,7 @@ from ...data_utils import get_output_options
 from ...infra.io import load_json, save_json
 from ...infra.azure import AzureConfig
 
-from .client import AzureJudgeClient, LocalJudgeClient, JudgeClient, get_client
+from .client import AzureJudgeClient, JudgeClient
 from .metrics import (
     compute_metrics,
     compute_metrics_with_difficulty,
@@ -62,17 +62,14 @@ class LLMJudge:
 
     def _init_client(self) -> None:
         """Initialize the appropriate client based on provider."""
-        if self.provider == "azure":
-            azure_config = AzureConfig.from_env()
-            self.client = AzureJudgeClient(azure_config, model=self.api_model)
+        if self.provider != "azure":
+            raise ValueError(
+                f"Unsupported judge provider: {self.provider}. "
+                "LLM judge models must use provider='azure'."
+            )
 
-        elif self.provider == "huggingface":
-            if not self.model_config:
-                raise ValueError("Local judge requires model_config.")
-            self.client = LocalJudgeClient(self.model_config)
-
-        else:
-            raise ValueError(f"Unsupported judge provider: {self.provider}")
+        azure_config = AzureConfig.from_env()
+        self.client = AzureJudgeClient(azure_config, model=self.api_model)
 
     def _build_prompt(self, input_text: str, gold: Any, prediction: str) -> str:
         return format_judge_prompt(

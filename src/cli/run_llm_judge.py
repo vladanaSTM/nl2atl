@@ -61,7 +61,7 @@ def resolve_judge_models(
     judge_models: Optional[list],
     judge_model: Optional[str],
 ) -> list:
-    """Resolve judge models from config or fall back to a fixed allowed set.
+    """Resolve Azure judge models from config or fall back to allowed defaults.
 
     Allowed default judges: `gpt-5.2`, `DeepSeek-V3.2`.
     If a models config exists and contains matching keys those entries are used;
@@ -112,24 +112,36 @@ def resolve_judge_models(
     else:
         # Default selection: only the allowed API judges, in this order.
         default_keys = ["gpt-5.2", "DeepSeek-V3.2"]
-        selected_keys = [k for k in default_keys if k in models]
+        selected_keys = [
+            k
+            for k in default_keys
+            if k in models
+            and isinstance(models.get(k), dict)
+            and str(models[k].get("provider", "")).lower() == "azure"
+        ]
         if not selected_keys:
             # If none of the allowed keys exist in the config, fall back to any
-            # available azure-models or the first few entries in the config.
+            # available Azure models.
             azure_keys = [
                 key
                 for key, data in models.items()
                 if isinstance(data, dict)
                 and str(data.get("provider", "huggingface")).lower() == "azure"
             ]
-            selected_keys = azure_keys or list(models.keys())[:3]
+            selected_keys = azure_keys
 
     resolved = []
     for key in selected_keys:
         data = models.get(key)
         if not isinstance(data, dict):
             continue
-        resolved.append((key, ModelConfig(**data)))
+        model_config = ModelConfig(**data)
+        if model_config.provider.lower() != "azure":
+            raise ValueError(
+                f"Judge model '{key}' uses provider '{model_config.provider}'. "
+                "LLM judge models must use provider='azure'."
+            )
+        resolved.append((key, model_config))
 
     return resolved
 
@@ -204,7 +216,6 @@ def main():
         default="configs/models.yaml",
         help="Models config file (default: configs/models.yaml)",
     )
-    # Note: HF-size filtering (--hf_min_params_b / --hf_only) removed.
     parser.add_argument(
         "--predictions_dir",
         default="outputs/model_predictions",

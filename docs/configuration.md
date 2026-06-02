@@ -61,7 +61,7 @@ The default fine-tuning setup is frozen for reproducible paper runs:
 - `bf16` and `tf32` stay enabled in config, but the runner only activates them when the CUDA device supports them.
 - Fine-tuned zero-shot and fine-tuned few-shot conditions share one adapter per model and seed.
 
-Frozen model-level profiles after the bounded smoke sweep:
+Frozen model-level profiles:
 
 | Model | Precision | LoRA rank | Dropout | Train batch | Grad accumulation |
 |---|---:|---:|---:|---:|---:|
@@ -69,8 +69,6 @@ Frozen model-level profiles after the bounded smoke sweep:
 | Phi-3.5 Mini | BF16 LoRA | 32 | 0.05 | 6 | 6 |
 | Qwen Coder 7B | 4-bit QLoRA | 64 | 0.05 | 4 | 8 |
 | Mistral 7B | 4-bit QLoRA | 32 | 0.05 | 2 | 16 |
-
-For parameter testing, use [../configs/models_finetune_sweep.yaml](../configs/models_finetune_sweep.yaml) with [../configs/experiments_finetune_sweep.yaml](../configs/experiments_finetune_sweep.yaml). Those files write under `outputs/tuning/` and `models/tuning/` so tuning adapters do not overwrite the frozen production adapters.
 
 ## Conditions
 
@@ -145,8 +143,6 @@ For OOM smoke tests, cap training steps without changing the YAML files:
 
 ```bash
 uv run nl2atl run --slurm \
-  --models_config configs/models_finetune_sweep.yaml \
-  --experiments_config configs/experiments_finetune_sweep.yaml \
   --models all --conditions all --model_provider hf \
   --train-max-steps 20
 ```

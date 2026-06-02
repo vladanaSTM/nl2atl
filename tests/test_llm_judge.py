@@ -10,7 +10,6 @@ from src.evaluation.llm_judge import (
 )
 from src.evaluation.llm_judge.parser import parse_judge_response
 from src.evaluation.llm_judge.prompts import PROMPT_VERSION, format_judge_prompt
-from src.evaluation.llm_judge.cache import JudgeCache
 from src.evaluation.llm_judge.pipeline import (
     LLMJudge,
     LLMJudgeEvaluator,
@@ -178,41 +177,29 @@ def test_resolve_judge_models_keeps_generation_baselines_out_of_defaults(tmp_pat
     assert [model.short_name for _, model in judges] == ["gpt-5.2", "ds-v3.2"]
 
 
-def test_judge_cache_roundtrip(tmp_path):
-    cache_path = tmp_path / "cache.json"
-    cache = JudgeCache(cache_path)
-    key = cache.get_cache_key("i", "g", "p", "m", "v1")
-    cache.set(key, {"correct": "yes"})
-    assert cache.get(key)["correct"] == "yes"
-
-
-def test_judge_cache_key_canonicalizes_gold_options(tmp_path):
-    cache = JudgeCache(tmp_path / "cache.json")
-
-    key1 = cache.get_cache_key(
-        " input text ",
-        ["gold two", "gold one"],
-        " prediction ",
-        "judge",
-        "v1",
-    )
-    key2 = cache.get_cache_key(
-        "input text",
-        ["gold one", "gold two", "gold one"],
-        "prediction",
-        "judge",
-        "v1",
-    )
-    key3 = cache.get_cache_key(
-        "input text",
-        ["gold one", "gold two"],
-        "different prediction",
-        "judge",
-        "v1",
+def test_resolve_judge_models_rejects_non_azure_models(tmp_path):
+    models_path = tmp_path / "models.yaml"
+    models_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "qwen-3b": {
+                        "name": "Qwen/Qwen2.5-3B-Instruct",
+                        "short_name": "qwen-3b",
+                        "provider": "huggingface",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
     )
 
-    assert key1 == key2
-    assert key1 != key3
+    try:
+        resolve_judge_models(models_path, judge_models=["qwen-3b"], judge_model=None)
+    except ValueError as exc:
+        assert "provider='azure'" in str(exc)
+    else:
+        raise AssertionError("Expected non-Azure judge model to be rejected")
 
 
 def test_evaluate_prediction_file_no_llm(tmp_path):
