@@ -93,6 +93,8 @@ class Config:
     # Model and experiment configs
     models: Dict[str, ModelConfig] = field(default_factory=dict)
     conditions: List[ExperimentCondition] = field(default_factory=list)
+    models_config_path: Optional[str] = None
+    experiments_config_path: Optional[str] = None
 
     @classmethod
     def from_yaml(cls, models_path: str, experiments_path: str) -> "Config":
@@ -116,6 +118,8 @@ class Config:
 
         # Build config
         config = cls(
+            models_config_path=models_path,
+            experiments_config_path=experiments_path,
             data_path=paths.get("data_path", data_settings["path"]),
             output_dir=paths.get("output_dir", DEFAULT_OUTPUT_DIR),
             models_dir=paths.get("models_dir", DEFAULT_MODELS_DIR),

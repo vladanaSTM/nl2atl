@@ -88,9 +88,12 @@ tests/            unit tests
 
 ```text
 outputs/model_predictions/      model predictions and run metadata
+outputs/split_manifests/        train/validation/test membership for each run
 outputs/LLM-evaluation/         judge outputs, agreement reports, aggregate metrics
 models/                         fine-tuned adapters
 ```
+
+Prediction artifacts keep the fields needed for post-hoc analysis without duplicating bulky prompts: cleaned and raw generations, prompt hash, deterministic decoding settings, few-shot example IDs when used, token usage when available, latency, dataset/config hashes, command arguments, and a split manifest path/hash. LLM-judge artifacts keep the judge model/provider, prompt version, source prediction hash, prompt hash, raw judge response, parse status, and judge latency.
 
 ## Fine-Tuning Defaults
 

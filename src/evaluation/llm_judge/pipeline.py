@@ -1,7 +1,9 @@
 """Main LLM judge evaluation pipeline."""
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base import BaseEvaluator
@@ -17,10 +19,14 @@ from .metrics import (
     _empty_metrics,
     build_summary,
 )
-from .parser import JudgeVerdict, parse_judge_response
+from .parser import parse_judge_response
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
 
 _EXACT_MATCH_EVALUATOR = ExactMatchEvaluator()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -30,6 +36,11 @@ class JudgeDecision:
     correct: str
     reasoning: str
     decision_method: str
+    prompt_version: Optional[str] = None
+    judge_prompt_sha256: Optional[str] = None
+    raw_judge_response: Optional[str] = None
+    judge_parse_status: Optional[str] = None
+    judge_latency_ms: Optional[float] = None
 
 
 class LLMJudge:
@@ -89,17 +100,31 @@ class LLMJudge:
                 correct="no",
                 reasoning="LLM disabled; non-exact match treated as incorrect.",
                 decision_method="no_llm",
+                prompt_version=self.prompt_version,
             )
 
         if not self.client:
             raise RuntimeError("LLM client is not configured.")
 
         prompt = self._build_prompt(input_text, gold, prediction)
+        start_time = time.perf_counter()
         raw = self.client.complete(prompt, max_new_tokens=256)
+        latency_ms = (time.perf_counter() - start_time) * 1000
         correct, reasoning = self._parse_response(raw)
 
         return JudgeDecision(
-            correct=correct, reasoning=reasoning, decision_method="llm"
+            correct=correct,
+            reasoning=reasoning,
+            decision_method="llm",
+            prompt_version=self.prompt_version,
+            judge_prompt_sha256=_sha256_text(prompt),
+            raw_judge_response=raw,
+            judge_parse_status=(
+                "invalid"
+                if reasoning == "Judge response was not valid JSON."
+                else "parsed"
+            ),
+            judge_latency_ms=round(latency_ms, 2),
         )
 
 
@@ -146,6 +171,11 @@ class LLMJudgeEvaluator(BaseEvaluator):
                 "correct": "yes",
                 "reasoning": "Exact match against an accepted gold formula.",
                 "decision_method": "exact",
+                "prompt_version": self.prompt_version,
+                "judge_prompt_sha256": None,
+                "raw_judge_response": None,
+                "judge_parse_status": "not_called_exact_match",
+                "judge_latency_ms": None,
             }
 
         if self.no_llm:
@@ -157,6 +187,11 @@ class LLMJudgeEvaluator(BaseEvaluator):
                 "correct": "no",
                 "reasoning": "LLM disabled; non-exact match treated as incorrect.",
                 "decision_method": "no_llm",
+                "prompt_version": self.prompt_version,
+                "judge_prompt_sha256": None,
+                "raw_judge_response": None,
+                "judge_parse_status": "not_called_no_llm",
+                "judge_latency_ms": None,
             }
 
         prompt = format_judge_prompt(
@@ -165,7 +200,9 @@ class LLMJudgeEvaluator(BaseEvaluator):
             prediction=pred_text,
             config=self.prompt_config,
         )
+        start_time = time.perf_counter()
         raw = self.client.complete(prompt, max_new_tokens=256)
+        latency_ms = (time.perf_counter() - start_time) * 1000
         verdict = parse_judge_response(raw)
 
         result = {
@@ -176,6 +213,15 @@ class LLMJudgeEvaluator(BaseEvaluator):
             "correct": verdict.decision,
             "reasoning": verdict.reasoning or "No reasoning provided.",
             "decision_method": "llm",
+            "prompt_version": self.prompt_version,
+            "judge_prompt_sha256": _sha256_text(prompt),
+            "raw_judge_response": raw,
+            "judge_parse_status": (
+                "invalid"
+                if verdict.reasoning == "Judge response was not valid JSON."
+                else "parsed"
+            ),
+            "judge_latency_ms": round(latency_ms, 2),
         }
 
         return result
@@ -316,6 +362,8 @@ def evaluate_prediction_file(
                 correct="no",
                 reasoning="Missing prediction or gold.",
                 decision_method="unmatched",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_missing_data",
             )
         elif is_exact_match(prediction, gold_options, exact_flag):
             stats["auto_exact"] += 1
@@ -323,6 +371,8 @@ def evaluate_prediction_file(
                 correct="yes",
                 reasoning="Exact match against an accepted gold formula.",
                 decision_method="exact",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_exact_match",
             )
         elif no_llm:
             stats["no_llm"] += 1
@@ -330,6 +380,8 @@ def evaluate_prediction_file(
                 correct="no",
                 reasoning="LLM disabled; non-exact match treated as incorrect.",
                 decision_method="no_llm",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_no_llm",
             )
         else:
             decision = judge.judge(input_text, gold_options, prediction)
@@ -345,6 +397,11 @@ def evaluate_prediction_file(
                 "correct": decision.correct,
                 "reasoning": decision.reasoning,
                 "decision_method": decision.decision_method,
+                "prompt_version": decision.prompt_version or judge.prompt_version,
+                "judge_prompt_sha256": decision.judge_prompt_sha256,
+                "raw_judge_response": decision.raw_judge_response,
+                "judge_parse_status": decision.judge_parse_status,
+                "judge_latency_ms": decision.judge_latency_ms,
                 "id": item.get("id"),
             }
         )

@@ -2,6 +2,7 @@
 Few-shot prompt management and formatting.
 """
 
+import hashlib
 import random
 from typing import Any, List, Dict, Optional
 
@@ -101,6 +102,15 @@ def get_few_shot_examples(
 
     rng = random.Random(seed)
     return rng.sample(examples, min(n, len(examples)))
+
+
+def get_few_shot_example_id(example: Dict[str, Any]) -> str:
+    """Return a stable identifier for a curated few-shot example."""
+    if example.get("id"):
+        return str(example["id"])
+
+    fingerprint = f"{example.get('input', '')}\n{get_preferred_output(example) or ''}"
+    return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
 
 
 def _format_few_shot_section(examples: List[Dict]) -> str:

@@ -215,6 +215,8 @@ def test_evaluate_prediction_file_no_llm(tmp_path):
     assert stats["auto_exact"] == 1
     assert stats["unmatched"] == 1
     assert any(r["decision_method"] == "exact" for r in rows)
+    assert rows[0]["judge_parse_status"] == "not_called_exact_match"
+    assert rows[1]["judge_parse_status"] == "not_called_missing_data"
 
 
 def test_evaluate_prediction_file_exact_matches_any_gold_option(tmp_path):
@@ -243,6 +245,34 @@ def test_evaluate_prediction_file_exact_matches_any_gold_option(tmp_path):
         "<<A>>X p_1 && <<B>>X p_2",
         "<<A,B>>X p",
     ]
+    assert rows[0]["prompt_version"] == PROMPT_VERSION
+
+
+def test_llm_judge_records_prompt_raw_response_and_latency():
+    class FakeClient:
+        def complete(self, prompt, max_new_tokens=256):
+            assert max_new_tokens == 256
+            assert "Natural-language input:" in prompt
+            return '{"correct": "yes", "reasoning": "Equivalent."}'
+
+        def complete_batch(self, prompts, max_new_tokens=256):
+            return [self.complete(prompt, max_new_tokens) for prompt in prompts]
+
+    judge = LLMJudge(judge_model="test", no_llm=True)
+    judge.no_llm = False
+    judge.client = FakeClient()
+
+    decision = judge.judge("input", ["gold"], "pred")
+
+    assert decision.correct == "yes"
+    assert decision.prompt_version == PROMPT_VERSION
+    assert decision.judge_prompt_sha256
+    assert (
+        decision.raw_judge_response == '{"correct": "yes", "reasoning": "Equivalent."}'
+    )
+    assert decision.judge_parse_status == "parsed"
+    assert decision.judge_latency_ms is not None
+    assert not hasattr(decision, "judge_prompt")
 
 
 def test_llm_judge_evaluator_exact_matches_before_calling_client():

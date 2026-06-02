@@ -19,7 +19,7 @@ from ..models.registry import load_model, get_model_type, clear_gpu_memory
 from ..models.utils import resolve_model_key
 
 from .data_manager import ExperimentDataManager
-from .reporter import ExperimentReporter
+from .reporter import ExperimentReporter, sha256_file
 
 
 class ExperimentRunner:
@@ -433,6 +433,16 @@ class ExperimentRunner:
             total_samples=len(self.test_data),
             results=detailed_results,
         )
+        split_manifest_path = self.reporter.save_split_manifest(
+            run_name=run_name,
+            config=self.config,
+            dataset_path=str(self.config.data_path),
+            train_data=self.data_manager.train_data or [],
+            val_data=self.val_data,
+            test_data=self.test_data,
+        )
+        metadata["split_manifest_path"] = str(split_manifest_path)
+        metadata["split_manifest_sha256"] = sha256_file(split_manifest_path)
         metadata["metrics"] = metrics
         if extra_metadata:
             metadata.update(extra_metadata)

@@ -1,6 +1,9 @@
 """Experiment reporting and logging."""
 
+import hashlib
+import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +32,51 @@ def get_git_commit() -> Optional[str]:
 def get_utc_timestamp() -> str:
     """Get current UTC timestamp in ISO 8601 format."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sha256_file(path: Path) -> Optional[str]:
+    """Return a SHA-256 digest for a file, or None when unavailable."""
+    try:
+        if not path.exists() or not path.is_file():
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _stable_item_id(item: Dict[str, Any], index: int) -> str:
+    if item.get("id") is not None:
+        return str(item["id"])
+    payload = {
+        "index": index,
+        "input": item.get("input"),
+        "outputs": item.get("outputs") or item.get("expected_options"),
+        "output": item.get("output") or item.get("expected"),
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def _split_entries(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    entries = []
+    for index, item in enumerate(items):
+        input_text = str(item.get("input", ""))
+        outputs = item.get("outputs") or item.get("expected_options") or []
+        encoded_outputs = json.dumps(outputs, sort_keys=True, ensure_ascii=False)
+        entries.append(
+            {
+                "id": _stable_item_id(item, index),
+                "input_sha256": hashlib.sha256(input_text.encode("utf-8")).hexdigest(),
+                "outputs_sha256": hashlib.sha256(
+                    encoded_outputs.encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+    return entries
 
 
 def _percentile(values: List[float], percentile: float) -> Optional[float]:
@@ -188,9 +236,25 @@ class ExperimentReporter:
             "run_id": run_name,
             "git_commit": self._git_commit,
             "dataset_path": dataset_path,
+            "dataset_sha256": sha256_file(Path(dataset_path)),
             "total_samples": total_samples,
             "successful_predictions": successful,
             "failed_predictions": failed,
+            "models_config_path": config.models_config_path,
+            "models_config_sha256": (
+                sha256_file(Path(config.models_config_path))
+                if config.models_config_path
+                else None
+            ),
+            "experiments_config_path": config.experiments_config_path,
+            "experiments_config_sha256": (
+                sha256_file(Path(config.experiments_config_path))
+                if config.experiments_config_path
+                else None
+            ),
+            "pyproject_sha256": sha256_file(Path("pyproject.toml")),
+            "uv_lock_sha256": sha256_file(Path("uv.lock")),
+            "command_argv": list(sys.argv),
             **self._build_run_config(
                 config, model_config, condition, effective_finetuned
             ),
@@ -202,6 +266,42 @@ class ExperimentReporter:
             metadata.update(self._timer.to_dict())
 
         return metadata
+
+    def save_split_manifest(
+        self,
+        run_name: str,
+        config: Config,
+        dataset_path: str,
+        train_data: List[Dict[str, Any]],
+        val_data: List[Dict[str, Any]],
+        test_data: List[Dict[str, Any]],
+    ) -> Path:
+        """Save the exact split membership used by a run."""
+        manifest_path = self.output_dir / "split_manifests" / f"{run_name}.json"
+        manifest = {
+            "created_at": get_utc_timestamp(),
+            "run_id": run_name,
+            "dataset_path": dataset_path,
+            "dataset_sha256": sha256_file(Path(dataset_path)),
+            "split_algorithm": "random.Random(seed).shuffle; round counts",
+            "split_sizes": {
+                "train_size": config.train_size,
+                "val_size": config.val_size,
+                "test_size": config.test_size,
+                "augment_factor": config.augment_factor,
+            },
+            "seed": config.seed,
+            "counts": {
+                "train": len(train_data),
+                "validation": len(val_data),
+                "test": len(test_data),
+            },
+            "train": _split_entries(train_data),
+            "validation": _split_entries(val_data),
+            "test": _split_entries(test_data),
+        }
+        save_json(manifest, manifest_path)
+        return manifest_path
 
     def get_result_path(self, run_name: str) -> Path:
         """Get path for saving results."""

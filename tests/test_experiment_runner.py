@@ -1,5 +1,8 @@
+import json
+
 from src.constants import ModelType
 from src.config import Config, ModelConfig
+from src.experiment.reporter import ExperimentReporter, sha256_file
 from src.experiment.runner import ExperimentRunner
 
 
@@ -71,3 +74,45 @@ def test_training_args_enable_completion_only_loss(tmp_path):
     )
 
     assert args.completion_only_loss is True
+
+
+def test_reporter_writes_reproducible_split_manifest(tmp_path):
+    dataset_path = tmp_path / "dataset.json"
+    dataset_path.write_text(
+        json.dumps(
+            [
+                {"id": "train-1", "input": "a", "output": "<<A>>F p"},
+                {"id": "test-1", "input": "b", "output": "<<B>>G q"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = Config(
+        seed=42,
+        train_size=0.7,
+        val_size=0.1,
+        test_size=0.2,
+        augment_factor=2,
+    )
+    reporter = ExperimentReporter(output_dir=tmp_path)
+
+    manifest_path = reporter.save_split_manifest(
+        run_name="run-1",
+        config=config,
+        dataset_path=str(dataset_path),
+        train_data=[{"id": "train-1", "input": "a", "outputs": ["<<A>>F p"]}],
+        val_data=[],
+        test_data=[{"id": "test-1", "input": "b", "outputs": ["<<B>>G q"]}],
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["dataset_sha256"] == sha256_file(dataset_path)
+    assert manifest["seed"] == 42
+    assert manifest["counts"] == {
+        "train": 1,
+        "validation": 0,
+        "test": 1,
+    }
+    assert manifest["train"][0]["id"] == "train-1"
+    assert manifest["test"][0]["id"] == "test-1"
+    assert "train_augmented" not in manifest

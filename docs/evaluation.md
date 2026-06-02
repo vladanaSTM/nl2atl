@@ -10,8 +10,15 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 - `expected`
 - `expected_options`
 - `generated`
+- `raw_generation`
+- `generation_prompt_sha256`
+- `generation_config`
+- `few_shot_example_ids` when few-shot prompting is enabled
+- `token_usage` and `usage_estimated` when usage data is available
 - `exact_match`
 - optional latency fields
+
+Top-level metadata records the dataset path/hash, model and experiment config paths/hashes, `pyproject.toml` and `uv.lock` hashes when present, command arguments, run timing, latency summaries, and a `split_manifest_path`/`split_manifest_sha256`. The split manifest under `outputs/split_manifests/` records ordered train, validation, and test membership by stable IDs and content hashes. Augmentation is deterministic from the training split, seed, and config, so augmented rows are not duplicated there.
 
 ## Step 1: Exact Match
 
@@ -37,7 +44,7 @@ The judge sees the natural-language input, the model prediction, and all accepte
 { "correct": "yes", "reasoning": "..." }
 ```
 
-Judged outputs are written to `outputs/LLM-evaluation/evaluated_datasets/<judge>/`.
+Judged outputs are written to `outputs/LLM-evaluation/evaluated_datasets/<judge>/`. Each judged row keeps the parsed decision plus the prompt version, prompt hash, raw judge response, parse status, judge latency, and a decision method such as `exact`, `llm`, `no_llm`, or `unmatched`.
 
 ## Agreement
 
@@ -59,7 +66,7 @@ This builds judge summaries, agreement reports, seed aggregates, an accuracy-lat
 
 Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
 
-The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, judged outputs, configs, lockfile, prompt version, judge agreement report, and any human-validation sample used to calibrate the judges.
+The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, split manifests, judged outputs, configs, lockfile, prompt versions, judge agreement report, generated notebooks, and any human-validation sample used to calibrate the judges.
 
 ## Accuracy-Latency Report
 

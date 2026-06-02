@@ -1,12 +1,21 @@
 """Exact-match evaluator for ATL formula generation."""
 
+import hashlib
 import re
 import time
 from typing import Any, Dict, List
 
 from .base import BaseEvaluator
 from ..data_utils import get_output_options, get_preferred_output
-from ..models.few_shot import format_prompt
+from ..models.few_shot import (
+    format_prompt,
+    get_few_shot_example_id,
+    get_few_shot_examples,
+)
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class ExactMatchEvaluator(BaseEvaluator):
@@ -198,6 +207,7 @@ class ExactMatchEvaluator(BaseEvaluator):
         for i, item in enumerate(test_data):
             # Start timing
             start_time = time.perf_counter()
+            few_shot_seed = 42
 
             prompt = format_prompt(
                 input_text=item["input"],
@@ -208,9 +218,30 @@ class ExactMatchEvaluator(BaseEvaluator):
                 tokenizer=tokenizer,
             )
 
-            response = generate(model, tokenizer, prompt)
+            few_shot_example_ids = (
+                [
+                    get_few_shot_example_id(example)
+                    for example in get_few_shot_examples(
+                        n=num_few_shot,
+                        seed=few_shot_seed,
+                        exclude_inputs=excluded_inputs,
+                    )
+                ]
+                if few_shot
+                else []
+            )
 
-            generated = self.clean_output(str(response), model_type)
+            prompt_sha256 = _sha256_text(prompt)
+
+            try:
+                response = generate(model, tokenizer, prompt, return_usage=True)
+            except TypeError:
+                response = generate(model, tokenizer, prompt)
+
+            raw_generation = getattr(response, "text", response)
+            usage = getattr(response, "usage", None)
+            usage_estimated = bool(getattr(response, "usage_estimated", False))
+            generated = self.clean_output(str(raw_generation), model_type)
 
             # Calculate latency
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -230,8 +261,22 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "expected": get_preferred_output(item),
                 "expected_options": expected_options,
                 "generated": generated,
+                "raw_generation": str(raw_generation),
                 "exact_match": exact_match,
                 "latency_ms": round(latency_ms, 2),
+                "generation_prompt_sha256": prompt_sha256,
+                "generation_config": {
+                    "max_new_tokens": 256,
+                    "do_sample": False,
+                    "temperature": 0,
+                    "model_type": model_type,
+                    "few_shot": few_shot,
+                    "num_few_shot": num_few_shot if few_shot else 0,
+                    "few_shot_seed": few_shot_seed if few_shot else None,
+                },
+                "few_shot_example_ids": few_shot_example_ids,
+                "token_usage": usage,
+                "usage_estimated": usage_estimated,
             }
 
             self.results.append(result_dict)
