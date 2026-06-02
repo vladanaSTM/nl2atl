@@ -21,7 +21,7 @@ experiment:
   num_seeds: 3
 
 data:
-  path: "./data/dataset_gold_no_difficulty.json"
+  path: "./data/dataset_gold.json"
   train_size: 0.70
   val_size: 0.10
   test_size: 0.20

@@ -52,7 +52,7 @@ uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 
 ## Dataset
 
-The default dataset is [data/dataset_gold_no_difficulty.json](data/dataset_gold_no_difficulty.json). Each row needs `input` and at least one gold formula field: `output`, `output_1`, or `output_2`.
+The default dataset is [data/dataset_gold.json](data/dataset_gold.json). Each row needs `input` and at least one gold formula field: `output`, `output_1`, or `output_2`.
 
 Rows can have more than one correct formula. `load_data` normalizes those formulas into `outputs` and keeps the preferred formula in `output` for compatibility. Training uses every formula in `outputs`; exact match accepts any of them; the LLM judge sees all of them when needed.
 
@@ -60,7 +60,7 @@ Splits are seeded shuffles, not stratified splits:
 
 ```yaml
 data:
-  path: "./data/dataset_gold_no_difficulty.json"
+  path: "./data/dataset_gold.json"
   train_size: 0.70
   val_size: 0.10
   test_size: 0.20

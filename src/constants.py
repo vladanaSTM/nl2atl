@@ -22,7 +22,7 @@ class ModelType(str, Enum):
 
 
 # Default paths
-DEFAULT_DATA_PATH = "./data/dataset_gold_no_difficulty.json"
+DEFAULT_DATA_PATH = "./data/dataset_gold.json"
 DEFAULT_OUTPUT_DIR = "./outputs"
 DEFAULT_MODELS_DIR = "./models"
 DEFAULT_LLM_EVAL_DIR = "outputs/LLM-evaluation"

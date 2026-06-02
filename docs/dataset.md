@@ -4,7 +4,7 @@ NL2ATL uses a JSON list of natural-language requirements and accepted ATL formul
 
 ## Default File
 
-[../data/dataset_gold_no_difficulty.json](../data/dataset_gold_no_difficulty.json)
+[../data/dataset_gold.json](../data/dataset_gold.json)
 
 ## Row Schema
 
@@ -44,7 +44,7 @@ Preferred order is `output`, then `output_2`, then `output_1`.
 ```python
 from src.data_utils import load_data
 
-data = load_data("data/dataset_gold_no_difficulty.json")
+data = load_data("data/dataset_gold.json")
 print(data[0]["input"])
 print(data[0]["outputs"])
 ```

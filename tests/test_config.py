@@ -14,7 +14,7 @@ def test_from_yaml_and_resolve_seeds(tmp_path):
     experiments = {
         "experiment": {"seed": 42, "seeds": [42], "num_seeds": 1},
         "data": {
-            "path": "data/dataset_gold_no_difficulty.json",
+            "path": "data/dataset_gold.json",
             "train_size": 0.8,
             "val_size": 0.1,
             "test_size": 0.1,
@@ -57,7 +57,7 @@ def test_from_yaml_loads_paths_and_training_strategy(tmp_path):
         "paths": {"output_dir": "outputs/tuning", "models_dir": "models/tuning"},
         "experiment": {"seed": 42, "seeds": [], "num_seeds": 1},
         "data": {
-            "path": "data/dataset_gold_no_difficulty.json",
+            "path": "data/dataset_gold.json",
             "train_size": 0.8,
             "val_size": 0.1,
             "test_size": 0.1,
@@ -105,7 +105,7 @@ def test_resolve_seeds_with_list(tmp_path):
     experiments = {
         "experiment": {"seed": 7, "seeds": [7, 11], "num_seeds": 1},
         "data": {
-            "path": "data/dataset_gold_no_difficulty.json",
+            "path": "data/dataset_gold.json",
             "train_size": 0.8,
             "val_size": 0.1,
             "test_size": 0.1,
@@ -141,7 +141,7 @@ def test_resolve_seeds_with_num_seeds(tmp_path):
     experiments = {
         "experiment": {"seed": 5, "seeds": [], "num_seeds": 3},
         "data": {
-            "path": "data/dataset_gold_no_difficulty.json",
+            "path": "data/dataset_gold.json",
             "train_size": 0.8,
             "val_size": 0.1,
             "test_size": 0.1,
@@ -177,7 +177,7 @@ def test_legacy_holdout_split_config_is_converted(tmp_path):
     experiments = {
         "experiment": {"seed": 5, "seeds": [], "num_seeds": 1},
         "data": {
-            "path": "data/dataset_gold_no_difficulty.json",
+            "path": "data/dataset_gold.json",
             "test_size": 0.3,
             "val_size": 2 / 3,
             "augment_factor": 2,
@@ -226,7 +226,7 @@ def test_config_validate_missing_values(tmp_path):
             {
                 "experiment": {"seed": None, "seeds": [], "num_seeds": 1},
                 "data": {
-                    "path": "data/dataset_gold_no_difficulty.json",
+                    "path": "data/dataset_gold.json",
                     "train_size": None,
                     "test_size": None,
                     "val_size": None,
@@ -280,7 +280,7 @@ def test_get_model_and_is_azure(tmp_path):
             {
                 "experiment": {"seed": 1, "seeds": [], "num_seeds": 1},
                 "data": {
-                    "path": "data/dataset_gold_no_difficulty.json",
+                    "path": "data/dataset_gold.json",
                     "train_size": 0.8,
                     "val_size": 0.1,
                     "test_size": 0.1,

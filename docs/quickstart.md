@@ -19,7 +19,7 @@ Create `.env` from `.env.example` when you need Azure-hosted models or gated Hug
 ## Inspect The Dataset
 
 ```bash
-uv run python -c "from src.data_utils import load_data; d=load_data('data/dataset_gold_no_difficulty.json'); print(len(d)); print(d[0]['input']); print(d[0]['outputs'])"
+uv run python -c "from src.data_utils import load_data; d=load_data('data/dataset_gold.json'); print(len(d)); print(d[0]['input']); print(d[0]['outputs'])"
 ```
 
 The loader validates rows and records every accepted gold formula in `outputs`.
