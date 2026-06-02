@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.evaluation.model_efficiency import (
     build_efficiency_report,
+    build_efficiency_report_from_aggregate,
     build_efficiency_notebook,
     resolve_prediction_files,
 )
@@ -94,6 +95,39 @@ def test_build_efficiency_report_with_summary(tmp_path):
     assert entry["efficiency_score"] is not None
     assert report["totals"]["with_latency"] == 1
     assert "pareto_frontier" in report
+
+
+def test_efficiency_report_from_aggregate_preserves_judge_identity(tmp_path):
+    aggregate_path = tmp_path / "aggregate.json"
+    aggregate_path.write_text(
+        json.dumps(
+            [
+                {
+                    "model_short": "qwen-3b",
+                    "condition": "baseline_zero_shot",
+                    "judge_model": "judge-a",
+                    "judge_models": ["judge-a"],
+                    "num_seeds": 3,
+                    "num_runs": 3,
+                    "metrics": {
+                        "accuracy": {"mean": 0.72, "std": 0.02},
+                        "latency_mean_ms": {"mean": 120.0},
+                        "n_examples": {"mean": 100},
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_efficiency_report_from_aggregate(aggregate_path)
+
+    entry = report["models"][0]
+    assert entry["judge_model"] == "judge-a"
+    assert entry["judge_models"] == ["judge-a"]
+    assert entry["num_runs"] == 3
+    assert report["pareto_frontier"][0]["judge_model"] == "judge-a"
+    assert report["rankings"]["most_accurate"][0]["judge_model"] == "judge-a"
 
 
 def test_efficiency_notebook_cells_have_language_metadata(tmp_path):

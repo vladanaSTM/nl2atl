@@ -101,3 +101,4 @@ curl http://localhost:8081/health
 | `outputs/LLM-evaluation/agreement_report.json` | Judge agreement report |
 | `outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json` | Metrics aggregated across seeds |
 | `outputs/LLM-evaluation/efficiency_report.json` | Accuracy, latency, rankings, and Pareto frontier |
+| `outputs/LLM-evaluation/publication_analysis.ipynb` | Single notebook for publication analysis |

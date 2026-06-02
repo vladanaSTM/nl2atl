@@ -62,11 +62,13 @@ The report includes pairwise Cohen's kappa, Fleiss' kappa, Krippendorff's alpha,
 uv run nl2atl generate-eval-reports
 ```
 
-This builds judge summaries, agreement reports, seed aggregates, an accuracy-latency report, generated notebooks, and a `reproducibility_manifest.json` under `outputs/LLM-evaluation/`.
+This builds judge summaries, agreement reports, seed aggregates, an accuracy-latency report, one publication-focused notebook at `outputs/LLM-evaluation/publication_analysis.ipynb`, and a `reproducibility_manifest.json`.
+
+The publication notebook is intentionally compact for paper writing: final judged accuracy, seed variability, exact-match versus LLM-judge contribution, judge reliability, accuracy-latency Pareto analysis, and a reproducibility snapshot. Use `--individual_notebooks` only when you explicitly need the older per-report notebooks for debugging.
 
 Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
 
-The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, split manifests, judged outputs, configs, lockfile, prompt versions, judge agreement report, generated notebooks, and any human-validation sample used to calibrate the judges.
+The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, split manifests, judged outputs, configs, lockfile, prompt versions, judge agreement report, publication notebook, and any human-validation sample used to calibrate the judges.
 
 ## Accuracy-Latency Report
 

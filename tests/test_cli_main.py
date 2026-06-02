@@ -1,5 +1,6 @@
 import json
 import sys
+from pathlib import Path
 
 from src.cli import main as cli_main
 from src.cli.generate_eval_reports import write_reproducibility_manifest
@@ -37,3 +38,25 @@ def test_write_reproducibility_manifest_hashes_inputs(tmp_path):
     assert manifest["inputs"]["prediction_files"][0]["sha256"]
     assert manifest["inputs"]["evaluated_files"][0]["sha256"]
     assert manifest["limitations"]
+
+
+def test_write_reproducibility_manifest_filters_stale_notebooks(tmp_path):
+    eval_dir = tmp_path / "eval"
+    predictions_dir = tmp_path / "predictions"
+    predictions_dir.mkdir(parents=True)
+    eval_dir.mkdir(parents=True)
+    selected_notebook = eval_dir / "publication_analysis.ipynb"
+    stale_notebook = eval_dir / "agreement_report.ipynb"
+    selected_notebook.write_text("{}", encoding="utf-8")
+    stale_notebook.write_text("{}", encoding="utf-8")
+
+    manifest_path = write_reproducibility_manifest(
+        eval_dir,
+        predictions_dir,
+        notebook_paths=[selected_notebook],
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    report_names = {Path(entry["path"]).name for entry in manifest["reports"]}
+
+    assert "publication_analysis.ipynb" in report_names
+    assert "agreement_report.ipynb" not in report_names

@@ -253,6 +253,11 @@ def main():
         action="store_true",
         help="Re-evaluate datasets even if evaluated outputs already exist.",
     )
+    parser.add_argument(
+        "--agreement_notebook",
+        action="store_true",
+        help="Also write the legacy agreement_report.ipynb notebook.",
+    )
     args = parser.parse_args()
 
     # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
@@ -356,7 +361,6 @@ def main():
         from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
-            build_agreement_notebook,
         )
 
         eval_datasets_dir = output_dir / "evaluated_datasets"
@@ -370,14 +374,17 @@ def main():
                 output_path=output_dir / "agreement_report.json",
             )
             print_agreement_summary(agreement_report)
-            try:
-                notebook_path = output_dir / "agreement_report.ipynb"
-                build_agreement_notebook(
-                    output_dir / "agreement_report.json", notebook_path
-                )
-                print(f"Agreement notebook: {notebook_path}")
-            except Exception as e:
-                print(f"Warning: could not build agreement notebook: {e}")
+            if args.agreement_notebook:
+                from ..evaluation.judge_agreement import build_agreement_notebook
+
+                try:
+                    notebook_path = output_dir / "agreement_report.ipynb"
+                    build_agreement_notebook(
+                        output_dir / "agreement_report.json", notebook_path
+                    )
+                    print(f"Agreement notebook: {notebook_path}")
+                except Exception as e:
+                    print(f"Warning: could not build agreement notebook: {e}")
         except ValueError as e:
             print(f"Skipping agreement analysis: {e}")
 

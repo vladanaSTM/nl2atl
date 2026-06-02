@@ -89,7 +89,7 @@ tests/            unit tests
 ```text
 outputs/model_predictions/      model predictions and run metadata
 outputs/split_manifests/        train/validation/test membership for each run
-outputs/LLM-evaluation/         judge outputs, agreement reports, aggregate metrics
+outputs/LLM-evaluation/         judge outputs, report JSON, publication notebook
 models/                         fine-tuned adapters
 ```
 

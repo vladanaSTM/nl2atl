@@ -104,6 +104,7 @@ def _rank_by(
                 "rank": index + 1,
                 "model": item.get("model_short"),
                 "condition": item.get("condition"),
+                "judge_model": item.get("judge_model"),
                 key: item.get(key),
                 "confidence_score": confidence_score,
             }
@@ -234,6 +235,7 @@ def _pareto_frontier(entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 {
                     "model": entry.get("model_short"),
                     "condition": entry.get("condition"),
+                    "judge_model": entry.get("judge_model"),
                     "accuracy": entry.get("accuracy"),
                     "latency_mean_ms": entry.get("latency_mean_ms"),
                     "confidence_score": entry.get("confidence_score"),
@@ -313,9 +315,12 @@ def build_efficiency_report_from_aggregate(
         entry = {
             "model_short": item.get("model_short"),
             "condition": item.get("condition"),
+            "judge_model": item.get("judge_model"),
+            "judge_models": item.get("judge_models", []),
             "finetuned": item.get("finetuned", False),
             "few_shot": item.get("few_shot", False),
             "num_seeds": item.get("num_seeds", 0),
+            "num_runs": item.get("num_runs", 0),
             **extracted,
             **derived,
             "confidence_score": _confidence_from_entry(item),
