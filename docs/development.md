@@ -30,6 +30,7 @@ Root pytest collects only `tests/`; the nested `genVITAMIN/` directory is a sepa
 uv run pytest tests/test_data_utils.py -q
 uv run pytest tests/test_exact_match.py tests/test_llm_judge.py -q
 uv run pytest tests/test_config.py tests/test_experiment_data_manager.py -q
+uv run pytest tests/test_run_experiments.py tests/test_model_efficiency.py -q
 ```
 
 On the Windows workstation used for this repo, this command is reliable:
@@ -67,8 +68,9 @@ cmd /c C:\Users\perlicv1\AppData\Local\Programs\Python\Python312\python.exe -m p
 ```bash
 uv run pytest -q
 uv run nl2atl --help
+uv run nl2atl run --list-tasks --models all --conditions all --model_provider hf
 ```
 
 For cluster-only validation, use `.venv/bin/python -m pytest -q` with the module and library path shown above.
 
-For doc-only changes, also search for old dependency commands, old dataset paths, and old split values.
+For doc-only changes, also search for old dependency commands, old dataset paths, old split values, stale output directories, and stale CLI flag spellings.

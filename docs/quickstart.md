@@ -32,6 +32,15 @@ uv run nl2atl run --models qwen-3b --conditions baseline_few_shot --seed 42
 
 This loads the dataset, creates a seeded split, loads the model, generates formulas for the test split, and writes a prediction file under `outputs/model_predictions/`.
 
+`nl2atl run` uses Hugging Face models by default. Use `--model_provider azure` for Azure generation baselines, or `--model_provider all` when you intentionally want both runnable providers. Existing prediction files are skipped unless you add `--overwrite`.
+
+Preview the task plan before running a sweep:
+
+```bash
+uv run nl2atl run --list-tasks --models all --conditions all --model_provider hf
+uv run nl2atl run --count --models all --conditions all --model_provider hf
+```
+
 To submit the selected sweep to SLURM without an array concurrency cap:
 
 ```bash
@@ -42,6 +51,8 @@ Add `--max-parallel-gpus N` only when you want to throttle the array to `N` conc
 
 The SLURM runner writes a frozen task manifest under `outputs/manifests/` so array tasks use the same model, condition, and seed plan that was submitted.
 
+Use `--dry-run` to print the generated batch script, or `--no-submit --script-path path/to/job.sbatch` to write the script and manifest without calling `sbatch`.
+
 For fine-tuning smoke tests, use a short step cap:
 
 ```bash
@@ -49,6 +60,8 @@ uv run nl2atl run --slurm \
 	--models all --conditions all --model_provider hf \
 	--train-max-steps 20
 ```
+
+Fine-tuned zero-shot and fine-tuned few-shot runs share one adapter per model and seed. Multi-seed runs write adapters under `models/<model>_finetuned_seed<seed>/final`; single-seed runs omit the seed suffix. Existing adapters are reused unless `--overwrite` is set.
 
 ## Inspect Predictions
 
@@ -68,6 +81,8 @@ uv run nl2atl generate-eval-reports
 
 Exact matches are accepted automatically. The LLM judge is called only for non-exact predictions and receives all accepted gold formulas. Judged rows preserve the prompt hash, raw response, parse status, prompt version, and judge latency. Reports are written under `outputs/LLM-evaluation/`.
 
+By default, `llm-judge` evaluates with GPT-5.2 and DeepSeek V3.2. Override that with `--models gpt-5.2` or another Azure judge model from [../configs/models.yaml](../configs/models.yaml). Add `--no_llm` for an offline exact-match-only pass.
+
 ## Common Commands
 
 | Command | Purpose |
@@ -75,8 +90,10 @@ Exact matches are accepted automatically. The LLM judge is called only for non-e
 | `uv run nl2atl run --models qwen-3b --conditions baseline_few_shot --seed 42` | Run one model, condition, and seed |
 | `uv run nl2atl run --models all --conditions all --model_provider hf` | Run selected local models, conditions, and seeds |
 | `uv run nl2atl run --slurm --models all --conditions all` | Submit an uncapped SLURM array |
+| `uv run nl2atl run --slurm --no-submit --script-path outputs/manifests/job.sbatch` | Write the SLURM script and task manifest without submitting |
 | `uv run nl2atl run --list-tasks --models all --conditions all` | Inspect the planned model/seed tasks |
 | `uv run nl2atl llm-judge --datasets all` | Judge non-exact predictions semantically |
+| `uv run nl2atl llm-judge --datasets all --no_llm` | Recompute exact-match-only judged artifacts without API calls |
 | `uv run nl2atl generate-eval-reports` | Build summaries, agreement, aggregates, and accuracy-latency reports |
 | `uv run nl2atl model-efficiency` | Rebuild only the accuracy-latency report |
 
@@ -91,14 +108,18 @@ curl http://localhost:8081/health
 
 `POST /generate` accepts `description`, optional `model`, `few_shot`, `num_few_shot`, `max_new_tokens`, `adapter`, and `return_raw`.
 
+Set `NL2ATL_DEFAULT_MODEL`, `NL2ATL_MODELS_CONFIG`, or `NL2ATL_EXPERIMENTS_CONFIG` to change API defaults without editing YAML. Adapters are supported only for Hugging Face models.
+
 ## Outputs
 
 | Path | Contents |
 |---|---|
 | `outputs/model_predictions/` | Prediction rows and run metadata |
 | `outputs/split_manifests/` | Train/validation/test membership and dataset hash per run |
+| `outputs/manifests/` | Frozen SLURM task manifests and optional generated scripts |
 | `outputs/LLM-evaluation/evaluated_datasets/` | LLM judge decisions |
 | `outputs/LLM-evaluation/agreement_report.json` | Judge agreement report |
 | `outputs/LLM-evaluation/seed_aggregate_metrics_from_judged.json` | Metrics aggregated across seeds |
 | `outputs/LLM-evaluation/efficiency_report.json` | Accuracy, latency, rankings, and Pareto frontier |
 | `outputs/LLM-evaluation/publication_analysis.ipynb` | Single notebook for publication analysis |
+| `models/` | Fine-tuned LoRA/QLoRA adapters |

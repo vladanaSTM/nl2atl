@@ -13,7 +13,7 @@ Required:
 | Field | Meaning |
 |---|---|
 | `input` | Natural-language requirement |
-| `output`, `output_1`, or `output_2` | Accepted ATL formula |
+| `outputs`, `output`, `output_1`, or `output_2` | At least one accepted ATL formula |
 
 Optional:
 
@@ -26,7 +26,7 @@ Rows may have multiple correct formulas. `load_data` creates:
 - `outputs`: all accepted formulas, deduplicated in preferred order
 - `output`: the first preferred formula, kept for compatibility
 
-Preferred order is `output`, then `output_2`, then `output_1`.
+Preferred order is an existing `outputs` list when present, then `output`, then `output_2`, then `output_1`. Evaluation helpers also understand result-style fields such as `expected_options`, `gold_options`, and `reference_options`.
 
 ## Example
 
@@ -51,7 +51,7 @@ print(data[0]["outputs"])
 
 ## Splits And Augmentation
 
-Splits are seeded shuffles.
+Splits are seeded shuffles, not stratified splits. The splitter uses `random.Random(seed).shuffle`, rounds the train and validation counts, and leaves the remainder for test.
 
 ```python
 from src.data_utils import split_data, augment_data
@@ -62,8 +62,11 @@ train_aug = augment_data(train, augment_factor=2)
 
 Augmentation happens after splitting and only on the training split. Augmented rows keep the same `outputs` list.
 
+`augment_factor` is the total number of copies per original training row, including the original row. With the default factor of `2`, each training item contributes one original and one paraphrased training item. Split manifests record only original train/validation/test membership; augmented rows are deterministic from the training split, seed, and config.
+
 ## How Multiple Gold Answers Are Used
 
 - Training creates one supervised target per accepted formula.
 - Exact match is correct if the prediction matches any accepted formula after normalization.
 - LLM judging sees all accepted formulas and can approve semantic equivalence to any one of them.
+- Few-shot examples use their preferred formula, so curated examples with alternatives should put the desired displayed target first by using `outputs` or `output`.

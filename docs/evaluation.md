@@ -16,7 +16,7 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 - `few_shot_example_ids` when few-shot prompting is enabled
 - `token_usage` and `usage_estimated` when usage data is available
 - `exact_match`
-- optional latency fields
+- `latency_ms`
 
 Top-level metadata records the dataset path/hash, model and experiment config paths/hashes, `pyproject.toml` and `uv.lock` hashes when present, command arguments, run timing, latency summaries, and a `split_manifest_path`/`split_manifest_sha256`. The split manifest under `outputs/split_manifests/` records ordered train, validation, and test membership by stable IDs and content hashes. Augmentation is deterministic from the training split, seed, and config, so augmented rows are not duplicated there.
 
@@ -38,6 +38,17 @@ uv run nl2atl llm-judge --datasets all
 
 By default, judge runs use GPT-5.2 and DeepSeek V3.2. GPT-4.1 and GPT-5.4 are reserved for generation baselines, so the strongest generator is not also the only evaluator in the main comparison.
 
+Useful options:
+
+| Option | Purpose |
+|---|---|
+| `--datasets all` | Evaluate all prediction JSON files under `outputs/model_predictions/` |
+| `--datasets file.json` | Evaluate one prediction file by path, name, or name without `.json` |
+| `--models gpt-5.2` | Select one or more Azure judge models; aliases include `--model`, `--judge_model`, and `--judge_models` |
+| `--no_llm` | Write judged artifacts using exact-match decisions only, without API calls |
+| `--overwrite` | Re-evaluate existing judged files |
+| `--predictions_dir` / `--output_dir` | Override input and output directories |
+
 The judge sees the natural-language input, the model prediction, and all accepted gold formulas. It returns:
 
 ```json
@@ -45,6 +56,8 @@ The judge sees the natural-language input, the model prediction, and all accepte
 ```
 
 Judged outputs are written to `outputs/LLM-evaluation/evaluated_datasets/<judge>/`. Each judged row keeps the parsed decision plus the prompt version, prompt hash, raw judge response, parse status, judge latency, and a decision method such as `exact`, `llm`, `no_llm`, or `unmatched`.
+
+Existing judged files are reused when their prompt version matches the current judge prompt. If the prompt version changes, they are regenerated.
 
 ## Agreement
 
@@ -64,6 +77,8 @@ uv run nl2atl generate-eval-reports
 
 This builds judge summaries, agreement reports, seed aggregates, an accuracy-latency report, one publication-focused notebook at `outputs/LLM-evaluation/publication_analysis.ipynb`, and a `reproducibility_manifest.json`.
 
+The pipeline has skip flags for each stage: `--skip_judge_summaries`, `--skip_agreement`, `--skip_seed_aggregation`, and `--skip_efficiency`. Use `--no_notebook` to skip the unified notebook, `--notebook_output` to change its path, or `--individual_notebooks` when you also need the older per-report notebooks.
+
 The publication notebook is intentionally compact for paper writing: final judged accuracy, seed variability, exact-match versus LLM-judge contribution, judge reliability, accuracy-latency Pareto analysis, and a reproducibility snapshot. Use `--individual_notebooks` only when you explicitly need the older per-report notebooks for debugging.
 
 Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
@@ -79,3 +94,5 @@ uv run nl2atl model-efficiency
 ```
 
 The report keeps accuracy and latency separate, then adds deterministic helper rankings such as fastest model, most accurate model, best accuracy per second, highest throughput, and a Pareto frontier.
+
+Options include `--top_k`, `--include_per_seed`, `--weight_accuracy`, `--weight_latency`, and `--no_notebook`. The report intentionally avoids monetary pricing, GPU-hour estimates, and token-derived statistics; use it for accuracy and latency comparisons only.
