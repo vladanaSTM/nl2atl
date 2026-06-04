@@ -273,6 +273,315 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
     disagreement_df = pd.DataFrame(disagreement_rows)
     """
 
+    combined_judge_cell = """
+    import random
+
+    BOOTSTRAP_ITERATIONS = 5000
+    RANDOMIZATION_ITERATIONS = 5000
+    RANDOM_SEED = 20260603
+    TOP_COMPARISONS = 5
+
+
+    def is_yes(value):
+        return str(value).strip().lower() in {"yes", "true", "1", "y"}
+
+
+    def item_identifier(item):
+        if item.get("id") is not None:
+            return str(item.get("id"))
+        return json.dumps(
+            {
+                "input": item.get("input"),
+                "gold": item.get("gold"),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+
+
+    def load_combined_judge_items(eval_dir):
+        evaluated_root = eval_dir / "evaluated_datasets"
+        if not evaluated_root.exists():
+            return pd.DataFrame()
+
+        records = {}
+        for path in sorted(evaluated_root.glob("*/*.json")):
+            if path.name.startswith("summary"):
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                continue
+
+            judge_model = payload.get("judge_model") or path.parent.name
+            source_file = payload.get("source_file") or f"{path.stem.split('__judge-')[0]}.json"
+            run_name = Path(source_file).stem
+            model_short = payload.get("model_short")
+            condition = payload.get("condition")
+            seed = payload.get("seed")
+
+            for item in payload.get("detailed_results", []):
+                item_id = item_identifier(item)
+                key = (run_name, seed, item_id)
+                record = records.setdefault(
+                    key,
+                    {
+                        "run_name": run_name,
+                        "model_short": model_short,
+                        "condition": condition,
+                        "finetuned": payload.get("finetuned"),
+                        "few_shot": payload.get("few_shot"),
+                        "seed": seed,
+                        "item_id": item_id,
+                        "judge_votes": {},
+                        "decision_methods": set(),
+                    },
+                )
+                record["judge_votes"][judge_model] = is_yes(item.get("correct"))
+                if item.get("decision_method"):
+                    record["decision_methods"].add(item.get("decision_method"))
+
+        rows = []
+        for record in records.values():
+            votes = list(record["judge_votes"].values())
+            if not votes:
+                continue
+            num_judges = len(votes)
+            yes_count = sum(1 for vote in votes if vote)
+            rows.append(
+                {
+                    "run_name": record["run_name"],
+                    "model_short": record["model_short"],
+                    "condition": record["condition"],
+                    "finetuned": record["finetuned"],
+                    "few_shot": record["few_shot"],
+                    "seed": record["seed"],
+                    "item_id": record["item_id"],
+                    "num_judges": num_judges,
+                    "combined_score": yes_count / num_judges,
+                    "consensus_score": float(yes_count == num_judges),
+                    "any_judge_score": float(yes_count > 0),
+                    "judge_disagreement": float(0 < yes_count < num_judges),
+                    "exact_match_lower_bound": float("exact" in record["decision_methods"]),
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+
+    def build_combined_ranking(item_df, fallback_df):
+        if not item_df.empty:
+            group_cols = ["model_short", "condition", "finetuned", "few_shot"]
+            ranking = (
+                item_df.groupby(group_cols, dropna=False)
+                .agg(
+                    n_items=("item_id", "count"),
+                    num_seeds=("seed", "nunique"),
+                    num_runs=("run_name", "nunique"),
+                    mean_num_judges=("num_judges", "mean"),
+                    combined_accuracy=("combined_score", "mean"),
+                    consensus_accuracy=("consensus_score", "mean"),
+                    any_judge_accuracy=("any_judge_score", "mean"),
+                    exact_match_lower_bound=("exact_match_lower_bound", "mean"),
+                    judge_disagreement_rate=("judge_disagreement", "mean"),
+                )
+                .reset_index()
+            )
+            return ranking.sort_values(
+                ["combined_accuracy", "consensus_accuracy"],
+                ascending=[False, False],
+                na_position="last",
+            ).reset_index(drop=True)
+
+        if fallback_df.empty:
+            return pd.DataFrame()
+
+        fallback = (
+            fallback_df.groupby(["model_short", "condition", "finetuned", "few_shot"], dropna=False)
+            .agg(
+                num_judges=("judge_model", "nunique"),
+                num_seeds=("num_seeds", "max"),
+                num_runs=("num_runs", "sum"),
+                combined_accuracy=("accuracy", "mean"),
+                exact_match_lower_bound=("exact_match_rate", "mean"),
+                judge_accuracy_min=("accuracy", "min"),
+                judge_accuracy_max=("accuracy", "max"),
+                latency_mean_ms=("latency_mean_ms", "mean"),
+            )
+            .reset_index()
+        )
+        fallback["judge_accuracy_range"] = fallback["judge_accuracy_max"] - fallback["judge_accuracy_min"]
+        return fallback.sort_values(
+            ["combined_accuracy", "latency_mean_ms"],
+            ascending=[False, True],
+            na_position="last",
+        ).reset_index(drop=True)
+
+
+    def bootstrap_ci95(values, iterations=BOOTSTRAP_ITERATIONS, seed=RANDOM_SEED):
+        clean_values = [float(value) for value in values if pd.notna(value)]
+        if not clean_values:
+            return None, None
+        rng = random.Random(seed)
+        sample_size = len(clean_values)
+        means = []
+        for _ in range(iterations):
+            means.append(sum(rng.choice(clean_values) for _ in range(sample_size)) / sample_size)
+        means.sort()
+        low_idx = int(0.025 * (iterations - 1))
+        high_idx = int(0.975 * (iterations - 1))
+        return means[low_idx], means[high_idx]
+
+
+    def paired_randomization_p_value(values, iterations=RANDOMIZATION_ITERATIONS, seed=RANDOM_SEED):
+        clean_values = [float(value) for value in values if pd.notna(value)]
+        if not clean_values:
+            return None
+        observed = abs(sum(clean_values) / len(clean_values))
+        rng = random.Random(seed)
+        extreme_count = 0
+        for _ in range(iterations):
+            randomized_mean = sum(
+                value if rng.random() < 0.5 else -value for value in clean_values
+            ) / len(clean_values)
+            if abs(randomized_mean) >= observed - 1e-12:
+                extreme_count += 1
+        return (extreme_count + 1) / (iterations + 1)
+
+
+    def build_paired_tests(item_df, ranking_df, top_k=TOP_COMPARISONS):
+        if item_df.empty or ranking_df.empty:
+            return pd.DataFrame()
+
+        top_rows = ranking_df.head(top_k).to_dict("records")
+        if len(top_rows) < 2:
+            return pd.DataFrame()
+
+        reference = top_rows[0]
+        reference_scores = item_df[
+            (item_df["model_short"] == reference["model_short"])
+            & (item_df["condition"] == reference["condition"])
+        ][["seed", "item_id", "combined_score"]].rename(
+            columns={"combined_score": "reference_score"}
+        )
+
+        rows = []
+        for candidate in top_rows[1:]:
+            candidate_scores = item_df[
+                (item_df["model_short"] == candidate["model_short"])
+                & (item_df["condition"] == candidate["condition"])
+            ][["seed", "item_id", "combined_score"]].rename(
+                columns={"combined_score": "candidate_score"}
+            )
+            paired = reference_scores.merge(candidate_scores, on=["seed", "item_id"], how="inner")
+            if paired.empty:
+                continue
+
+            differences = paired["reference_score"] - paired["candidate_score"]
+            ci_low, ci_high = bootstrap_ci95(
+                differences,
+                seed=RANDOM_SEED + len(rows) + 1,
+            )
+            p_value = paired_randomization_p_value(
+                differences,
+                seed=RANDOM_SEED + 100 + len(rows),
+            )
+            rows.append(
+                {
+                    "comparison": (
+                        f"{reference['model_short']} | {reference['condition']} vs "
+                        f"{candidate['model_short']} | {candidate['condition']}"
+                    ),
+                    "n_pairs": len(paired),
+                    "reference_accuracy": reference.get("combined_accuracy"),
+                    "candidate_accuracy": candidate.get("combined_accuracy"),
+                    "mean_difference": differences.mean(),
+                    "bootstrap_ci95_low": ci_low,
+                    "bootstrap_ci95_high": ci_high,
+                    "paired_randomization_p": p_value,
+                }
+            )
+
+        return pd.DataFrame(rows)
+
+
+    combined_item_df = load_combined_judge_items(EVAL_DIR)
+    combined_ranking_df = build_combined_ranking(combined_item_df, aggregate_df)
+    if not combined_ranking_df.empty and "rank" not in combined_ranking_df.columns:
+        combined_ranking_df.insert(0, "rank", range(1, len(combined_ranking_df) + 1))
+
+    if combined_ranking_df.empty:
+        print("No combined judge ranking data available.")
+    else:
+        combined_cols = [
+            "rank",
+            "model_short",
+            "condition",
+            "num_seeds",
+            "num_runs",
+            "n_items",
+            "mean_num_judges",
+            "combined_accuracy",
+            "exact_match_lower_bound",
+            "consensus_accuracy",
+            "any_judge_accuracy",
+            "judge_disagreement_rate",
+            "judge_accuracy_range",
+            "latency_mean_ms",
+        ]
+        print("Combined ranking: exact-match is a deterministic lower bound; non-exact correctness is averaged across judges.")
+        display(combined_ranking_df[[c for c in combined_cols if c in combined_ranking_df.columns]].head(20).round(4))
+
+    if aggregate_df.empty:
+        print("No per-judge aggregate rows available for sensitivity analysis.")
+    else:
+        sensitivity_cols = [
+            "model_short",
+            "condition",
+            "judge_model",
+            "num_seeds",
+            "num_runs",
+            "accuracy",
+            "accuracy_ci95",
+            "exact_match_rate",
+            "llm_approval_rate",
+            "judge_agreement_kappa",
+        ]
+        per_judge_sensitivity_df = aggregate_df[[c for c in sensitivity_cols if c in aggregate_df.columns]].sort_values(
+            ["judge_model", "accuracy"],
+            ascending=[True, False],
+            na_position="last",
+        )
+        print("Per-judge ranking sensitivity")
+        display(per_judge_sensitivity_df.round(4))
+
+        if "judge_model" in aggregate_df.columns and aggregate_df["judge_model"].nunique(dropna=True) > 1:
+            judge_pivot_df = aggregate_df.pivot_table(
+                index=["model_short", "condition"],
+                columns="judge_model",
+                values="accuracy",
+                aggfunc="mean",
+            )
+            judge_pivot_df["judge_accuracy_range"] = judge_pivot_df.max(axis=1) - judge_pivot_df.min(axis=1)
+            print("Largest per-judge accuracy gaps")
+            display(
+                judge_pivot_df.reset_index()
+                .sort_values("judge_accuracy_range", ascending=False)
+                .head(15)
+                .round(4)
+            )
+
+    paired_tests_df = build_paired_tests(combined_item_df, combined_ranking_df)
+    if paired_tests_df.empty:
+        print("Paired bootstrap/randomization tests require item-level evaluated outputs for at least two model-condition groups.")
+    else:
+        print(
+            "Paired top-model tests use shared seed/example pairs; "
+            f"bootstrap={BOOTSTRAP_ITERATIONS}, randomization={RANDOMIZATION_ITERATIONS}."
+        )
+        display(paired_tests_df.round(4))
+    """
+
     notebook = {
         "cells": [
             _markdown_cell(f"""
@@ -316,6 +625,8 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
                     )
                     display(best_by_condition.round(4))
                 """),
+            _markdown_cell("## Combined Judge Ranking And Sensitivity"),
+            _code_cell(combined_judge_cell),
             _markdown_cell("## Seed Stability And Correctness Sources"),
             _code_cell("""
                 if aggregate_df.empty:
