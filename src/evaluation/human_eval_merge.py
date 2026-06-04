@@ -13,15 +13,15 @@ from xml.etree import ElementTree as ET
 
 from ..infra.io import load_json, save_json
 
-KNOWN_ANNOTATORS = ("Francesco", "Marco")
+KNOWN_ANNOTATORS = ("annotator_1", "annotator_2")
 
 MERGED_CSV_COLUMNS = [
     "audit_id",
     "human_status",
     "needs_adjudication",
     "n_human_labels",
-    "francesco_correct",
-    "marco_correct",
+    "annotator_1_correct",
+    "annotator_2_correct",
     "human_consensus_correct",
     "human_final_correct",
     "human_labels",
@@ -37,10 +37,10 @@ MERGED_CSV_COLUMNS = [
     "n_human_matches_gpt_5_2",
     "human_match_rate_ds_v3_2",
     "human_match_rate_gpt_5_2",
-    "francesco_matches_ds_v3_2",
-    "francesco_matches_gpt_5_2",
-    "marco_matches_ds_v3_2",
-    "marco_matches_gpt_5_2",
+    "annotator_1_matches_ds_v3_2",
+    "annotator_1_matches_gpt_5_2",
+    "annotator_2_matches_ds_v3_2",
+    "annotator_2_matches_gpt_5_2",
     "model_short",
     "condition",
     "seed",
@@ -266,8 +266,8 @@ def _analysis_item(
     human_labels = human_summary.get("human_labels", [])
     label_counts = human_summary.get("human_label_counts") or {}
     labels_by_annotator = human_summary.get("labels_by_annotator") or {}
-    francesco_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[0]) or "")
-    marco_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[1]) or "")
+    annotator_1_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[0]) or "")
+    annotator_2_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[1]) or "")
     n_human_labels = int(human_summary.get("n_human_labels", 0))
     n_human_matches_ds = _match_count(human_labels, ds_correct)
     n_human_matches_gpt = _match_count(human_labels, gpt_correct)
@@ -279,8 +279,8 @@ def _analysis_item(
             "yes" if human_summary.get("needs_adjudication") else "no"
         ),
         "n_human_labels": n_human_labels,
-        "francesco_correct": francesco_correct,
-        "marco_correct": marco_correct,
+        "annotator_1_correct": annotator_1_correct,
+        "annotator_2_correct": annotator_2_correct,
         "human_consensus_correct": human_summary.get("human_consensus_correct"),
         "human_final_correct": human_final,
         "human_labels": human_labels,
@@ -300,10 +300,10 @@ def _analysis_item(
         "human_match_rate_gpt_5_2": (
             n_human_matches_gpt / n_human_labels if n_human_labels else ""
         ),
-        "francesco_matches_ds_v3_2": _label_match(francesco_correct, ds_correct),
-        "francesco_matches_gpt_5_2": _label_match(francesco_correct, gpt_correct),
-        "marco_matches_ds_v3_2": _label_match(marco_correct, ds_correct),
-        "marco_matches_gpt_5_2": _label_match(marco_correct, gpt_correct),
+        "annotator_1_matches_ds_v3_2": _label_match(annotator_1_correct, ds_correct),
+        "annotator_1_matches_gpt_5_2": _label_match(annotator_1_correct, gpt_correct),
+        "annotator_2_matches_ds_v3_2": _label_match(annotator_2_correct, ds_correct),
+        "annotator_2_matches_gpt_5_2": _label_match(annotator_2_correct, gpt_correct),
         "model_short": item.get("model_short"),
         "condition": item.get("condition"),
         "seed": item.get("seed"),
@@ -436,8 +436,8 @@ def merge_human_annotations(
                     "human_status": item.get("human_status"),
                     "needs_adjudication": item.get("needs_adjudication"),
                     "n_human_labels": item.get("n_human_labels"),
-                    "francesco_correct": item.get("francesco_correct"),
-                    "marco_correct": item.get("marco_correct"),
+                    "annotator_1_correct": item.get("annotator_1_correct"),
+                    "annotator_2_correct": item.get("annotator_2_correct"),
                     "human_consensus_correct": item.get("human_consensus_correct"),
                     "human_final_correct": item.get("human_final_correct"),
                     "human_labels": json.dumps(item.get("human_labels", [])),
@@ -453,10 +453,18 @@ def merge_human_annotations(
                     "n_human_matches_gpt_5_2": item.get("n_human_matches_gpt_5_2"),
                     "human_match_rate_ds_v3_2": item.get("human_match_rate_ds_v3_2"),
                     "human_match_rate_gpt_5_2": item.get("human_match_rate_gpt_5_2"),
-                    "francesco_matches_ds_v3_2": item.get("francesco_matches_ds_v3_2"),
-                    "francesco_matches_gpt_5_2": item.get("francesco_matches_gpt_5_2"),
-                    "marco_matches_ds_v3_2": item.get("marco_matches_ds_v3_2"),
-                    "marco_matches_gpt_5_2": item.get("marco_matches_gpt_5_2"),
+                    "annotator_1_matches_ds_v3_2": item.get(
+                        "annotator_1_matches_ds_v3_2"
+                    ),
+                    "annotator_1_matches_gpt_5_2": item.get(
+                        "annotator_1_matches_gpt_5_2"
+                    ),
+                    "annotator_2_matches_ds_v3_2": item.get(
+                        "annotator_2_matches_ds_v3_2"
+                    ),
+                    "annotator_2_matches_gpt_5_2": item.get(
+                        "annotator_2_matches_gpt_5_2"
+                    ),
                     "model_short": item.get("model_short"),
                     "condition": item.get("condition"),
                     "seed": item.get("seed"),

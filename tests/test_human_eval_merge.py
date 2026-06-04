@@ -31,7 +31,7 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
         encoding="utf-8",
     )
 
-    annotation_a_path = tmp_path / "Francesco.csv"
+    annotation_a_path = tmp_path / "annotator_1.csv"
     with open(annotation_a_path, "w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -42,11 +42,11 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
             {
                 "audit_id": "HEVAL-0001",
                 "correct": "yes",
-                "annotator_id": "Francesco",
+                "annotator_id": "annotator_1",
             }
         )
 
-    annotation_b_path = tmp_path / "Marco.csv"
+    annotation_b_path = tmp_path / "annotator_2.csv"
     with open(annotation_b_path, "w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -57,7 +57,7 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
             {
                 "audit_id": "HEVAL-0001",
                 "correct": "yes",
-                "annotator_id": "Marco",
+                "annotator_id": "annotator_2",
             }
         )
 
@@ -128,7 +128,7 @@ def test_merge_ignores_blank_template_rows(tmp_path):
         encoding="utf-8",
     )
 
-    annotation_path = tmp_path / "Francesco.csv"
+    annotation_path = tmp_path / "annotator_1.csv"
     with open(annotation_path, "w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -139,7 +139,7 @@ def test_merge_ignores_blank_template_rows(tmp_path):
             {
                 "audit_id": "HEVAL-0001",
                 "correct": "",
-                "annotator_id": "Francesco",
+                "annotator_id": "annotator_1",
             }
         )
 
@@ -190,7 +190,7 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
         encoding="utf-8",
     )
 
-    annotation_a_path = tmp_path / "Francesco.csv"
+    annotation_a_path = tmp_path / "annotator_1.csv"
     with open(annotation_a_path, "w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -201,11 +201,11 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
             {
                 "audit_id": "HEVAL-0002",
                 "correct": "yes",
-                "annotator_id": "Francesco",
+                "annotator_id": "annotator_1",
             }
         )
 
-    annotation_b_path = tmp_path / "Marco.csv"
+    annotation_b_path = tmp_path / "annotator_2.csv"
     with open(annotation_b_path, "w", encoding="utf-8", newline="") as csv_file:
         writer = csv.DictWriter(
             csv_file,
@@ -216,7 +216,7 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
             {
                 "audit_id": "HEVAL-0002",
                 "correct": "no",
-                "annotator_id": "Marco",
+                "annotator_id": "annotator_2",
             }
         )
 
@@ -245,12 +245,12 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
     assert item["human_final_correct"] == "pending_adjudication"
     assert item["human_matches_ds_v3_2"] == "pending_adjudication"
     assert item["human_matches_gpt_5_2"] == "pending_adjudication"
-    assert item["francesco_correct"] == "yes"
-    assert item["marco_correct"] == "no"
-    assert item["francesco_matches_ds_v3_2"] == "yes"
-    assert item["francesco_matches_gpt_5_2"] == "no"
-    assert item["marco_matches_ds_v3_2"] == "no"
-    assert item["marco_matches_gpt_5_2"] == "yes"
+    assert item["annotator_1_correct"] == "yes"
+    assert item["annotator_2_correct"] == "no"
+    assert item["annotator_1_matches_ds_v3_2"] == "yes"
+    assert item["annotator_1_matches_gpt_5_2"] == "no"
+    assert item["annotator_2_matches_ds_v3_2"] == "no"
+    assert item["annotator_2_matches_gpt_5_2"] == "yes"
     assert item["n_human_matches_ds_v3_2"] == 1
     assert item["n_human_matches_gpt_5_2"] == 1
     assert item["human_match_rate_ds_v3_2"] == 0.5

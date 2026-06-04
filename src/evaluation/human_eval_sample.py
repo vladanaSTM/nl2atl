@@ -17,7 +17,7 @@ from ..infra.io import load_json, save_json
 from .judge_agreement import create_item_key
 
 DEFAULT_JUDGES: Tuple[str, str] = ("ds-v3.2", "gpt-5.2")
-DEFAULT_ANNOTATORS: Tuple[str, str] = ("Francesco", "Marco")
+DEFAULT_ANNOTATORS: Tuple[str, str] = ("annotator_1", "annotator_2")
 
 DEFAULT_AAAI_QUOTAS: Dict[str, int] = {
     "disagree_ds_no_gpt_yes": 33,

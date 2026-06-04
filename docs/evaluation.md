@@ -77,7 +77,7 @@ For publication-facing human validation, create a blind stratified audit set fro
 uv run nl2atl human-eval-sample
 ```
 
-The default package is written to `outputs/LLM-evaluation/human_evaluation/`. It includes a 600-item AAAI-oriented core sample, a master blind XLSX workbook, two annotator-specific XLSX workbooks, a keyed metadata file for post-annotation analysis, and a protocol document. Exact matches are excluded from the default human workload because they are accepted by deterministic normalization before LLM judging. The XLSX files show accepted formulas as `gold_1` and optional `gold_2`, restrict `correct` to `yes`/`no`, and restrict `annotator_id` to `Francesco`/`Marco`. The blind files intentionally hide generator identity, judge identity, judge decisions, judge reasoning, and sampling strata from annotators. CSV/JSON/JSONL blind files and the full disagreement pool can be generated with `--legacy_formats` and `--write_disagreement_pool` when needed, but they are not required for the normal annotation workflow.
+The default package is written to `outputs/LLM-evaluation/human_evaluation/`. It includes a 600-item AAAI-oriented core sample, a master blind XLSX workbook, two annotator-specific XLSX workbooks, a keyed metadata file for post-annotation analysis, and a protocol document. Exact matches are excluded from the default human workload because they are accepted by deterministic normalization before LLM judging. The XLSX files show accepted formulas as `gold_1` and optional `gold_2`, restrict `correct` to `yes`/`no`, and restrict `annotator_id` to anonymous IDs. The blind files intentionally hide generator identity, judge identity, judge decisions, judge reasoning, and sampling strata from annotators. CSV/JSON/JSONL blind files and the full disagreement pool can be generated with `--legacy_formats` and `--write_disagreement_pool` when needed, but they are not required for the normal annotation workflow.
 
 The default core sample is enriched for judge calibration rather than raw population prevalence: all unique rare reverse disagreements are included, common disagreements are oversampled, and LLM agreement controls are retained. The sample is designed to answer whether the LLM judges are trustworthy on cases where deterministic exact match cannot decide correctness.
 
@@ -98,12 +98,12 @@ Use two ATL-literate project annotators when possible. They should annotate inde
 After annotators complete their blind XLSX workbooks, merge them with the private key:
 
 ```bash
-uv run nl2atl human-eval-merge outputs/LLM-evaluation/human_evaluation/annotations/Francesco_blind.xlsx outputs/LLM-evaluation/human_evaluation/annotations/Marco_blind.xlsx
+uv run nl2atl human-eval-merge outputs/LLM-evaluation/human_evaluation/annotations/annotator_1_blind.xlsx outputs/LLM-evaluation/human_evaluation/annotations/annotator_2_blind.xlsx
 ```
 
 Annotators only need to fill the `correct` column with `yes` or `no`, marking `yes` when `prediction` is equivalent to either `gold_1` or a non-empty `gold_2`. Use the XLSX templates to avoid typos in the `correct` and `annotator_id` columns. The merge command reads completed XLSX files and writes analysis-ready CSV, JSON, and JSONL files under `outputs/LLM-evaluation/human_evaluation/merged/`, with human labels, human-human status, per-judge LLM-human agreement fields, generator metadata, judge decisions, and hidden sampling strata joined by `audit_id`. Human-human disagreements are marked with `needs_adjudication=yes`, `human_final_correct=pending_adjudication`, and per-annotator match columns, so they remain analyzable before the final discussion pass. Free-text human reasoning is intentionally not part of the annotation or merged output; keep any adjudication notes separately only when a disagreement needs discussion.
 
-To regenerate only the blank Francesco/Marco annotation workbooks from the existing 600-item key, without resampling the audit set, run:
+To regenerate only the blank anonymous annotation workbooks from the existing 600-item key, without resampling the audit set, run:
 
 ```bash
 uv run nl2atl human-eval-sample --regenerate_annotator_workbooks

@@ -84,15 +84,15 @@ def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
     assert len(key_payload["items"]) == 3
     assert "judge_decisions" in key_payload["items"][0]
     assert (output_dir / "aaai_human_eval_sample_blind.xlsx").exists()
-    assert (output_dir / "annotations" / "Francesco_blind.xlsx").exists()
-    assert (output_dir / "annotations" / "Marco_blind.xlsx").exists()
+    assert (output_dir / "annotations" / "annotator_1_blind.xlsx").exists()
+    assert (output_dir / "annotations" / "annotator_2_blind.xlsx").exists()
     assert not (output_dir / "aaai_human_eval_sample_blind.csv").exists()
     assert not (output_dir / "aaai_disagreement_pool_blind.xlsx").exists()
 
     with zipfile.ZipFile(output_dir / "aaai_human_eval_sample_blind.xlsx") as archive:
         sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
     assert '"yes,no"' in sheet_xml
-    assert '"Francesco,Marco"' in sheet_xml
+    assert '"annotator_1,annotator_2"' in sheet_xml
 
     rows = _xlsx_rows(output_dir / "aaai_human_eval_sample_blind.xlsx")
     assert rows[0] == [
@@ -195,19 +195,19 @@ def test_regenerate_annotator_workbooks_from_key(tmp_path):
     files = regenerate_annotator_workbooks_from_key(
         key_path=output_dir / "aaai_human_eval_sample_key.json",
         output_dir=output_dir,
-        annotator_choices=("Francesco", "Marco"),
+        annotator_choices=("annotator_1", "annotator_2"),
         backup_existing=True,
     )
 
-    assert set(files) == {"Francesco", "Marco"}
-    assert (output_dir / "annotations" / "Francesco_blind.xlsx").exists()
-    assert list((output_dir / "annotations").glob("Francesco_blind.*.bak.xlsx"))
+    assert set(files) == {"annotator_1", "annotator_2"}
+    assert (output_dir / "annotations" / "annotator_1_blind.xlsx").exists()
+    assert list((output_dir / "annotations").glob("annotator_1_blind.*.bak.xlsx"))
 
     annotations = load_human_annotations(
-        [output_dir / "annotations" / "Marco_blind.xlsx"]
+        [output_dir / "annotations" / "annotator_2_blind.xlsx"]
     )
     first_annotation = next(iter(annotations.values()))[0]
-    assert first_annotation["annotator_id"] == "Marco"
+    assert first_annotation["annotator_id"] == "annotator_2"
     assert first_annotation["correct"] == ""
 
 
@@ -248,6 +248,6 @@ def test_blind_workbook_splits_two_gold_options(tmp_path):
         sampling_seed=11,
     )
 
-    rows = _xlsx_rows(output_dir / "annotations" / "Francesco_blind.xlsx")
+    rows = _xlsx_rows(output_dir / "annotations" / "annotator_1_blind.xlsx")
     assert rows[0][2:4] == ["gold_1", "gold_2"]
     assert rows[1][2:4] == ["<<A>>F p", "<<B>>F q"]
