@@ -69,6 +69,48 @@ uv run nl2atl judge-agreement
 
 The report includes pairwise Cohen's kappa, Fleiss' kappa, Krippendorff's alpha, and optional disagreement examples.
 
+## Human Judge Calibration Sample
+
+For publication-facing human validation, create a blind stratified audit set from the paired LLM-judge outputs:
+
+```bash
+uv run nl2atl human-eval-sample
+```
+
+The default package is written to `outputs/LLM-evaluation/human_evaluation/`. It includes a 600-item AAAI-oriented core sample, a master blind XLSX workbook, two annotator-specific XLSX workbooks, a keyed metadata file for post-annotation analysis, and a protocol document. Exact matches are excluded from the default human workload because they are accepted by deterministic normalization before LLM judging. The XLSX files restrict `correct` to `yes`/`no` and `annotator_id` to `Francesco`/`Marco`. The blind files intentionally hide generator identity, judge identity, judge decisions, judge reasoning, and sampling strata from annotators. CSV/JSON/JSONL blind files and the full disagreement pool can be generated with `--legacy_formats` and `--write_disagreement_pool` when needed, but they are not required for the normal annotation workflow.
+
+The default core sample is enriched for judge calibration rather than raw population prevalence: all unique rare reverse disagreements are included, common disagreements are oversampled, and LLM agreement controls are retained. The sample is designed to answer whether the LLM judges are trustworthy on cases where deterministic exact match cannot decide correctness.
+
+Sampling starts from the full paired-judge population of 13,200 evaluated prediction items, each judged by DeepSeek V3.2 and GPT-5.2. Exact matches are removed because they are accepted automatically before LLM judging. The remaining items are grouped by judge-decision stratum, with disagreement strata oversampled because they reveal which judge is closer to human expert labels. Agreement controls are retained to test whether consensus labels are reliable: `llm_agree_yes` detects overly permissive consensus, and `llm_agree_no` detects overly strict consensus. Duplicate `input` + `gold_options` + `prediction` triples are collapsed in the core sample to avoid redundant annotation, while the private key file keeps the hidden source metadata. Within each stratum, examples are spread across generator model, condition, and seed so the sample is not dominated by one run.
+
+Current default sample composition:
+
+| Stratum | Meaning | Count |
+|---|---|---:|
+| `disagree_ds_no_gpt_yes` | DeepSeek rejects, GPT accepts | 26 |
+| `disagree_ds_yes_gpt_no` | DeepSeek accepts, GPT rejects | 334 |
+| `llm_agree_no` | both judges reject | 120 |
+| `llm_agree_yes` | both judges accept | 120 |
+| **Total** |  | **600** |
+
+Use two ATL-literate project annotators when possible. They should annotate independently first, then resolve disagreements through a documented adjudication/discussion pass. After annotation, report human-human agreement before adjudication, the number of human-human disagreements, LLM-human agreement per judge, adjudicated accuracy by stratum, the deterministic exact-match policy, and whether the main model ranking is stable under human adjudication.
+
+After annotators complete their blind XLSX workbooks, merge them with the private key:
+
+```bash
+uv run nl2atl human-eval-merge outputs/LLM-evaluation/human_evaluation/annotations/Francesco_blind.xlsx outputs/LLM-evaluation/human_evaluation/annotations/Marco_blind.xlsx
+```
+
+Annotators only need to fill the `correct` column with `yes` or `no`. Use the XLSX templates to avoid typos in the `correct` and `annotator_id` columns. The merge command reads completed XLSX files and writes analysis-ready CSV, JSON, and JSONL files under `outputs/LLM-evaluation/human_evaluation/merged/`, with human labels, human-human status, per-judge LLM-human agreement fields, generator metadata, judge decisions, and hidden sampling strata joined by `audit_id`. Human-human disagreements are marked with `needs_adjudication=yes`, `human_final_correct=pending_adjudication`, and per-annotator match columns, so they remain analyzable before the final discussion pass. Free-text human reasoning is intentionally not part of the annotation or merged output; keep any adjudication notes separately only when a disagreement needs discussion.
+
+To regenerate only the blank Francesco/Marco annotation workbooks from the existing 600-item key, without resampling the audit set, run:
+
+```bash
+uv run nl2atl human-eval-sample --regenerate_annotator_workbooks
+```
+
+The command writes new files under `outputs/LLM-evaluation/human_evaluation/annotations/` and backs up existing annotator workbooks before replacing them.
+
 ## Combined Reports
 
 ```bash

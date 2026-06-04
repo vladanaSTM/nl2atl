@@ -12,6 +12,8 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "genvitamin": ("src.cli.genvitamin", "main"),
     "llm-judge": ("src.cli.run_llm_judge", "main"),
     "judge-agreement": ("src.cli.run_judge_agreement", "main"),
+    "human-eval-sample": ("src.cli.create_human_eval_sample", "main"),
+    "human-eval-merge": ("src.cli.merge_human_eval_annotations", "main"),
     "model-efficiency": ("src.cli.run_model_efficiency", "main"),
     "generate-eval-reports": ("src.cli.generate_eval_reports", "main"),
 }
