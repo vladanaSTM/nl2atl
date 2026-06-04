@@ -1,11 +1,23 @@
 import json
 import zipfile
+from xml.etree import ElementTree as ET
 
 from src.evaluation.human_eval_merge import load_human_annotations
 from src.evaluation.human_eval_sample import (
     build_human_eval_sample,
     regenerate_annotator_workbooks_from_key,
 )
+
+
+def _xlsx_rows(path):
+    ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    with zipfile.ZipFile(path) as archive:
+        root = ET.fromstring(archive.read("xl/worksheets/sheet1.xml"))
+
+    rows = []
+    for row in root.findall(".//x:sheetData/x:row", ns):
+        rows.append(["".join(cell.itertext()) for cell in row.findall("x:c", ns)])
+    return rows
 
 
 def _write_judge_file(path, judge_name, decisions):
@@ -82,6 +94,20 @@ def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
     assert '"yes,no"' in sheet_xml
     assert '"Francesco,Marco"' in sheet_xml
 
+    rows = _xlsx_rows(output_dir / "aaai_human_eval_sample_blind.xlsx")
+    assert rows[0] == [
+        "audit_id",
+        "input",
+        "gold_1",
+        "gold_2",
+        "prediction",
+        "correct",
+        "annotator_id",
+    ]
+    assert "gold_options" not in rows[0]
+    assert rows[1][2]
+    assert rows[1][3] == ""
+
 
 def test_build_human_eval_sample_can_write_legacy_formats_and_pool(tmp_path):
     eval_dir = tmp_path / "evaluated_datasets"
@@ -111,6 +137,8 @@ def test_build_human_eval_sample_can_write_legacy_formats_and_pool(tmp_path):
     )
     assert len(blind_payload["annotations"]) == 2
     assert "judge_decisions" not in blind_payload["annotations"][0]
+    assert "gold_1" in blind_payload["annotations"][0]
+    assert "gold_options" not in blind_payload["annotations"][0]
     assert (output_dir / "aaai_disagreement_pool_blind.xlsx").exists()
     assert (output_dir / "aaai_disagreement_pool_blind.csv").exists()
 
@@ -181,3 +209,45 @@ def test_regenerate_annotator_workbooks_from_key(tmp_path):
     first_annotation = next(iter(annotations.values()))[0]
     assert first_annotation["annotator_id"] == "Marco"
     assert first_annotation["correct"] == ""
+
+
+def test_blind_workbook_splits_two_gold_options(tmp_path):
+    eval_dir = tmp_path / "evaluated_datasets"
+    for judge_name, decision in (("ds-v3.2", "yes"), ("gpt-5.2", "no")):
+        path = eval_dir / judge_name / f"toy_run__judge-{judge_name}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "run_id": "toy_run",
+                    "source_file": "toy_run.json",
+                    "model_short": "toy-model",
+                    "condition": "baseline_zero_shot",
+                    "seed": 42,
+                    "detailed_results": [
+                        {
+                            "id": "ex1",
+                            "input": "Input with two gold options",
+                            "gold": "<<A>>F p",
+                            "gold_options": ["<<A>>F p", "<<B>>F q"],
+                            "prediction": "<<A>>F p",
+                            "correct": decision,
+                            "decision_method": "llm",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    output_dir = tmp_path / "human_evaluation"
+    build_human_eval_sample(
+        eval_dir=eval_dir,
+        output_dir=output_dir,
+        quotas={"disagree_ds_yes_gpt_no": 1},
+        sampling_seed=11,
+    )
+
+    rows = _xlsx_rows(output_dir / "annotations" / "Francesco_blind.xlsx")
+    assert rows[0][2:4] == ["gold_1", "gold_2"]
+    assert rows[1][2:4] == ["<<A>>F p", "<<B>>F q"]

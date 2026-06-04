@@ -82,6 +82,9 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
     assert merged["items"][0]["human_matches_gpt_5_2"] == "yes"
     assert merged["items"][0]["n_human_matches_ds_v3_2"] == 2
     assert merged["items"][0]["human_match_rate_ds_v3_2"] == 1.0
+    assert merged["items"][0]["gold_1"] == "<<A>>F p"
+    assert merged["items"][0]["gold_2"] == ""
+    assert "gold_options" not in merged["items"][0]
     assert "human_reasoning" not in merged["items"][0]
     assert "human_annotations" not in merged["items"][0]
 
@@ -94,6 +97,7 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
         row = next(csv.DictReader(csv_file))
     assert list(row) == MERGED_CSV_COLUMNS
     assert "human_reasoning" not in row
+    assert "gold_options" not in row
     assert row["human_matches_ds_v3_2"] == "yes"
 
 

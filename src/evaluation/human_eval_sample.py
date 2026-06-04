@@ -31,8 +31,8 @@ PRIMARY_STRATA = tuple(DEFAULT_AAAI_QUOTAS.keys())
 ANNOTATION_COLUMNS = [
     "audit_id",
     "input",
-    "gold",
-    "gold_options",
+    "gold_1",
+    "gold_2",
     "prediction",
     "correct",
     "annotator_id",
@@ -478,12 +478,20 @@ def _assign_audit_ids(
     return assigned_records
 
 
+def _blind_gold_fields(record: Mapping[str, Any]) -> Dict[str, str]:
+    options = record.get("gold_options") or []
+    if not isinstance(options, list):
+        options = []
+    gold_1 = str(options[0]) if options else str(record.get("gold") or "")
+    gold_2 = str(options[1]) if len(options) > 1 else ""
+    return {"gold_1": gold_1, "gold_2": gold_2}
+
+
 def _blind_item(record: Mapping[str, Any], annotator_id: str = "") -> Dict[str, Any]:
     return {
         "audit_id": record["audit_id"],
         "input": record["input"],
-        "gold": record["gold"],
-        "gold_options": record["gold_options"],
+        **_blind_gold_fields(record),
         "prediction": record["prediction"],
         "correct": "",
         "annotator_id": annotator_id,
@@ -569,7 +577,6 @@ def _write_csv_annotations(
         writer.writeheader()
         for record in records:
             item = _blind_item(record, annotator_id=annotator_id)
-            item["gold_options"] = json.dumps(item["gold_options"], ensure_ascii=False)
             writer.writerow(item)
 
 
@@ -615,7 +622,6 @@ def _write_xlsx_annotations(
     rows: List[List[str]] = [ANNOTATION_COLUMNS]
     for record in records:
         item = _blind_item(record, annotator_id=annotator_id)
-        item["gold_options"] = json.dumps(item["gold_options"], ensure_ascii=False)
         rows.append([str(item.get(column, "")) for column in ANNOTATION_COLUMNS])
 
     correct_column = _excel_column(ANNOTATION_COLUMNS.index("correct") + 1)
@@ -706,7 +712,7 @@ This package is a blind, stratified audit set for calibrating the LLM judges use
 
 The sample is designed to calibrate the LLM judges on cases where deterministic exact match cannot decide correctness. It starts from the paired-judge population of {metadata["population_size"]} evaluated prediction items, each judged by DeepSeek V3.2 and GPT-5.2. Exact matches are excluded. The remaining items are grouped by judge-decision stratum, with disagreements oversampled because they are the most informative cases for identifying which judge is closer to human expert labels.
 
-Agreement controls are retained: `llm_agree_yes` checks whether consensus acceptances are too permissive, and `llm_agree_no` checks whether consensus rejections are too strict. Duplicate `input` + `gold_options` + `prediction` triples are collapsed in the core sample to avoid redundant annotation, while the private key file preserves source metadata. Within each stratum, the sampler spreads examples across generator model, condition, and seed.
+Agreement controls are retained: `llm_agree_yes` checks whether consensus acceptances are too permissive, and `llm_agree_no` checks whether consensus rejections are too strict. Duplicate `input` + accepted gold formulas + `prediction` triples are collapsed in the core sample to avoid redundant annotation, while the private key file preserves source metadata. Within each stratum, the sampler spreads examples across generator model, condition, and seed.
 
 | Stratum | Meaning | Count |
 |---|---|---:|
@@ -718,7 +724,7 @@ Agreement controls are retained: `llm_agree_yes` checks whether consensus accept
 
 ## Annotation Task
 
-For each row, decide whether `prediction` is semantically equivalent to at least one formula in `gold_options` for the given natural-language `input`.
+For each row, decide whether `prediction` is semantically equivalent to `gold_1` or, when present, `gold_2` for the given natural-language `input`.
 
 Mark `correct` as `yes` only when the prediction preserves the coalition/agent, temporal operator, temporal scope, polarity, logical structure, and atomic proposition meaning. Ignore whitespace and harmless parentheses. Do not mark a prediction correct when it changes an agent, changes temporal scope, flips polarity, drops or adds a condition, uses an unsupported alias, or introduces malformed ATL syntax.
 

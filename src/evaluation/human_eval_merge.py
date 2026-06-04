@@ -47,8 +47,8 @@ MERGED_CSV_COLUMNS = [
     "primary_stratum",
     "sampling_weight_primary",
     "input",
-    "gold",
-    "gold_options",
+    "gold_1",
+    "gold_2",
     "prediction",
     "source_file",
     "item_id",
@@ -248,6 +248,15 @@ def _match_count(labels: Sequence[str], judge_label: str) -> int:
     return sum(1 for label in labels if label == judge_label)
 
 
+def _gold_fields(item: Mapping[str, Any]) -> Dict[str, str]:
+    options = item.get("gold_options") or []
+    if not isinstance(options, list):
+        options = []
+    gold_1 = str(options[0]) if options else str(item.get("gold") or "")
+    gold_2 = str(options[1]) if len(options) > 1 else ""
+    return {"gold_1": gold_1, "gold_2": gold_2}
+
+
 def _analysis_item(
     item: Mapping[str, Any], human_summary: Mapping[str, Any]
 ) -> Dict[str, Any]:
@@ -301,8 +310,7 @@ def _analysis_item(
         "primary_stratum": item.get("primary_stratum"),
         "sampling_weight_primary": item.get("sampling_weight_primary"),
         "input": item.get("input"),
-        "gold": item.get("gold"),
-        "gold_options": item.get("gold_options", []),
+        **_gold_fields(item),
         "prediction": item.get("prediction"),
         "source_file": item.get("source_file"),
         "item_id": item.get("item_id"),
@@ -455,10 +463,8 @@ def merge_human_annotations(
                     "primary_stratum": item.get("primary_stratum"),
                     "sampling_weight_primary": item.get("sampling_weight_primary"),
                     "input": item.get("input"),
-                    "gold": item.get("gold"),
-                    "gold_options": json.dumps(
-                        item.get("gold_options", []), ensure_ascii=False
-                    ),
+                    "gold_1": item.get("gold_1"),
+                    "gold_2": item.get("gold_2"),
                     "prediction": item.get("prediction"),
                     "source_file": item.get("source_file"),
                     "item_id": item.get("item_id"),
