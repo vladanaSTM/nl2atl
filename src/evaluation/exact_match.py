@@ -1,12 +1,13 @@
 """Exact-match evaluator for ATL formula generation."""
 
+from collections import Counter
 import hashlib
 import re
 import time
 from typing import Any, Dict, List
 
 from .base import BaseEvaluator
-from ..data_utils import get_output_options, get_preferred_output
+from ..data_utils import get_output_options
 from ..models.few_shot import (
     format_prompt,
     get_few_shot_example_id,
@@ -102,6 +103,32 @@ class ExactMatchEvaluator(BaseEvaluator):
         normalized = self._normalize_symbols(formula)
         return re.sub(r"\s+", "", normalized.strip().lower())
 
+    def split_formula_lines(self, text: str) -> List[str]:
+        """Split model output into formula lines.
+
+        Single-output predictions produce one line. QSA/multi-output predictions
+        are expected to contain one formula per non-empty line.
+        """
+        return [line.strip() for line in str(text or "").splitlines() if line.strip()]
+
+    def outputs_exact_match(self, prediction_text: str, gold_outputs: List[str]) -> bool:
+        """Return True iff predicted formulas match all gold outputs.
+
+        The comparison is order-insensitive but multiplicity-sensitive. This means
+        QSA outputs may be generated in either order, but producing only one
+        required reading, duplicating a reading, or collapsing readings into one
+        conjunctive formula does not count as exact match.
+        """
+        predicted_outputs = self.split_formula_lines(prediction_text)
+        if not predicted_outputs or not gold_outputs:
+            return False
+
+        normalized_prediction = Counter(
+            self.normalize(formula) for formula in predicted_outputs
+        )
+        normalized_gold = Counter(self.normalize(formula) for formula in gold_outputs)
+        return normalized_prediction == normalized_gold
+
     def evaluate_single(
         self, prediction: Dict[str, Any], reference: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -114,19 +141,16 @@ class ExactMatchEvaluator(BaseEvaluator):
             or ""
         )
         reference_options = get_output_options(reference)
-        reference_text = reference_options[0] if reference_options else ""
-        exact_match = int(
-            any(
-                self.normalize(prediction_text) == self.normalize(reference_text)
-                for reference_text in reference_options
-            )
-        )
+        reference_text = "\n".join(reference_options)
+        exact_match = int(self.outputs_exact_match(prediction_text, reference_options))
         result = {
             "id": prediction.get("id") or reference.get("id"),
             "input": prediction.get("input") or reference.get("input"),
             "expected": reference_text,
             "expected_options": reference_options,
+            "expected_outputs": reference_options,
             "generated": prediction_text,
+            "predicted_outputs": self.split_formula_lines(prediction_text),
             "exact_match": exact_match,
         }
         # Preserve latency if it was already computed
@@ -247,20 +271,17 @@ class ExactMatchEvaluator(BaseEvaluator):
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             expected_options = get_output_options(item)
-            exact_match = int(
-                any(
-                    self.normalize(expected) == self.normalize(generated)
-                    for expected in expected_options
-                )
-            )
+            exact_match = int(self.outputs_exact_match(generated, expected_options))
 
             # Build result dict
             result_dict = {
                 "id": item.get("id", i),
                 "input": item["input"],
-                "expected": get_preferred_output(item),
+                "expected": "\n".join(expected_options),
                 "expected_options": expected_options,
+                "expected_outputs": expected_options,
                 "generated": generated,
+                "predicted_outputs": self.split_formula_lines(generated),
                 "raw_generation": str(raw_generation),
                 "exact_match": exact_match,
                 "latency_ms": round(latency_ms, 2),

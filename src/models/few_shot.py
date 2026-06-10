@@ -7,73 +7,158 @@ import random
 from typing import Any, List, Dict, Optional
 
 from ..constants import ModelType
-from ..data_utils import get_preferred_output
 
-# Curated few-shot examples covering diverse ATL patterns
+# Curated few-shot examples covering diverse ATL/ATL* patterns
+# The schema mirrors the current dataset:
+# each item has an "outputs" list; each output contains a "formula".
 FEW_SHOT_EXAMPLES = [
     {
         "input": "They can guarantee that at the next step the alarm will be sent, the surveillance system and the operator.",
-        "output": "<<System,Operator>>X alarm_sent",
+        "outputs": [
+            {
+                "formula": "<<System,Operator>>X alarm_sent"
+            }
+        ],
     },
     {
         "input": "The gate, the machine can guarantee that it will open at the next step.",
-        "output": "<<Machine>>X gate_open",
+        "outputs": [
+            {
+                "formula": "<<Machine>>X gate_open"
+            }
+        ],
     },
     {
         "input": "Robot number 1 has a strategy to ensure that eventually position 3 holds, and robot number 2 does too.",
-        "output": "<<Robot1>>F pos3 && <<Robot2>>F pos3",
+        "outputs": [
+            {
+                "formula": "<<Robot1>>F pos3 && <<Robot2>>F pos3"
+            }
+        ],
     },
     {
         "input": "Every robot can guarantee that it will eventually reach a safe spot.",
-        "output_1": "<<Robot1>>F at_safe_spot_1 && <<Robot2>>F at_safe_spot_2 && <<Robot3>>F at_safe_spot_3",
-        "output_2": "<<Robot1,Robot2,Robot3>>F at_safe_spot",
+        "outputs": [
+            {
+                "formula": "<<Robot1>>F at_safe_spot_1 && <<Robot2>>F at_safe_spot_2 && <<Robot3>>F at_safe_spot_3"
+            },
+            {
+                "formula": "<<Robot1,Robot2,Robot3>>F at_safe_spot"
+            }
+        ],
     },
     {
         "input": "The diplomatic cable system can, but the encryption gateway cannot, guarantee that classified cables will never be routed publicly.",
-        "output": "<<DiplomaticCableSystem>>G !classified_cables_routed_publicly && !<<EncryptionGateway>>G !classified_cables_routed_publicly",
+        "outputs": [
+            {
+                "formula": "<<DiplomaticCableSystem>>G !classified_cables_routed_publicly && !<<EncryptionGateway>>G !classified_cables_routed_publicly"
+            }
+        ],
     },
     {
         "input": "The user can guarantee that sooner or later the ticket will be printed.",
-        "output": "<<User>>F ticket_printed",
+        "outputs": [
+            {
+                "formula": "<<User>>F ticket_printed"
+            }
+        ],
     },
     {
         "input": "If we do not wish to fight, we can prevent the enemy from engaging us even though the lines of our encampment be merely traced out on the ground. All we need do is to throw something odd and unaccountable in his way.",
-        "output": "<<We>>(!wish_to_fight -> F (throw_something_odd_in_his_way && G !enemy_engages_us))",
+        "outputs": [
+            {
+                "formula": "<<We>>(!wish_to_fight -> F (throw_something_odd_in_his_way && G !enemy_engages_us))"
+            }
+        ],
     },
 ]
+
 
 SYSTEM_PROMPT_BASE = """You are an expert in Alternating-time Temporal Logic (ATL/ATL*).
 
 Convert natural-language strategic specifications into well-formed ATL/ATL* formulas.
 
 Output rules:
-- Return exactly one ATL/ATL* formula on a single line.
-- Choose one best formula; do not provide alternative formulas.
-- Do not include explanations, Markdown fences, labels, or natural-language text.
-- Stop immediately after the formula. Never append notes beginning with words like "where", "or equivalently", "which means", or "represents".
+- Return only ATL/ATL* formula text.
+- For ordinary single-reading inputs, return exactly one ATL/ATL* formula on a single line.
+- For quantifier-scope ambiguity inputs with multiple admissible readings, return all required ATL/ATL* formulas, one per line.
+- Do not merge multiple QSA readings into one conjunctive formula unless the natural-language input explicitly requires a conjunction.
+- Do not include explanations, Markdown fences, labels, numbering, or natural-language text.
+- Stop immediately after the formula or formulas. Never append notes beginning with words like "where", "or equivalently", "which means", or "represents".
 
 ATL/ATL* syntax rules:
 - Agent coalition: <<Agent>> or <<Agent1,Agent2>>
 - Coalitions may contain numbers or symbolic names, e.g. <<1>>, <<Machine>>, <<Robot,Operator>>
-- Temporal operators: G (always), F (eventually), X (next), U (until), W (weak until), R (release)
+- Temporal operators supported in this benchmark: G (always), F (eventually), X (next), U (until).
 - Logical operators: -> (implies), && (and), || (or), ! (not)
 - Parentheses are required whenever an operator scopes over a compound formula.
+- ATL formulas are valid ATL* formulas. ATL* additionally allows more general nesting of temporal operators, such as XF p, XG !p, G(F p), or G(p -> F q), when licensed by the input.
 
 Scope rules:
-- The strategic operator <<A>> scopes over the whole temporal/path formula that follows it.
+- The strategic operator <<A>> scopes over the whole formula that follows it.
 - Do not merge the strategic operator and the temporal operator conceptually.
 - For example, write <<Machine>>G(paid -> ticket_printed), not <<Machine>>(G paid -> ticket_printed).
 - If a temporal operator applies to a whole implication or conjunction, place the full compound formula inside its scope.
 - Example: "always, if p then q" becomes G(p -> q), not G p -> q.
-- Example: "next, p and q" becomes X(p && q), unless the sentence explicitly says that each is next separately.
+- Example: "next, p and q" becomes X(p && q), unless the sentence explicitly says that each condition is next separately.
 - Do not introduce negation unless it is explicitly expressed in the natural-language input.
 - Do not introduce temporal operators that are not licensed by the natural-language input.
 
 Ambiguity rules:
 - For VP ellipsis, repeat the full recovered strategic-temporal formula for the second agent.
 - For Right Node Raising, attach the same shared right-peripheral objective to both coordinated strategic clauses.
-- For quantifier-scope ambiguity, preserve the intended distributive or collective reading when specified.
+- For quantifier-scope ambiguity, produce all admissible readings as separate ATL/ATL* formulas.
+- In QSA cases, do not choose only one reading. If both distributive and collective readings are admissible, include both.
+- Keep distinct QSA readings on separate lines; do not collapse them into a single conjunction unless the input itself requires one conjunctive specification.
 """
+
+def get_all_output_formulas(example: Dict[str, Any]) -> List[str]:
+    """
+    Return all expected ATL/ATL* formulas for an example.
+
+    Current dataset schema:
+      "outputs": [{"formula": "..."}, ...]
+
+    Legacy fallback:
+      "output": "..."
+      "output_1": "...", "output_2": ...
+    """
+    if "outputs" in example:
+        outputs = example["outputs"]
+        if not isinstance(outputs, list):
+            return []
+
+        formulas = []
+        for out in outputs:
+            if isinstance(out, dict) and out.get("formula"):
+                formulas.append(str(out["formula"]).strip())
+            elif isinstance(out, str) and out.strip():
+                formulas.append(out.strip())
+        return formulas
+
+    if example.get("output"):
+        return [str(example["output"]).strip()]
+
+    formulas = []
+    i = 1
+    while example.get(f"output_{i}"):
+        formulas.append(str(example[f"output_{i}"]).strip())
+        i += 1
+
+    return formulas
+
+
+def get_output_text(example: Dict[str, Any]) -> Optional[str]:
+    """
+    Format all required formulas as the assistant target.
+
+    Single-output examples produce one line.
+    Multi-output examples produce one formula per line.
+    """
+    formulas = get_all_output_formulas(example)
+    if not formulas:
+        return None
+    return "\n".join(formulas)
 
 
 def get_few_shot_examples(
@@ -109,7 +194,8 @@ def get_few_shot_example_id(example: Dict[str, Any]) -> str:
     if example.get("id"):
         return str(example["id"])
 
-    fingerprint = f"{example.get('input', '')}\n{get_preferred_output(example) or ''}"
+    output_text = get_output_text(example) or ""
+    fingerprint = f"{example.get('input', '')}\n{output_text}"
     return hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
 
 
@@ -117,12 +203,12 @@ def _format_few_shot_section(examples: List[Dict]) -> str:
     """Format few-shot examples into a prompt section."""
     prompt = "Here are some examples:\n\n"
     for i, ex in enumerate(examples, 1):
-        output = get_preferred_output(ex)
+        output = get_output_text(ex)
         if output is None:
             continue
         prompt += f"Example {i}:\n"
         prompt += f"Input: {ex['input']}\n"
-        prompt += f"Output: {output}\n\n"
+        prompt += f"Output:\n{output}\n\n"
     return prompt
 
 

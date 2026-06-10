@@ -1,5 +1,6 @@
 """Main LLM judge evaluation pipeline."""
 
+from collections import Counter
 from dataclasses import dataclass
 import hashlib
 from pathlib import Path
@@ -169,7 +170,7 @@ class LLMJudgeEvaluator(BaseEvaluator):
                 "gold_options": gold_options,
                 "prediction": pred_text,
                 "correct": "yes",
-                "reasoning": "Exact match against an accepted gold formula.",
+                "reasoning": "Exact match against all required gold output formulas.",
                 "decision_method": "exact",
                 "prompt_version": self.prompt_version,
                 "judge_prompt_sha256": None,
@@ -251,32 +252,41 @@ def normalize_formula_for_match(text: Optional[str]) -> str:
     return _EXACT_MATCH_EVALUATOR.normalize(normalize_text(text))
 
 
-def matches_any_gold_option(prediction: str, gold_options: List[str]) -> bool:
-    """Return whether prediction exactly matches any accepted gold formula."""
-    normalized_prediction = normalize_formula_for_match(prediction)
-    return any(
-        normalized_prediction == normalize_formula_for_match(gold)
-        for gold in gold_options
+def split_formula_lines(text: str) -> List[str]:
+    """Split a formula-only model output into non-empty formula lines."""
+    return [line.strip() for line in str(text or "").splitlines() if line.strip()]
+
+
+def matches_all_gold_outputs(prediction: str, gold_options: List[str]) -> bool:
+    """Return whether prediction exactly matches all required gold outputs.
+
+    The match is order-insensitive but multiplicity-sensitive. In QSA/multi-output
+    cases, all gold readings are required; they are not alternatives.
+    """
+    predicted_outputs = split_formula_lines(prediction)
+    if not predicted_outputs or not gold_options:
+        return False
+
+    normalized_prediction = Counter(
+        normalize_formula_for_match(formula) for formula in predicted_outputs
     )
+    normalized_gold = Counter(
+        normalize_formula_for_match(gold) for gold in gold_options
+    )
+    return normalized_prediction == normalized_gold
+
+
+def matches_any_gold_option(prediction: str, gold_options: List[str]) -> bool:
+    """Backward-compatible alias for the old single-output name.
+
+    With the current dataset schema, multi-output gold entries are jointly
+    required, so this now delegates to ``matches_all_gold_outputs``.
+    """
+    return matches_all_gold_outputs(prediction, gold_options)
 
 
 def _gold_options_from_prediction_item(item: Dict[str, Any]) -> List[str]:
-    options: List[str] = []
-
-    def append(value: Any) -> None:
-        if isinstance(value, list):
-            for entry in value:
-                append(entry)
-            return
-        if isinstance(value, str) and value.strip() and value.strip() not in options:
-            options.append(value.strip())
-
-    for key in ("expected_options", "gold_options", "reference_options", "outputs"):
-        append(item.get(key))
-    for key in ("expected", "gold", "reference"):
-        append(item.get(key))
-
-    return options
+    return get_output_options(item)
 
 
 def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Any]]:
@@ -312,6 +322,7 @@ def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Any]]:
                 "prediction": prediction,
                 "gold": gold,
                 "gold_options": gold_options,
+                "expected_outputs": item.get("expected_outputs") or gold_options,
                 "exact_match": item.get("exact_match"),
                 "id": item.get("id"),
             }
@@ -345,9 +356,9 @@ def evaluate_prediction_file(
     def is_exact_match(
         pred: str, gold_options: List[str], flag: Optional[bool]
     ) -> bool:
-        if flag is not None and is_positive_exact_flag(flag):
-            return True
-        return matches_any_gold_option(pred, gold_options)
+        if flag is not None:
+            return is_positive_exact_flag(flag)
+        return matches_all_gold_outputs(pred, gold_options)
 
     for item in prediction_items:
         input_text = item.get("input") or ""
@@ -369,7 +380,7 @@ def evaluate_prediction_file(
             stats["auto_exact"] += 1
             decision = JudgeDecision(
                 correct="yes",
-                reasoning="Exact match against an accepted gold formula.",
+                reasoning="Exact match against all required gold output formulas.",
                 decision_method="exact",
                 prompt_version=judge.prompt_version,
                 judge_parse_status="not_called_exact_match",
