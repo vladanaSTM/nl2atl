@@ -1,16 +1,7 @@
 """Metrics computation for LLM judge evaluations."""
 
-from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any
-
-
-@dataclass
-class JudgeMetrics:
-    accuracy: float
-    total_evaluated: int
-    correct: int
-    incorrect: int
 
 
 def _safe_rate(numerator: int, denominator: int) -> float:
@@ -84,31 +75,6 @@ def compute_metrics(rows: List[Dict]) -> Dict[str, Any]:
     }
 
 
-def compute_metrics_with_difficulty(rows: List[Dict]) -> Dict[str, Any]:
-    """Compute metrics with breakdown by difficulty level."""
-    base = compute_metrics(rows)
-
-    by_difficulty: Dict[str, List[Dict]] = {}
-    for r in rows:
-        difficulty = r.get("difficulty", "unknown")
-        by_difficulty.setdefault(difficulty, []).append(r)
-
-    breakdown = {}
-    for difficulty, diff_rows in sorted(by_difficulty.items()):
-        evaluated = [r for r in diff_rows if r.get("decision_method") != "unmatched"]
-        if not evaluated:
-            continue
-        correct = sum(1 for r in evaluated if r.get("correct") == "yes")
-        breakdown[difficulty] = {
-            "count": len(evaluated),
-            "correct": correct,
-            "accuracy": round(correct / len(evaluated), 4),
-        }
-
-    base["by_difficulty"] = breakdown
-    return base
-
-
 def build_summary(
     results: List[Dict],
     totals: Dict,
@@ -148,7 +114,7 @@ def build_summary(
     return {
         "judge_model": judge_model,
         "prompt_version": prompt_version,
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "overall": overall,
         "per_file": per_file,
         "ranking": ranking_table,

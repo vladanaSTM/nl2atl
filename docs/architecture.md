@@ -1,99 +1,69 @@
 # Architecture
 
-This document summarizes NL2ATL’s current module layout and data flow as implemented in the codebase.
+NL2ATL is organized around a simple experiment pipeline.
 
-## High‑level flow
-
-```mermaid
-flowchart TD
-  CLI[nl2atl CLI] --> Runner[ExperimentRunner]
-  Runner --> Data[ExperimentDataManager]
-  Runner --> Models[Model Registry]
-  Runner --> Eval[Exact Match Evaluator]
-  Runner --> Report[ExperimentReporter]
-  Eval --> Outputs[outputs/model_predictions]
-
-  Judge[LLM Judge] --> Outputs
-  Judge --> EvalOut[outputs/LLM-evaluation]
-  Agreement[Judge Agreement] --> EvalOut
-  Efficiency[Model Efficiency] --> EvalOut
+```text
+configs + dataset
+  -> ExperimentDataManager
+  -> ExperimentRunner
+  -> model loading / training / generation
+  -> ExactMatchEvaluator
+  -> LLM judge and reports
 ```
 
-## Package structure
+## Main Packages
 
-```
-src/
-  cli/              CLI entry points (run-all, run-single, run-array, judge, etc.)
-  experiment/       experiment orchestration and reporting
-  models/           model loading, prompt formatting, generation
-  evaluation/       exact-match, LLM judge, agreement, efficiency, difficulty
-  infra/            I/O helpers and Azure utilities
-  data_utils.py     dataset split + augmentation helpers
-  api_server.py     FastAPI service
-```
+| Path | Role |
+|---|---|
+| `src/cli/` | Command-line entry points |
+| `src/config.py` | YAML config loading and validation |
+| `src/data_utils.py` | Dataset validation, normalization, splitting, augmentation |
+| `src/experiment/` | Experiment orchestration and result writing |
+| `src/models/` | Prompt formatting, model loading, generation utilities |
+| `src/evaluation/` | Exact match, LLM judge, judge agreement, accuracy-latency tools |
+| `src/infra/` | JSON/YAML/env helpers and Azure client wrapper |
+| `src/api_server.py` | FastAPI generation service |
 
-## Key responsibilities
+## CLI Boundary
 
-- `src/cli/` — command parsing and task dispatch
-- `src/experiment/` — data splits, training/inference runs, output persistence
-- `src/models/` — model loading (HF/Azure), caching, few‑shot prompt formatting
-- `src/evaluation/` — exact‑match evaluation, LLM‑as‑judge pipeline, agreement, efficiency, difficulty
-- `src/infra/` — I/O helpers, Azure config/client, environment utilities
-- `src/data_utils.py` — stratified split and augmentation utilities
+The consolidated `nl2atl` command dispatches to focused modules:
 
-## Execution workflows
+| Command | Module |
+|---|---|
+| `nl2atl run` | `src/cli/run_experiments.py` |
+| `nl2atl llm-judge` | `src/cli/run_llm_judge.py` |
+| `nl2atl judge-agreement` | `src/cli/run_judge_agreement.py` |
+| `nl2atl aggregate-seeds` | `src/cli/aggregate_seeds.py` |
+| `nl2atl model-efficiency` | `src/cli/run_model_efficiency.py` |
+| `nl2atl generate-eval-reports` | `src/cli/generate_eval_reports.py` |
+| `nl2atl genvitamin` | `src/cli/genvitamin.py` |
 
-### Experiment workflow (local or single node)
+## Dataset Boundary
 
-```mermaid
-sequenceDiagram
-    participant User
-    participant CLI
-    participant Runner
-    participant DataMgr
-    participant Registry
-    participant Evaluator
-    participant Reporter
+Use `load_data` for experiment data. It validates raw rows, builds `outputs` for all accepted gold formulas, and keeps preferred `output` for compatibility. Downstream code should use `get_output_options` instead of reading `output_1` or `output_2` directly.
 
-    User->>CLI: nl2atl run-all / run-single
-    CLI->>Runner: Config.from_yaml(models.yaml, experiments.yaml)
-    Runner->>DataMgr: prepare_data()
-    DataMgr-->>Runner: train_aug, val, test
-    Runner->>Registry: load_model(...)
-    Runner->>Evaluator: evaluate(model, test_data)
-    Evaluator-->>Runner: metrics + per-sample results
-    Runner->>Reporter: save_result(run_name, result)
-```
+## Experiment Boundary
 
-### SLURM array workflow (recommended for sweeps)
+`ExperimentDataManager` loads originals, performs the seeded train/validation/test split, and augments only the training split.
 
-```mermaid
-sequenceDiagram
-    participant Scheduler
-    participant CLI
-    participant Runner
+`ExperimentRunner` loads or trains models, evaluates on the test split, and writes prediction files under `outputs/model_predictions/`.
 
-    Scheduler->>CLI: nl2atl run-array (task index)
-    CLI->>Runner: Run single (seed, model, condition)
-    Runner-->>CLI: outputs/model_predictions/<run>.json
-```
+For fine-tuned sweeps, `run_experiments` groups work by model and seed. When both fine-tuned conditions are selected, the runner trains one shared adapter, then evaluates zero-shot and few-shot prompts from that adapter. Baseline model loads can be cached within a process unless `REUSE_MODEL_CACHE=0`.
 
-`run-array` maps each SLURM array index to exactly one $(seed, model, condition)$ task.
+## Evaluation Boundary
 
-## Output artifacts
+`ExactMatchEvaluator` cleans model output and checks it against every accepted gold formula. LLM judging consumes prediction files and only judges non-exact predictions.
 
-```
-outputs/
-  model_predictions/<run_name>.json
-  LLM-evaluation/
-    evaluated_datasets/<judge>/...
-    summary__judge-<judge>.json
-    agreement_report.json
-    efficiency_report.json
-```
+Report generation is layered: judged datasets feed judge summaries and agreement, those feed seed aggregation, and seed aggregation feeds the accuracy-latency report and publication notebook. Aggregates remain judge-specific unless `aggregate-seeds --combine_judges` is used intentionally.
 
-## Where to extend
+## API Boundary
 
-- Add models: update `configs/models.yaml` and provider logic in `src/models/registry.py`.
-- Add CLI tasks: create `src/cli/run_*.py` and register in `src/cli/main.py`.
-- Add evaluators: implement `BaseEvaluator` in `src/evaluation/base.py`.
+The FastAPI service exposes `/health` and `/generate`. It loads models from the same config files as the CLI.
+
+## Design Rules
+
+- Keep raw dataset normalization in `src/data_utils.py`.
+- Keep generated artifacts under `outputs/` or `models/`.
+- Treat `genVITAMIN/` as a separate nested project.
+- Prefer focused modules over large cross-cutting helpers.
+- Keep pricing, GPU-hour, and token-derived efficiency estimates out of computed reports unless the research question changes explicitly.

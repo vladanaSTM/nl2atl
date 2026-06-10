@@ -1,9 +1,11 @@
 """Experiment reporting and logging."""
 
+import hashlib
+import json
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +32,51 @@ def get_git_commit() -> Optional[str]:
 def get_utc_timestamp() -> str:
     """Get current UTC timestamp in ISO 8601 format."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sha256_file(path: Path) -> Optional[str]:
+    """Return a SHA-256 digest for a file, or None when unavailable."""
+    try:
+        if not path.exists() or not path.is_file():
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _stable_item_id(item: Dict[str, Any], index: int) -> str:
+    if item.get("id") is not None:
+        return str(item["id"])
+    payload = {
+        "index": index,
+        "input": item.get("input"),
+        "outputs": item.get("outputs") or item.get("expected_options"),
+        "output": item.get("output") or item.get("expected"),
+    }
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+
+
+def _split_entries(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    entries = []
+    for index, item in enumerate(items):
+        input_text = str(item.get("input", ""))
+        outputs = item.get("outputs") or item.get("expected_options") or []
+        encoded_outputs = json.dumps(outputs, sort_keys=True, ensure_ascii=False)
+        entries.append(
+            {
+                "id": _stable_item_id(item, index),
+                "input_sha256": hashlib.sha256(input_text.encode("utf-8")).hexdigest(),
+                "outputs_sha256": hashlib.sha256(
+                    encoded_outputs.encode("utf-8")
+                ).hexdigest(),
+            }
+        )
+    return entries
 
 
 def _percentile(values: List[float], percentile: float) -> Optional[float]:
@@ -114,28 +161,43 @@ class ExperimentReporter:
         return {
             "model": model_config.name,
             "model_short": model_config.short_name,
+            "model_revision": model_config.revision,
             "condition": condition.name,
             "seed": config.seed,
             "finetuned": effective_finetuned,
             "few_shot": condition.few_shot,
             "num_epochs": config.num_epochs if effective_finetuned else 0,
             "learning_rate": config.learning_rate,
+            "weight_decay": config.weight_decay,
+            "warmup_ratio": config.warmup_ratio,
+            "bf16": config.bf16,
+            "tf32": config.tf32,
+            "lr_scheduler_type": config.lr_scheduler_type,
+            "eval_strategy": config.eval_strategy,
+            "save_strategy": config.save_strategy,
+            "save_total_limit": config.save_total_limit,
             "batch_size": config.batch_size,
+            "train_batch_size": model_config.train_batch_size or config.batch_size,
+            "eval_batch_size": model_config.eval_batch_size
+            or model_config.train_batch_size
+            or config.batch_size,
+            "gradient_accumulation_steps": model_config.gradient_accumulation_steps
+            or config.gradient_accumulation_steps,
+            "max_seq_length": model_config.max_seq_length,
+            "load_in_4bit": model_config.load_in_4bit,
+            "lora_r": model_config.lora_r,
+            "lora_alpha": model_config.lora_alpha,
+            "lora_dropout": model_config.lora_dropout,
+            "target_modules": list(model_config.target_modules),
+            "optim": config.optim,
+            "gradient_checkpointing": config.gradient_checkpointing,
+            "dataloader_num_workers": config.dataloader_num_workers,
+            "dataloader_pin_memory": config.dataloader_pin_memory,
+            "group_by_length": config.group_by_length,
+            "max_grad_norm": config.max_grad_norm,
+            "packing": config.packing,
             "num_few_shot": config.num_few_shot_examples if condition.few_shot else 0,
             "git_commit": self._git_commit,
-            "price_input_per_1k": model_config.price_input_per_1k,
-            "price_output_per_1k": model_config.price_output_per_1k,
-            "gpu_hour_usd": model_config.gpu_hour_usd,
-            "price_input_per_token": (
-                model_config.price_input_per_1k / 1000.0
-                if model_config.price_input_per_1k is not None
-                else None
-            ),
-            "price_output_per_token": (
-                model_config.price_output_per_1k / 1000.0
-                if model_config.price_output_per_1k is not None
-                else None
-            ),
         }
 
     def build_run_metadata(
@@ -170,52 +232,33 @@ class ExperimentReporter:
                 "latency_p99_ms": round(p99, 2) if p99 is not None else None,
             }
 
-        cost_stats = {}
-        total_cost = sum(Decimal(str(r.get("cost_usd", 0))) for r in results)
-        if total_cost > 0:
-            q = Decimal("0.000001")
-            n_dec = Decimal(len(results)) if results else Decimal("1")
-            cost_stats = {
-                "cost_total_usd": float(total_cost.quantize(q, rounding=ROUND_HALF_UP)),
-                "cost_input_usd": float(
-                    sum(
-                        Decimal(str(r.get("cost_input_usd", 0))) for r in results
-                    ).quantize(q, rounding=ROUND_HALF_UP)
-                ),
-                "cost_output_usd": float(
-                    sum(
-                        Decimal(str(r.get("cost_output_usd", 0))) for r in results
-                    ).quantize(q, rounding=ROUND_HALF_UP)
-                ),
-                "avg_cost_usd": float(
-                    (total_cost / n_dec).quantize(q, rounding=ROUND_HALF_UP)
-                ),
-                "avg_cost_input_usd": float(
-                    (
-                        sum(Decimal(str(r.get("cost_input_usd", 0))) for r in results)
-                        / n_dec
-                    ).quantize(q, rounding=ROUND_HALF_UP)
-                ),
-                "avg_cost_output_usd": float(
-                    (
-                        sum(Decimal(str(r.get("cost_output_usd", 0))) for r in results)
-                        / n_dec
-                    ).quantize(q, rounding=ROUND_HALF_UP)
-                ),
-            }
-
         metadata = {
             "run_id": run_name,
             "git_commit": self._git_commit,
             "dataset_path": dataset_path,
+            "dataset_sha256": sha256_file(Path(dataset_path)),
             "total_samples": total_samples,
             "successful_predictions": successful,
             "failed_predictions": failed,
+            "models_config_path": config.models_config_path,
+            "models_config_sha256": (
+                sha256_file(Path(config.models_config_path))
+                if config.models_config_path
+                else None
+            ),
+            "experiments_config_path": config.experiments_config_path,
+            "experiments_config_sha256": (
+                sha256_file(Path(config.experiments_config_path))
+                if config.experiments_config_path
+                else None
+            ),
+            "pyproject_sha256": sha256_file(Path("pyproject.toml")),
+            "uv_lock_sha256": sha256_file(Path("uv.lock")),
+            "command_argv": list(sys.argv),
             **self._build_run_config(
                 config, model_config, condition, effective_finetuned
             ),
             **latency_stats,
-            **cost_stats,
         }
 
         # Add timing info if available
@@ -223,6 +266,42 @@ class ExperimentReporter:
             metadata.update(self._timer.to_dict())
 
         return metadata
+
+    def save_split_manifest(
+        self,
+        run_name: str,
+        config: Config,
+        dataset_path: str,
+        train_data: List[Dict[str, Any]],
+        val_data: List[Dict[str, Any]],
+        test_data: List[Dict[str, Any]],
+    ) -> Path:
+        """Save the exact split membership used by a run."""
+        manifest_path = self.output_dir / "split_manifests" / f"{run_name}.json"
+        manifest = {
+            "created_at": get_utc_timestamp(),
+            "run_id": run_name,
+            "dataset_path": dataset_path,
+            "dataset_sha256": sha256_file(Path(dataset_path)),
+            "split_algorithm": "random.Random(seed).shuffle; round counts",
+            "split_sizes": {
+                "train_size": config.train_size,
+                "val_size": config.val_size,
+                "test_size": config.test_size,
+                "augment_factor": config.augment_factor,
+            },
+            "seed": config.seed,
+            "counts": {
+                "train": len(train_data),
+                "validation": len(val_data),
+                "test": len(test_data),
+            },
+            "train": _split_entries(train_data),
+            "validation": _split_entries(val_data),
+            "test": _split_entries(test_data),
+        }
+        save_json(manifest, manifest_path)
+        return manifest_path
 
     def get_result_path(self, run_name: str) -> Path:
         """Get path for saving results."""

@@ -20,6 +20,14 @@ from ..infra.azure import AzureClient, AzureConfig, GenerationResult
 load_env()
 
 
+CHAT_STOP_TOKENS = ("<|end|>", "<|im_end|>")
+
+
+def _trust_remote_code(model_name: str) -> bool:
+    """Use built-in Transformers code for Phi; remote code loops under this stack."""
+    return "phi" not in model_name.lower()
+
+
 def clear_gpu_memory() -> None:
     """Aggressively clear GPU memory."""
     # Multiple gc passes for circular references
@@ -62,10 +70,6 @@ def get_model_type(model_name: str) -> str:
         return ModelType.PHI3
     if "mistral" in model_lower:
         return ModelType.MISTRAL
-    if "llama" in model_lower:
-        return ModelType.LLAMA
-    if "gemma" in model_lower:
-        return ModelType.GEMMA
 
     return ModelType.GENERIC
 
@@ -93,15 +97,17 @@ def _build_bnb_config() -> BitsAndBytesConfig:
     )
 
 
-def _load_tokenizer(model_name: str) -> AutoTokenizer:
+def _load_tokenizer(model_name: str, revision: Optional[str] = None) -> AutoTokenizer:
     """Load tokenizer with fallback handling."""
     hf_token = os.getenv("HUGGINGFACE_TOKEN")
+    trust_remote_code = _trust_remote_code(model_name)
 
     try:
         tokenizer = AutoTokenizer.from_pretrained(
             model_name,
-            trust_remote_code=True,
+            trust_remote_code=trust_remote_code,
             token=hf_token,
+            revision=revision,
         )
     except Exception as e:
         error_msg = str(e).lower()
@@ -116,22 +122,25 @@ def _load_tokenizer(model_name: str) -> AutoTokenizer:
             try:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_name,
-                    trust_remote_code=True,
+                    trust_remote_code=trust_remote_code,
                     use_fast=False,
                     token=hf_token,
+                    revision=revision,
                 )
                 print("Recovered tokenizer with use_fast=False")
             except Exception:
                 tokenizer = AutoTokenizer.from_pretrained(
                     model_name,
-                    trust_remote_code=True,
+                    trust_remote_code=trust_remote_code,
                     use_fast=False,
+                    revision=revision,
                 )
         else:
             print(f"Warning: {e}. Trying without token...")
             tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
-                trust_remote_code=True,
+                trust_remote_code=trust_remote_code,
+                revision=revision,
             )
 
     if tokenizer.pad_token is None:
@@ -150,7 +159,7 @@ def _load_hf_model(
     clear_gpu_memory()
     print(f"Loading model: {model_config.name}")
 
-    tokenizer = _load_tokenizer(model_config.name)
+    tokenizer = _load_tokenizer(model_config.name, model_config.revision)
 
     use_4bit = model_config.load_in_4bit
     bnb_config = _build_bnb_config() if use_4bit else None
@@ -158,10 +167,12 @@ def _load_hf_model(
 
     while True:
         model_kwargs = {
-            "trust_remote_code": True,
-            "torch_dtype": torch.bfloat16,
+            "trust_remote_code": _trust_remote_code(model_config.name),
+            "dtype": torch.bfloat16,
             "device_map": "auto",
         }
+        if model_config.revision:
+            model_kwargs["revision"] = model_config.revision
 
         # Special handling for very large models
         if torch.cuda.is_available() and is_large_model(
@@ -219,26 +230,31 @@ def _load_hf_model(
 
         # Only merge if NOT using 4-bit (merge corrupts weights with 4-bit)
         if not use_4bit:
-            model = model.merge_and_unload()
+            merge_and_unload = getattr(model, "merge_and_unload")
+            model = merge_and_unload()
             print("Adapter merged into base model")
         else:
             print("Keeping adapter separate (4-bit mode)")
 
     # Apply LoRA for training
     elif for_training:
-        model = prepare_model_for_kbit_training(model)
+        if use_4bit:
+            model = prepare_model_for_kbit_training(model)
 
         lora_config = LoraConfig(
             r=model_config.lora_r,
             lora_alpha=model_config.lora_alpha,
             target_modules=model_config.target_modules,
-            lora_dropout=0.05,
+            lora_dropout=model_config.lora_dropout,
             bias="none",
             task_type="CAUSAL_LM",
         )
 
         model = get_peft_model(model, lora_config)
         model.print_trainable_parameters()
+
+    if not for_training:
+        model.eval()
 
     print(f"Model loaded. GPU Memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
 
@@ -274,6 +290,39 @@ def load_model(
     return _load_hf_model(model_config, for_training, load_adapter)
 
 
+def _generation_eos_token_ids(tokenizer: Any) -> list[int]:
+    """Return all special-token ids that should stop chat generation."""
+    eos_token_ids: list[int] = []
+
+    def append_token_id(token_id: Any) -> None:
+        if (
+            isinstance(token_id, int)
+            and token_id >= 0
+            and token_id not in eos_token_ids
+        ):
+            eos_token_ids.append(token_id)
+
+    append_token_id(getattr(tokenizer, "eos_token_id", None))
+
+    unk_token_id = getattr(tokenizer, "unk_token_id", None)
+    for token in CHAT_STOP_TOKENS:
+        if not hasattr(tokenizer, "convert_tokens_to_ids"):
+            continue
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id is None or token_id == unk_token_id:
+            continue
+        append_token_id(token_id)
+
+    return eos_token_ids
+
+
+def _requires_cache_disabled(model: Any) -> bool:
+    """Disable cache only for the broken remote-code Phi implementation."""
+    model_type = getattr(getattr(model, "config", None), "model_type", "")
+    module_name = model.__class__.__module__
+    return model_type == "phi3" and module_name.startswith("transformers_modules.")
+
+
 def generate(
     model: Any,
     tokenizer: Any,
@@ -303,22 +352,18 @@ def generate(
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_length = inputs.input_ids.shape[1]  # Track input length
 
-    # Phi-3 sometimes has cache issues; disable for safety
-    model_type = getattr(getattr(model, "config", None), "model_type", "")
-    use_cache = model_type != "phi3"
-
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            temperature=0.1,
             do_sample=False,
             pad_token_id=tokenizer.pad_token_id,
-            eos_token_id=tokenizer.eos_token_id,
-            use_cache=use_cache,
+            eos_token_id=_generation_eos_token_ids(tokenizer),
+            use_cache=not _requires_cache_disabled(model),
         )
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=False)
+    generated_tokens = outputs[0][input_length:]
+    text = tokenizer.decode(generated_tokens, skip_special_tokens=False)
 
     # ============== Return usage info if requested ==============
     if return_usage:

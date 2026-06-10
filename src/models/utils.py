@@ -4,7 +4,7 @@ Model helper utilities shared across CLI entry points and runners.
 
 from typing import Any, Mapping, Tuple
 
-from ..constants import AZURE_PREFIX
+AZURE_PREFIX = "azure-"
 
 
 def _get_model_names(entry: Any) -> Tuple[str, str]:

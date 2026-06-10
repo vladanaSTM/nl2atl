@@ -5,13 +5,17 @@ Runs all evaluation steps in sequence:
 1. Summarize judge evaluations per model
 2. Generate inter-rater agreement report
 3. Aggregate metrics across seeds
-4. Generate model efficiency report
+4. Generate accuracy-latency report
 """
 
 import argparse
+import hashlib
+import json
+import platform
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from .summarize_judge_evaluations import summarize_judge_evaluations
 from .aggregate_seeds import aggregate_predictions, _build_notebook
@@ -25,7 +29,89 @@ from ..evaluation.model_efficiency import (
     build_efficiency_notebook,
     EfficiencyWeights,
 )
+from ..evaluation.publication_notebook import (
+    DEFAULT_PUBLICATION_NOTEBOOK_NAME,
+    build_publication_notebook,
+)
+from ..experiment.reporter import get_git_commit
 from ..infra.io import save_json
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _file_manifest(root: Path, pattern: str) -> list[dict]:
+    if not root.exists():
+        return []
+    files = []
+    for path in sorted(root.rglob(pattern)):
+        if not path.is_file():
+            continue
+        files.append(
+            {
+                "path": str(path),
+                "sha256": _sha256_file(path),
+                "bytes": path.stat().st_size,
+            }
+        )
+    return files
+
+
+def _path_manifest(paths: Iterable[Path]) -> list[dict]:
+    files = []
+    for path in sorted({Path(path) for path in paths}, key=str):
+        if not path.exists() or not path.is_file():
+            continue
+        files.append(
+            {
+                "path": str(path),
+                "sha256": _sha256_file(path),
+                "bytes": path.stat().st_size,
+            }
+        )
+    return files
+
+
+def write_reproducibility_manifest(
+    eval_dir: Path,
+    predictions_dir: Path,
+    notebook_paths: Optional[Iterable[Path]] = None,
+) -> Path:
+    """Write a machine-readable manifest for reproducing evaluation reports."""
+    report_files = _file_manifest(eval_dir, "*.json")
+    if notebook_paths is None:
+        report_files += _file_manifest(eval_dir, "*.ipynb")
+    else:
+        report_files += _path_manifest(notebook_paths)
+
+    manifest = {
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "git_commit": get_git_commit(),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "inputs": {
+            "prediction_files": _file_manifest(predictions_dir, "*.json"),
+            "evaluated_files": _file_manifest(
+                eval_dir / "evaluated_datasets", "*.json"
+            ),
+        },
+        "reports": report_files,
+        "limitations": [
+            "Azure judge calls request temperature=0, but exact reproducibility also depends on provider-side deployment stability.",
+            "Local GPU fine-tuning can still vary across CUDA, driver, hardware, and library versions despite deterministic settings.",
+            "Conference-ready claims should preserve raw predictions, judged outputs, prompts, configs, package lockfile, and human-validation samples.",
+        ],
+    }
+    manifest_path = eval_dir / "reproducibility_manifest.json"
+    save_json(manifest, manifest_path)
+    return manifest_path
 
 
 def main() -> None:
@@ -66,13 +152,7 @@ def main() -> None:
     parser.add_argument(
         "--skip_efficiency",
         action="store_true",
-        help="Skip model efficiency analysis.",
-    )
-    parser.add_argument(
-        "--gpu_hour_usd",
-        type=float,
-        default=None,
-        help="GPU cost per hour in USD for efficiency calculations.",
+        help="Skip accuracy-latency analysis.",
     )
     parser.add_argument(
         "--weight_accuracy",
@@ -81,21 +161,25 @@ def main() -> None:
         help="Weight for accuracy in efficiency scoring (default: 0.5).",
     )
     parser.add_argument(
-        "--weight_cost",
-        type=float,
-        default=0.25,
-        help="Weight for cost in efficiency scoring (default: 0.25).",
-    )
-    parser.add_argument(
         "--weight_latency",
         type=float,
-        default=0.25,
-        help="Weight for latency in efficiency scoring (default: 0.25).",
+        default=0.5,
+        help="Weight for latency in efficiency scoring (default: 0.5).",
     )
     parser.add_argument(
         "--no_notebook",
         action="store_true",
-        help="Do not generate Jupyter notebooks.",
+        help="Do not generate the publication analysis notebook.",
+    )
+    parser.add_argument(
+        "--notebook_output",
+        default=None,
+        help="Path for the unified notebook (default: <eval_dir>/publication_analysis.ipynb).",
+    )
+    parser.add_argument(
+        "--individual_notebooks",
+        action="store_true",
+        help="Also generate legacy per-report notebooks.",
     )
     args = parser.parse_args()
 
@@ -116,6 +200,9 @@ def main() -> None:
                     input_dir=evaluated_datasets_dir,
                     output_dir=eval_dir,
                     judge_filter=args.judges,
+                    write_notebooks=(
+                        not args.no_notebook and args.individual_notebooks
+                    ),
                 )
                 print("✓ Judge summaries generated successfully")
             except Exception as e:
@@ -134,7 +221,7 @@ def main() -> None:
                         output_path=eval_dir / "agreement_report.json",
                     )
                     print_agreement_summary(agreement_report)
-                    if not args.no_notebook:
+                    if not args.no_notebook and args.individual_notebooks:
                         try:
                             build_agreement_notebook(
                                 eval_dir / "agreement_report.json",
@@ -172,17 +259,17 @@ def main() -> None:
 
                 agg_output = eval_dir / "seed_aggregate_metrics_from_judged.json"
                 agg_output.write_text(
-                    __import__("json").dumps(aggregates, indent=2, ensure_ascii=False),
+                    json.dumps(aggregates, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
                 print(f"✓ Aggregated {len(aggregates)} groups into {agg_output}")
 
-                if not args.no_notebook:
+                if not args.no_notebook and args.individual_notebooks:
                     try:
                         nb = _build_notebook(aggregates, str(agg_output))
                         nb_path = eval_dir / "seed_aggregate_metrics_from_judged.ipynb"
                         nb_path.write_text(
-                            __import__("json").dumps(nb, indent=2),
+                            json.dumps(nb, indent=2),
                             encoding="utf-8",
                         )
                         print(f"✓ Aggregation notebook generated")
@@ -192,21 +279,20 @@ def main() -> None:
                 print(f"✗ Error aggregating seeds: {e}")
                 raise
 
-        # Step 4: Generate efficiency report
+        # Step 4: Generate accuracy-latency report
         if not args.skip_efficiency:
             print("\n" + "=" * 70)
-            print("STEP 4: Generating model efficiency report")
+            print("STEP 4: Generating accuracy-latency report")
             print("=" * 70)
             try:
                 agg_path = eval_dir / "seed_aggregate_metrics_from_judged.json"
                 if not agg_path.exists():
                     print(
-                        f"Warning: Aggregation file not found at {agg_path}, skipping efficiency report"
+                        f"Warning: Aggregation file not found at {agg_path}, skipping accuracy-latency report"
                     )
                 else:
                     weights = EfficiencyWeights(
                         accuracy=args.weight_accuracy,
-                        cost=args.weight_cost,
                         latency=args.weight_latency,
                     )
 
@@ -214,7 +300,6 @@ def main() -> None:
                     efficiency_report = build_efficiency_report_from_aggregate(
                         aggregate_path=agg_path,
                         weights=weights,
-                        gpu_hour_usd=args.gpu_hour_usd,
                         agreement_report_path=(
                             agreement_report_path
                             if agreement_report_path.exists()
@@ -224,19 +309,48 @@ def main() -> None:
 
                     eff_output = eval_dir / "efficiency_report.json"
                     save_json(efficiency_report, eff_output)
-                    print(f"✓ Efficiency report saved to {eff_output}")
+                    print(f"✓ Accuracy-latency report saved to {eff_output}")
 
-                    if not args.no_notebook:
+                    if not args.no_notebook and args.individual_notebooks:
                         try:
                             build_efficiency_notebook(
                                 eff_output, eval_dir / "efficiency_report.ipynb"
                             )
-                            print(f"✓ Efficiency notebook generated")
+                            print(f"✓ Accuracy-latency notebook generated")
                         except Exception as e:
-                            print(f"Warning: Could not build efficiency notebook: {e}")
+                            print(
+                                f"Warning: Could not build accuracy-latency notebook: {e}"
+                            )
             except Exception as e:
-                print(f"✗ Error generating efficiency report: {e}")
+                print(f"✗ Error generating accuracy-latency report: {e}")
                 raise
+
+        notebook_path = None
+        generated_notebooks = []
+        if not args.no_notebook:
+            notebook_path = (
+                Path(args.notebook_output)
+                if args.notebook_output
+                else eval_dir / DEFAULT_PUBLICATION_NOTEBOOK_NAME
+            )
+            build_publication_notebook(eval_dir=eval_dir, output_path=notebook_path)
+            generated_notebooks.append(notebook_path)
+            print(f"✓ Publication analysis notebook saved to {notebook_path}")
+
+            if args.individual_notebooks:
+                generated_notebooks.extend(eval_dir.glob("summary__judge-*.ipynb"))
+                generated_notebooks.extend(
+                    [
+                        eval_dir / "agreement_report.ipynb",
+                        eval_dir / "seed_aggregate_metrics_from_judged.ipynb",
+                        eval_dir / "efficiency_report.ipynb",
+                    ]
+                )
+
+        manifest_path = write_reproducibility_manifest(
+            eval_dir, predictions_dir, notebook_paths=generated_notebooks
+        )
+        print(f"✓ Reproducibility manifest saved to {manifest_path}")
 
         print("\n" + "=" * 70)
         print("✓ Evaluation pipeline completed successfully!")
@@ -247,15 +361,20 @@ def main() -> None:
         print(
             f"  • Seed aggregation: {eval_dir}/seed_aggregate_metrics_from_judged.json"
         )
-        print(f"  • Efficiency report: {eval_dir}/efficiency_report.json")
-        if not args.no_notebook:
-            print("\nGenerated notebooks:")
-            print(f"  • Judge summaries: {eval_dir}/summary__judge-*.ipynb")
-            print(f"  • Agreement report: {eval_dir}/agreement_report.ipynb")
-            print(
-                f"  • Seed aggregation: {eval_dir}/seed_aggregate_metrics_from_judged.ipynb"
-            )
-            print(f"  • Efficiency report: {eval_dir}/efficiency_report.ipynb")
+        print(f"  • Accuracy-latency report: {eval_dir}/efficiency_report.json")
+        if not args.no_notebook and notebook_path is not None:
+            print("\nGenerated notebook:")
+            print(f"  • Publication analysis: {notebook_path}")
+            if args.individual_notebooks:
+                print("\nLegacy individual notebooks:")
+                print(f"  • Judge summaries: {eval_dir}/summary__judge-*.ipynb")
+                print(f"  • Agreement report: {eval_dir}/agreement_report.ipynb")
+                print(
+                    f"  • Seed aggregation: {eval_dir}/seed_aggregate_metrics_from_judged.ipynb"
+                )
+                print(
+                    f"  • Accuracy-latency report: {eval_dir}/efficiency_report.ipynb"
+                )
 
     except Exception as e:
         print(f"\n✗ Pipeline failed with error: {e}", file=sys.stderr)

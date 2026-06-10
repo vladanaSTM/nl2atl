@@ -8,6 +8,16 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from ..constants import DEFAULT_LLM_EVAL_DIR
+
+DEFAULT_EVALUATED_DATASETS_DIR = f"{DEFAULT_LLM_EVAL_DIR}/evaluated_datasets"
+DEFAULT_AGREEMENT_REPORT_PATH = f"{DEFAULT_LLM_EVAL_DIR}/agreement_report.json"
+DEFAULT_SEED_AGGREGATE_PATH = (
+    f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.json"
+)
+DEFAULT_SEED_AGGREGATE_NOTEBOOK_PATH = (
+    f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.ipynb"
+)
 
 NUMERIC_FIELDS = [
     "accuracy",
@@ -22,9 +32,6 @@ NUMERIC_FIELDS = [
     "accuracy_boost_from_llm",
     "no_llm_fallback_count",
     "n_examples",
-    "total_tokens_input",
-    "total_tokens_output",
-    "total_tokens",
     "latency_mean_ms",
     "latency_p50_ms",
     "latency_p95_ms",
@@ -39,6 +46,21 @@ def _safe_mean(values: List[float]) -> float:
 
 def _safe_std(values: List[float]) -> float:
     return statistics.pstdev(values) if len(values) > 1 else 0.0
+
+
+def _aggregate_numeric(values: List[float]) -> Dict[str, float]:
+    mean = _safe_mean(values)
+    std = _safe_std(values)
+    n = len(values)
+    sem = std / (n**0.5) if n > 1 else 0.0
+    ci95 = 1.96 * sem if n > 1 else 0.0
+    return {
+        "mean": mean,
+        "std": std,
+        "n": n,
+        "sem": sem,
+        "ci95": ci95,
+    }
 
 
 def _iter_prediction_files(input_dir: Path) -> Iterable[Path]:
@@ -143,14 +165,18 @@ def _load_agreement_scores(
 def aggregate_predictions(
     input_dir: Path,
     agreement_report_path: Optional[Path] = None,
+    combine_judges: bool = False,
 ) -> List[Dict[str, Any]]:
     """Aggregate predictions with optional agreement scores.
 
     Args:
         input_dir: Directory with prediction files
         agreement_report_path: Optional path to agreement_report.json
+        combine_judges: Combine files from different judges into one group
     """
-    grouped: Dict[Tuple[str, str, bool, bool], List[Dict[str, Any]]] = defaultdict(list)
+    grouped: Dict[Tuple[str, str, bool, bool, Optional[str]], List[Dict[str, Any]]] = (
+        defaultdict(list)
+    )
 
     # Load agreement scores if provided
     agreement_scores = _load_agreement_scores(agreement_report_path)
@@ -167,13 +193,19 @@ def aggregate_predictions(
         finetuned = bool(metadata.get("finetuned", False))
         few_shot = bool(metadata.get("few_shot", False))
         seed = metadata.get("seed")
+        judge_model = (
+            metadata.get("judge_model")
+            or metadata.get("judge")
+            or (path.parent.name if path.parent != input_dir else None)
+        )
+        group_judge = None if combine_judges else str(judge_model or "unknown")
 
         metrics = _extract_metrics(payload)
 
         # Add agreement scores if available for this source file
         # The agreement report keys use base filename (without judge suffix)
-        # e.g., "ds-r1-qwen-32b_baseline_few_shot_seed42.json"
-        # matches prediction file "ds-r1-qwen-32b_baseline_few_shot_seed42__judge-ds-v3.2.json"
+        # e.g., "qwen-coder-7b_baseline_few_shot_seed42.json"
+        # matches prediction file "qwen-coder-7b_baseline_few_shot_seed42__judge-ds-v3.2.json"
         source_file = path.name
         base_source = (
             source_file.split("__judge-")[0] + ".json"
@@ -184,9 +216,10 @@ def aggregate_predictions(
         if base_source in agreement_scores:
             metrics["judge_agreement"] = agreement_scores[base_source]
 
-        grouped[(model_short, condition, finetuned, few_shot)].append(
+        grouped[(model_short, condition, finetuned, few_shot, group_judge)].append(
             {
                 "seed": seed,
+                "judge_model": judge_model,
                 "model": metadata.get("model"),
                 "model_short": model_short,
                 "condition": condition,
@@ -198,7 +231,13 @@ def aggregate_predictions(
         )
 
     aggregates: List[Dict[str, Any]] = []
-    for (model_short, condition, finetuned, few_shot), items in grouped.items():
+    for (
+        model_short,
+        condition,
+        finetuned,
+        few_shot,
+        judge_model,
+    ), items in grouped.items():
         agg_metrics: Dict[str, Dict[str, float]] = {}
         for field in NUMERIC_FIELDS:
             values = [
@@ -207,10 +246,7 @@ def aggregate_predictions(
                 if i["metrics"].get(field) is not None
             ]
             if values:
-                agg_metrics[field] = {
-                    "mean": _safe_mean(values),
-                    "std": _safe_std(values),
-                }
+                agg_metrics[field] = _aggregate_numeric(values)
 
         # Aggregate judge agreement scores if present
         agg_agreement_temp: Dict[str, List[float]] = {}
@@ -228,21 +264,29 @@ def aggregate_predictions(
         for key in agg_agreement_temp:
             values = agg_agreement_temp[key]
             if values:
-                agg_agreement[key] = {
-                    "mean": _safe_mean(values),
-                    "std": _safe_std(values),
-                }
+                agg_agreement[key] = _aggregate_numeric(values)
+
+        unique_seeds = sorted(
+            {item["seed"] for item in items if item.get("seed") is not None}
+        )
+        judge_models = sorted(
+            {str(item["judge_model"]) for item in items if item.get("judge_model")}
+        )
 
         aggregate_entry = {
             "model_short": model_short,
             "condition": condition,
             "finetuned": finetuned,
             "few_shot": few_shot,
-            "num_seeds": len(items),
+            "judge_model": judge_model,
+            "judge_models": judge_models,
+            "num_seeds": len(unique_seeds) if unique_seeds else len(items),
+            "num_runs": len(items),
             "metrics": agg_metrics,
             "per_seed": [
                 {
                     "seed": i["seed"],
+                    "judge_model": i["judge_model"],
                     "metrics": i["metrics"],
                     "source": i["source"],
                 }
@@ -307,10 +351,12 @@ def _build_notebook(
         "    aggregates = json.load(fh)\n",
         "rows = []\n",
         "for g in aggregates:\n",
-        "    row = {k: g.get(k) for k in ('model_short','condition','finetuned','few_shot','num_seeds')}\n",
+        "    row = {k: g.get(k) for k in ('model_short','condition','finetuned','few_shot','judge_model','num_seeds','num_runs')}\n",
         "    for metric,vals in (g.get('metrics') or {}).items():\n",
         "        row[f'{metric}_mean'] = vals.get('mean')\n",
         "        row[f'{metric}_std'] = vals.get('std')\n",
+        "        row[f'{metric}_ci95'] = vals.get('ci95')\n",
+        "        row[f'{metric}_n'] = vals.get('n')\n",
         "    # Add confidence score (mean if aggregated)\n",
         "    judge_agreement = g.get('judge_agreement', {})\n",
         "    conf_score = judge_agreement.get('confidence_score')\n",
@@ -324,15 +370,61 @@ def _build_notebook(
         "# Show top models by accuracy with confidence scores\n",
         "if 'accuracy_mean' in df.columns:\n",
         "    top_models = df.sort_values('accuracy_mean', ascending=False).head(10)\n",
-        "    display_cols = ['model_short', 'condition', 'accuracy_mean', 'confidence_score', 'num_seeds']\n",
+        "    display_cols = ['model_short', 'condition', 'judge_model', 'accuracy_mean', 'accuracy_ci95', 'confidence_score', 'num_seeds']\n",
         "    print('\\n=== Top 10 Most Accurate Models (with Confidence Scores) ===')\n",
         "    display(top_models[[c for c in display_cols if c in top_models.columns]])\n",
         "    plot_df = top_models\n",
         "    plt.figure(figsize=(12,6))\n",
         "    sns.barplot(data=plot_df, x='accuracy_mean', y='model_short', hue='condition', dodge=False)\n",
-        "    plt.title('Top 10 Groups by Accuracy (with Judge Agreement Scores)')\n",
+        "    if 'accuracy_ci95' in plot_df.columns:\n",
+        "        for idx, row in enumerate(plot_df.itertuples()):\n",
+        "            ci = getattr(row, 'accuracy_ci95', None)\n",
+        "            if pd.notna(ci):\n",
+        "                plt.errorbar(row.accuracy_mean, idx, xerr=ci, fmt='none', color='black', capsize=3)\n",
+        "    plt.title('Top 10 Groups by Accuracy with Approx. 95% CI')\n",
         "    plt.tight_layout()\n",
         "    plt.show()\n",
+    ]
+
+    paired_comparison = [
+        "# Paired seed comparisons for models evaluated on shared seeds\n",
+        "seed_rows = []\n",
+        "for g in aggregates:\n",
+        "    for item in g.get('per_seed', []):\n",
+        "        metrics = item.get('metrics') or {}\n",
+        "        seed_rows.append({\n",
+        "            'model_short': g.get('model_short'),\n",
+        "            'condition': g.get('condition'),\n",
+        "            'judge_model': g.get('judge_model'),\n",
+        "            'seed': item.get('seed'),\n",
+        "            'accuracy': metrics.get('accuracy'),\n",
+        "        })\n",
+        "seed_df = pd.DataFrame(seed_rows).dropna(subset=['seed', 'accuracy'])\n",
+        "comparisons = []\n",
+        "for (condition, judge_model), part in seed_df.groupby(['condition', 'judge_model'], dropna=False):\n",
+        "    pivot = part.pivot_table(index='seed', columns='model_short', values='accuracy', aggfunc='mean')\n",
+        "    models = list(pivot.columns)\n",
+        "    for i, left in enumerate(models):\n",
+        "        for right in models[i + 1:]:\n",
+        "            paired = pivot[[left, right]].dropna()\n",
+        "            if paired.empty:\n",
+        "                continue\n",
+        "            delta = paired[left] - paired[right]\n",
+        "            comparisons.append({\n",
+        "                'condition': condition,\n",
+        "                'judge_model': judge_model,\n",
+        "                'model_a': left,\n",
+        "                'model_b': right,\n",
+        "                'shared_seeds': len(delta),\n",
+        "                'mean_accuracy_delta_a_minus_b': delta.mean(),\n",
+        "                'wins_a': int((delta > 0).sum()),\n",
+        "                'ties': int((delta == 0).sum()),\n",
+        "            })\n",
+        "comparison_df = pd.DataFrame(comparisons)\n",
+        "if comparison_df.empty:\n",
+        "    print('No paired seed comparisons available.')\n",
+        "else:\n",
+        "    display(comparison_df.sort_values('mean_accuracy_delta_a_minus_b', ascending=False).head(30))\n",
     ]
 
     # Display table sorted by accuracy_mean if available, otherwise fallback
@@ -366,6 +458,16 @@ def _build_notebook(
         }
     )
 
+    nb_cells.append(
+        {
+            "cell_type": "code",
+            "metadata": {"language": "python"},
+            "execution_count": None,
+            "outputs": [],
+            "source": paired_comparison,
+        }
+    )
+
     nb = {
         "cells": nb_cells,
         "metadata": {
@@ -385,18 +487,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--input_dir",
-        default="outputs/LLM-evaluation/evaluated_datasets",
+        default=DEFAULT_EVALUATED_DATASETS_DIR,
         help="Directory containing evaluated JSON files.",
     )
     parser.add_argument(
         "--agreement_report",
-        default="outputs/LLM-evaluation/agreement_report.json",
+        default=DEFAULT_AGREEMENT_REPORT_PATH,
         help="Optional path to agreement_report.json for judge agreement scores.",
     )
     parser.add_argument(
         "--output",
-        default="outputs/seed_aggregate_metrics_from_judged.json",
+        default=DEFAULT_SEED_AGGREGATE_PATH,
         help="Path to write aggregated metrics JSON.",
+    )
+    parser.add_argument(
+        "--combine_judges",
+        action="store_true",
+        help="Combine evaluated files from different judges into one aggregate group.",
     )
     # Notebook enabled by default; provide --no-notebook to disable
     parser.set_defaults(notebook=True)
@@ -414,7 +521,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--notebook_output",
-        default="outputs/seed_aggregate_metrics_from_judged.ipynb",
+        default=DEFAULT_SEED_AGGREGATE_NOTEBOOK_PATH,
         help="Path to write the generated Jupyter notebook.",
     )
     args = parser.parse_args()
@@ -427,7 +534,11 @@ def main() -> None:
         Path(args.agreement_report) if args.agreement_report else None
     )
 
-    aggregates = aggregate_predictions(input_dir, agreement_report_path)
+    aggregates = aggregate_predictions(
+        input_dir,
+        agreement_report_path,
+        combine_judges=args.combine_judges,
+    )
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

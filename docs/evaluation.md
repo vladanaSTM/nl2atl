@@ -1,231 +1,140 @@
-# Evaluation guide
+# Evaluation
 
-This guide explains the evaluation pipeline: exact‑match scoring, LLM‑as‑judge evaluation, agreement metrics, and the efficiency report.
+Evaluation is a two-step correctness check followed by optional judge agreement and reporting.
 
-## Overview
+## Prediction Files
 
-```mermaid
-flowchart LR
-    A[Exact match] --> C[Agreement]
-    B[LLM judge] --> C
-    C --> D[Efficiency report]
-```
+Experiments write JSON files under `outputs/model_predictions/`. Each row includes:
 
-## Exact match
+- `input`
+- `expected`
+- `expected_options`
+- `generated`
+- `raw_generation`
+- `generation_prompt_sha256`
+- `generation_config`
+- `few_shot_example_ids` when few-shot prompting is enabled
+- `token_usage` and `usage_estimated` when usage data is available
+- `exact_match`
+- `latency_ms`
 
-Exact‑match compares generated formulas to references after normalization:
+Top-level metadata records the dataset path/hash, model and experiment config paths/hashes, `pyproject.toml` and `uv.lock` hashes when present, command arguments, run timing, latency summaries, and a `split_manifest_path`/`split_manifest_sha256`. The split manifest under `outputs/split_manifests/` records ordered train, validation, and test membership by stable IDs and content hashes. Augmentation is deterministic from the training split, seed, and config, so augmented rows are not duplicated there.
 
-- Strip whitespace
-- Normalize operators `∧`, `∨`, `¬`, `→` to ASCII
-- Lowercase the formula
+## Step 1: Exact Match
 
-This is the default baseline metric used across the project.
+Exact match runs first. It normalizes formulas by lowercasing, removing whitespace, and normalizing common logical-symbol variants to the project's ASCII form.
 
-## LLM‑as‑judge
+Before comparison, model text is cleaned only at chat boundaries: prompt echoes and explicit assistant stop tokens are removed when present. The evaluator does not parse, repair, validate, or extract a best-looking ATL formula from a longer answer; malformed or verbose model output is kept in `generated` and evaluated as-is.
 
-The LLM judge checks semantic correctness beyond exact string match.
+For rows with multiple gold formulas, exact match succeeds if the prediction matches any formula in `expected_options`.
 
-Run:
+## Step 2: LLM Judge
+
+The LLM judge runs only for predictions that are not exact matches.
 
 ```bash
-nl2atl llm-judge --datasets all
+uv run nl2atl llm-judge --datasets all
 ```
 
-Use `--overwrite` or `--force` to re‑evaluate existing outputs.
+By default, judge runs use GPT-5.2 and DeepSeek V3.2. GPT-4.1 and GPT-5.4 are reserved for generation baselines, so the strongest generator is not also the only evaluator in the main comparison.
 
-### Judge prompt
+Useful options:
 
-The prompt is defined in [src/evaluation/llm_judge/prompts.py](../src/evaluation/llm_judge/prompts.py) and expects JSON like:
+| Option | Purpose |
+|---|---|
+| `--datasets all` | Evaluate all prediction JSON files under `outputs/model_predictions/` |
+| `--datasets file.json` | Evaluate one prediction file by path, name, or name without `.json` |
+| `--models gpt-5.2` | Select one or more Azure judge models; aliases include `--model`, `--judge_model`, and `--judge_models` |
+| `--no_llm` | Write judged artifacts using exact-match decisions only, without API calls |
+| `--overwrite` | Re-evaluate existing judged files |
+| `--predictions_dir` / `--output_dir` | Override input and output directories |
+
+The judge sees the natural-language input, the model prediction, and all accepted gold formulas. It returns:
 
 ```json
-{ "correct": "yes" | "no", "reasoning": "..." }
+{ "correct": "yes", "reasoning": "..." }
 ```
 
-### Output format
+Judged outputs are written to `outputs/LLM-evaluation/evaluated_datasets/<judge>/`. Each judged row keeps the parsed decision plus the prompt version, prompt hash, raw judge response, parse status, judge latency, and a decision method such as `exact`, `llm`, `no_llm`, or `unmatched`.
 
-Each evaluated file contains run metadata plus `detailed_results`:
+Existing judged files are reused when their prompt version matches the current judge prompt. If the prompt version changes, they are regenerated.
 
-```json
-{
-  "run_name": "qwen-3b_baseline_zero_shot",
-  "judge_model": "gpt-5.2",
-  "metrics": {
-    "n_examples": 90,
-    "exact_match": 0.82
-  },
-  "detailed_results": [
-    {
-      "input": "...",
-      "gold": "<<User>>F p",
-      "prediction": "<<User>>F p",
-      "correct": "yes",
-      "reasoning": "Exact match \(normalized\)",
-      "decision_method": "exact"
-    }
-  ]
-}
-```
+## Agreement
 
-## Judge agreement
-
-Compute agreement across judge outputs:
+Use agreement metrics when multiple judges evaluate the same predictions:
 
 ```bash
-nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
+uv run nl2atl judge-agreement
 ```
 
-The report includes:
+The report includes pairwise Cohen's kappa, Fleiss' kappa, Krippendorff's alpha, and optional disagreement examples.
 
-- Pairwise Cohen’s $\kappa$
-- Fleiss’ $\kappa$ when all judges rate the same items
-- Krippendorff’s $\alpha$
-- Optional disagreement samples
+## Human Judge Calibration Sample
 
-## Model efficiency report
-
-This report aggregates accuracy, latency, and cost across models and derives normalized composite
-scores. This helps quantify trade‑offs between quality and resource usage, enabling comparisons of
-“best overall,” “cheapest,” and “fastest” models.
-
-Run:
+For publication-facing human validation, create a blind stratified audit set from the paired LLM-judge outputs:
 
 ```bash
-nl2atl model-efficiency --predictions_dir outputs/model_predictions
+uv run nl2atl human-eval-sample
 ```
 
-Outputs:
+The default package is written to `outputs/LLM-evaluation/human_evaluation/`. It includes a 600-item AAAI-oriented core sample, a master blind XLSX workbook, two annotator-specific XLSX workbooks, a keyed metadata file for post-annotation analysis, and a protocol document. Exact matches are excluded from the default human workload because they are accepted by deterministic normalization before LLM judging. The XLSX files show accepted formulas as `gold_1` and optional `gold_2`, restrict `correct` to `yes`/`no`, and restrict `annotator_id` to anonymous IDs. The blind files intentionally hide generator identity, judge identity, judge decisions, judge reasoning, and sampling strata from annotators. CSV/JSON/JSONL blind files and the full disagreement pool can be generated with `--legacy_formats` and `--write_disagreement_pool` when needed, but they are not required for the normal annotation workflow.
 
-- `outputs/LLM-evaluation/efficiency_report.json`
-- `outputs/LLM-evaluation/efficiency_report.ipynb`
+The default core sample is enriched for judge calibration rather than raw population prevalence: all unique rare reverse disagreements are included, common disagreements are oversampled, and LLM agreement controls are retained. The sample is designed to answer whether the LLM judges are trustworthy on cases where deterministic exact match cannot decide correctness.
 
-### Metrics and rankings
+Sampling starts from the full paired-judge population of 13,200 evaluated prediction items, each judged by DeepSeek V3.2 and GPT-5.2. Exact matches are removed because they are accepted automatically before LLM judging. The remaining items are grouped by judge-decision stratum, with disagreement strata oversampled because they reveal which judge is closer to human expert labels. Agreement controls are retained to test whether consensus labels are reliable: `llm_agree_yes` detects overly permissive consensus, and `llm_agree_no` detects overly strict consensus. Duplicate `input` + accepted gold formulas + `prediction` triples are collapsed in the core sample to avoid redundant annotation, while the private key file keeps the hidden source metadata. Within each stratum, examples are spread across generator model, condition, and seed so the sample is not dominated by one run.
 
-The report includes:
+Current default sample composition:
 
-- Accuracy (LLM‑judge accuracy when available, else exact‑match).
-- Average cost and total cost (USD).
-- Latency statistics and throughput.
-- Composite efficiency score: normalized weighted sum of accuracy, cost, and latency.
-- **Confidence score**: Inter‑rater agreement (Cohen's $\kappa$) across judges, aggregated across all seeds for the model‑condition pair. This indicates how much judges agree on the model's outputs (range 0–1, higher = stronger agreement). The score is computed as the mean pairwise kappa with uncertainty bounds (mean ± std).
-- Rankings for cheapest, fastest, most accurate, and best composite score, all including confidence scores.
+| Stratum | Meaning | Count |
+|---|---|---:|
+| `disagree_ds_no_gpt_yes` | DeepSeek rejects, GPT accepts | 26 |
+| `disagree_ds_yes_gpt_no` | DeepSeek accepts, GPT rejects | 334 |
+| `llm_agree_no` | both judges reject | 120 |
+| `llm_agree_yes` | both judges accept | 120 |
+| **Total** |  | **600** |
 
-### USD cost calculation and pricing sources
+Use two ATL-literate project annotators when possible. They should annotate independently first, then resolve disagreements through a documented adjudication/discussion pass. After annotation, report human-human agreement before adjudication, the number of human-human disagreements, LLM-human agreement per judge, adjudicated accuracy by stratum, the deterministic exact-match policy, and whether the main model ranking is stable under human adjudication.
 
-Costs are derived from token usage and the per‑1k pricing in `configs/models.yaml`.
-
-For Azure models:
-
-$$
-  ext{cost} = \frac{\text{tokens\_input}}{1000} \cdot \text{price\_input\_per\_1k} +
-\frac{\text{tokens\_output}}{1000} \cdot \text{price\_output\_per\_1k}
-$$
-
-Token usage comes from the Azure API (or is estimated via tiktoken when usage is unavailable). Prices
-should match the official Azure OpenAI and Azure AI Foundry Models pricing page.
-
-For local GPU runs with `gpu_hour_usd`:
-
-$$
-  ext{tokens\_per\_hour} = \frac{\text{tokens\_total}}{\text{hours\_used}},
-\quad
-  ext{cost\_per\_1k\_tokens} = \frac{\text{gpu\_hour\_usd}}{\text{tokens\_per\_hour}} \cdot 1000
-$$
-
-For GPU/local models, you can either provide per‑token prices (`price_input_per_1k`,
-`price_output_per_1k`) or a GPU hourly rate (`gpu_hour_usd`) in `configs/models.yaml`. If none of
-these fields are set, cost‑based rankings are skipped for those models.
-
-If you don’t know your GPU cost, you can estimate it:
-
-1) **GPU amortization per hour**:
-  $\text{gpu\_amort\_hour} = \frac{\text{gpu\_price\_usd}}{\text{lifespan\_years} \times 365 \times 24 \times \text{utilization}}$
-  (use public MSRP or a public cloud on‑demand hourly price for an A100 as a proxy).
-2) **Power cost per hour**:
-  $\text{power\_hour} = \frac{\text{avg\_watts}}{1000} \times \text{electricity\_usd\_per\_kwh}$
-  (average watts from `nvidia-smi` and electricity rate from public utility data).
-3) **Overhead**: add 10–30% for shared infrastructure if you want a conservative estimate.
-
-Then set:
-
-$$
-	ext{gpu\_hour\_usd} = \text{gpu\_amort\_hour} + \text{power\_hour} + \text{overhead\_hour}
-$$
-
-If neither per‑token prices nor `gpu_hour_usd` is set, cost rankings are omitted for that model.
-
-### Confidence scores (judge agreement)
-
-The efficiency report includes **confidence scores** that reflect inter‑rater agreement across judges. This metric helps identify whether model outputs are inherently ambiguous or whether judges consistently agree on correctness.
-
-#### What is a confidence score?
-
-The confidence score is the mean Cohen's $\kappa$ coefficient computed pairwise between all judge pairs, then aggregated across all seeds for a given model‑condition combination. It measures agreement on a scale of 0–1:
-
-- **0.8–1.0**: Very strong agreement (judges almost always agree)
-- **0.6–0.8**: Strong agreement (judges frequently agree)
-- **0.4–0.6**: Moderate agreement (judges sometimes disagree)
-- **0.0–0.4**: Weak or poor agreement (judges often disagree)
-
-#### Interpretation
-
-A **high confidence score** suggests:
-- Model outputs are unambiguous to evaluators
-- Judge disagreements are rare (more reliable accuracy estimates)
-- The accuracy metric is trustworthy
-
-A **low confidence score** suggests:
-- Model outputs are borderline or ambiguous
-- Judges frequently disagree (noisy accuracy estimates)
-- Consider manual review to understand disagreement sources
-
-#### In the efficiency report
-
-Confidence scores appear in:
-
-1. **JSON output** (`efficiency_report.json`): Each model includes `confidence_score` (scalar, range 0–1)
-2. **Notebook tables** (`efficiency_report.ipynb`): Rankings display confidence_score alongside accuracy
-3. **Seed aggregation** (`seed_aggregate_metrics_from_judged.json`): Each model includes `judge_agreement` with mean and std
-
-#### Example workflow
+After annotators complete their blind XLSX workbooks, merge them with the private key:
 
 ```bash
-# Run LLM-as-judge evaluation across multiple judges
-nl2atl llm-judge --datasets all
-
-# Compute inter‑judge agreement
-nl2atl judge-agreement --eval_dir outputs/LLM-evaluation/evaluated_datasets
-
-# Generate efficiency report with confidence scores
-nl2atl model-efficiency --predictions_dir outputs/model_predictions
+uv run nl2atl human-eval-merge outputs/LLM-evaluation/human_evaluation/annotations/annotator_1_blind.xlsx outputs/LLM-evaluation/human_evaluation/annotations/annotator_2_blind.xlsx
 ```
 
-The confidence scores are automatically integrated into all rankings and visualizations.
+Annotators only need to fill the `correct` column with `yes` or `no`, marking `yes` when `prediction` is equivalent to either `gold_1` or a non-empty `gold_2`. Use the XLSX templates to avoid typos in the `correct` and `annotator_id` columns. The merge command reads completed XLSX files and writes analysis-ready CSV, JSON, and JSONL files under `outputs/LLM-evaluation/human_evaluation/merged/`, with human labels, human-human status, per-judge LLM-human agreement fields, generator metadata, judge decisions, and hidden sampling strata joined by `audit_id`. Human-human disagreements are marked with `needs_adjudication=yes`, `human_final_correct=pending_adjudication`, and per-annotator match columns, so they remain analyzable before the final discussion pass. Free-text human reasoning is intentionally not part of the annotation or merged output; keep any adjudication notes separately only when a disagreement needs discussion.
 
-## Human annotations
-
-You can add a human‑annotated file as an additional judge during agreement analysis.
-The human file may be either a list of items or a metadata dictionary with an `annotations` list.
-
-Minimal item schema:
-
-```json
-{
-  "input": "...",
-  "gold": "<<A>>F goal",
-  "prediction": "<<A>>F goal",
-  "correct": "yes"
-}
-```
-
-Run with humans:
+To regenerate only the blank anonymous annotation workbooks from the existing 600-item key, without resampling the audit set, run:
 
 ```bash
-nl2atl judge-agreement \
-  --eval_dir outputs/LLM-evaluation/evaluated_datasets \
-  --human_annotations path/to/human_annotations.json
+uv run nl2atl human-eval-sample --regenerate_annotator_workbooks
 ```
 
-## Extending evaluation
+The command writes new files under `outputs/LLM-evaluation/human_evaluation/annotations/` and backs up existing annotator workbooks before replacing them.
 
-Implement custom evaluators by extending `BaseEvaluator` in [src/evaluation/base.py](../src/evaluation/base.py) and wiring them into your workflow.
+## Combined Reports
 
+```bash
+uv run nl2atl generate-eval-reports
+```
+
+This builds judge summaries, agreement reports, seed aggregates, an accuracy-latency report, one publication-focused notebook at `outputs/LLM-evaluation/publication_analysis.ipynb`, and a `reproducibility_manifest.json`.
+
+The pipeline has skip flags for each stage: `--skip_judge_summaries`, `--skip_agreement`, `--skip_seed_aggregation`, and `--skip_efficiency`. Use `--no_notebook` to skip the unified notebook, `--notebook_output` to change its path, or `--individual_notebooks` when you also need the older per-report notebooks.
+
+The publication notebook is intentionally compact for paper writing: final judged accuracy, seed variability, exact-match versus LLM-judge contribution, judge reliability, accuracy-latency Pareto analysis, and a reproducibility snapshot. Use `--individual_notebooks` only when you explicitly need the older per-report notebooks for debugging.
+
+Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
+
+The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, split manifests, judged outputs, configs, lockfile, prompt versions, judge agreement report, publication notebook, and any human-validation sample used to calibrate the judges.
+
+## Accuracy-Latency Report
+
+If you already have an aggregate file, build only the accuracy-latency report:
+
+```bash
+uv run nl2atl model-efficiency
+```
+
+The report keeps accuracy and latency separate, then adds deterministic helper rankings such as fastest model, most accurate model, best accuracy per second, highest throughput, and a Pareto frontier.
+
+Options include `--top_k`, `--include_per_seed`, `--weight_accuracy`, `--weight_latency`, and `--no_notebook`. The report intentionally avoids monetary pricing, GPU-hour estimates, and token-derived statistics; use it for accuracy and latency comparisons only.

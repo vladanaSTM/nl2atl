@@ -3,11 +3,13 @@ from pathlib import Path
 
 from src.evaluation.model_efficiency import (
     build_efficiency_report,
+    build_efficiency_report_from_aggregate,
+    build_efficiency_notebook,
     resolve_prediction_files,
 )
 
 
-def test_gpu_hour_cost_derivation(tmp_path: Path) -> None:
+def test_latency_derivations(tmp_path: Path) -> None:
     prediction_path = tmp_path / "model_run.json"
 
     metadata = {
@@ -15,18 +17,15 @@ def test_gpu_hour_cost_derivation(tmp_path: Path) -> None:
         "model": "local-a100",
         "model_short": "a100",
         "total_samples": 2,
-        "gpu_hour_usd": 10.0,
         "duration_seconds": 3600.0,
         "metrics": {
-            "total_tokens_input": 400,
-            "total_tokens_output": 600,
-            "total_tokens": 1000,
+            "exact_match": 0.5,
         },
     }
 
     predictions = [
-        {"id": "ex1", "tokens_input": 200, "tokens_output": 300},
-        {"id": "ex2", "tokens_input": 200, "tokens_output": 300},
+        {"id": "ex1"},
+        {"id": "ex2"},
     ]
 
     prediction_path.write_text(
@@ -37,11 +36,12 @@ def test_gpu_hour_cost_derivation(tmp_path: Path) -> None:
     assert report["totals"]["models"] == 1
 
     entry = report["models"][0]
-    assert entry["gpu_hour_usd"] == 10.0
-    assert entry["cost_total_usd"] == 10.0
-    assert entry["avg_cost_usd"] == 5.0
-    assert entry["tokens_per_hour"] == 1000.0
-    assert entry["cost_per_1k_tokens_usd"] == 10.0
+    assert entry["accuracy"] == 0.5
+    assert entry["latency_total_ms"] == 3600000.0
+    assert entry["latency_mean_ms"] == 1800000.0
+    assert entry["duration_seconds"] == 3600.0
+    assert entry["throughput_samples_per_sec"] == 0.000556
+    assert entry["accuracy_per_second"] == 0.000278
 
 
 def test_resolve_prediction_files(tmp_path):
@@ -69,7 +69,6 @@ def test_build_efficiency_report_with_summary(tmp_path):
                     "model": "m1",
                     "model_short": "m1",
                     "total_samples": 2,
-                    "avg_cost_usd": 2.0,
                     "latency_mean_ms": 100.0,
                 },
                 "predictions": [
@@ -94,3 +93,53 @@ def test_build_efficiency_report_with_summary(tmp_path):
     assert entry["accuracy"] == 0.8
     assert entry["accuracy_source"] == "llm_judge"
     assert entry["efficiency_score"] is not None
+    assert report["totals"]["with_latency"] == 1
+    assert "pareto_frontier" in report
+
+
+def test_efficiency_report_from_aggregate_preserves_judge_identity(tmp_path):
+    aggregate_path = tmp_path / "aggregate.json"
+    aggregate_path.write_text(
+        json.dumps(
+            [
+                {
+                    "model_short": "qwen-3b",
+                    "condition": "baseline_zero_shot",
+                    "judge_model": "judge-a",
+                    "judge_models": ["judge-a"],
+                    "num_seeds": 3,
+                    "num_runs": 3,
+                    "metrics": {
+                        "accuracy": {"mean": 0.72, "std": 0.02},
+                        "latency_mean_ms": {"mean": 120.0},
+                        "n_examples": {"mean": 100},
+                    },
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = build_efficiency_report_from_aggregate(aggregate_path)
+
+    entry = report["models"][0]
+    assert entry["judge_model"] == "judge-a"
+    assert entry["judge_models"] == ["judge-a"]
+    assert entry["num_runs"] == 3
+    assert report["pareto_frontier"][0]["judge_model"] == "judge-a"
+    assert report["rankings"]["most_accurate"][0]["judge_model"] == "judge-a"
+
+
+def test_efficiency_notebook_cells_have_language_metadata(tmp_path):
+    report_path = tmp_path / "efficiency_report.json"
+    report_path.write_text(
+        json.dumps({"models": [], "pareto_frontier": [], "rankings": {}}),
+        encoding="utf-8",
+    )
+    notebook_path = tmp_path / "efficiency_report.ipynb"
+
+    build_efficiency_notebook(report_path, notebook_path)
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+
+    assert notebook["cells"]
+    assert all(cell["metadata"].get("language") for cell in notebook["cells"])

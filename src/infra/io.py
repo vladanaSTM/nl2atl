@@ -30,14 +30,3 @@ def save_json(
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii, default=str)
-
-
-def load_json_safe(path: Union[str, Path], default: Any = None) -> Any:
-    """Load a JSON file, returning default if file doesn't exist or is invalid."""
-    path = Path(path)
-    if not path.exists():
-        return default if default is not None else {}
-    try:
-        return load_json(path)
-    except (json.JSONDecodeError, IOError):
-        return default if default is not None else {}

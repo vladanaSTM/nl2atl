@@ -4,6 +4,8 @@ Run the ATL LLM-as-a-judge evaluator over prediction files.
 """
 
 import argparse
+import hashlib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,20 @@ from ..evaluation.llm_judge import (
     evaluate_prediction_file,
 )
 from ..models.utils import resolve_model_key
+
+
+def _sha256_file(path: Path) -> Optional[str]:
+    if not path.exists() or not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def resolve_prediction_files(predictions_dir: Path, datasets: list) -> list:
@@ -61,9 +77,9 @@ def resolve_judge_models(
     judge_models: Optional[list],
     judge_model: Optional[str],
 ) -> list:
-    """Resolve judge models from config or fall back to a fixed allowed set.
+    """Resolve Azure judge models from config or fall back to allowed defaults.
 
-    Allowed default judges: `llama-70b`, `gpt-5.2`, `DeepSeek-V3.2`.
+    Allowed default judges: `gpt-5.2`, `DeepSeek-V3.2`.
     If a models config exists and contains matching keys those entries are used;
     otherwise a simple `ModelConfig` with provider="azure" is returned for
     the requested names.
@@ -83,10 +99,6 @@ def resolve_judge_models(
                 for name in judge_models
             ]
         return [
-            (
-                "llama-70b",
-                ModelConfig(name="llama-70b", short_name="llama-70b", provider="azure"),
-            ),
             (
                 "gpt-5.2",
                 ModelConfig(name="gpt-5.2", short_name="gpt-5.2", provider="azure"),
@@ -114,26 +126,38 @@ def resolve_judge_models(
                 selected_keys.append(key)
                 seen.add(key)
     else:
-        # Default selection: only the allowed three, in this order.
-        default_keys = ["llama-70b", "gpt-5.2", "DeepSeek-V3.2"]
-        selected_keys = [k for k in default_keys if k in models]
+        # Default selection: only the allowed API judges, in this order.
+        default_keys = ["gpt-5.2", "DeepSeek-V3.2"]
+        selected_keys = [
+            k
+            for k in default_keys
+            if k in models
+            and isinstance(models.get(k), dict)
+            and str(models[k].get("provider", "")).lower() == "azure"
+        ]
         if not selected_keys:
             # If none of the allowed keys exist in the config, fall back to any
-            # available azure-models or the first few entries in the config.
+            # available Azure models.
             azure_keys = [
                 key
                 for key, data in models.items()
                 if isinstance(data, dict)
                 and str(data.get("provider", "huggingface")).lower() == "azure"
             ]
-            selected_keys = azure_keys or list(models.keys())[:3]
+            selected_keys = azure_keys
 
     resolved = []
     for key in selected_keys:
         data = models.get(key)
         if not isinstance(data, dict):
             continue
-        resolved.append((key, ModelConfig(**data)))
+        model_config = ModelConfig(**data)
+        if model_config.provider.lower() != "azure":
+            raise ValueError(
+                f"Judge model '{key}' uses provider '{model_config.provider}'. "
+                "LLM judge models must use provider='azure'."
+            )
+        resolved.append((key, model_config))
 
     return resolved
 
@@ -208,7 +232,6 @@ def main():
         default="configs/models.yaml",
         help="Models config file (default: configs/models.yaml)",
     )
-    # Note: HF-size filtering (--hf_min_params_b / --hf_only) removed.
     parser.add_argument(
         "--predictions_dir",
         default="outputs/model_predictions",
@@ -229,6 +252,11 @@ def main():
         "--force",
         action="store_true",
         help="Re-evaluate datasets even if evaluated outputs already exist.",
+    )
+    parser.add_argument(
+        "--agreement_notebook",
+        action="store_true",
+        help="Also write the legacy agreement_report.ipynb notebook.",
     )
     args = parser.parse_args()
 
@@ -278,15 +306,21 @@ def main():
 
             if evaluated_path.exists() and not args.overwrite:
                 existing_data = load_json(evaluated_path)
-                rows = extract_evaluated_rows(existing_data)
-                metrics = compute_metrics(rows)
-                stats = compute_stats_from_rows(rows)
+                if existing_data.get("prompt_version") == PROMPT_VERSION:
+                    rows = extract_evaluated_rows(existing_data)
+                    metrics = compute_metrics(rows)
+                    stats = compute_stats_from_rows(rows)
 
-                totals["evaluated"] += int(metrics["evaluated"])
-                totals["auto_exact"] += stats.get("auto_exact", 0)
-                totals["llm_calls"] += stats.get("llm_calls", 0)
-                totals["no_llm"] += stats.get("no_llm", 0)
-                continue
+                    totals["evaluated"] += int(metrics["evaluated"])
+                    totals["auto_exact"] += stats.get("auto_exact", 0)
+                    totals["llm_calls"] += stats.get("llm_calls", 0)
+                    totals["no_llm"] += stats.get("no_llm", 0)
+                    continue
+
+                print(
+                    f"Re-evaluating {evaluated_path.name}: "
+                    f"prompt version changed to {PROMPT_VERSION}."
+                )
 
             prediction_data = load_json(pred_path)
             metadata = extract_prediction_metadata(prediction_data)
@@ -299,7 +333,18 @@ def main():
             evaluated_payload = {
                 **metadata,
                 "judge_model": judge_name,
+                "prompt_version": PROMPT_VERSION,
+                "judge_provider": model_config.provider,
+                "judge_api_model": api_model,
+                "judge_decoding": {
+                    "temperature": 0,
+                    "max_new_tokens": 256,
+                },
                 "source_file": pred_path.name,
+                "source_sha256": _sha256_file(pred_path),
+                "models_config": str(Path(args.models_config)),
+                "models_config_sha256": _sha256_file(Path(args.models_config)),
+                "evaluated_at": _utc_now(),
                 "detailed_results": rows,
             }
             save_json(evaluated_payload, evaluated_path)
@@ -316,7 +361,6 @@ def main():
         from ..evaluation.judge_agreement import (
             generate_agreement_report,
             print_agreement_summary,
-            build_agreement_notebook,
         )
 
         eval_datasets_dir = output_dir / "evaluated_datasets"
@@ -330,14 +374,17 @@ def main():
                 output_path=output_dir / "agreement_report.json",
             )
             print_agreement_summary(agreement_report)
-            try:
-                notebook_path = output_dir / "agreement_report.ipynb"
-                build_agreement_notebook(
-                    output_dir / "agreement_report.json", notebook_path
-                )
-                print(f"Agreement notebook: {notebook_path}")
-            except Exception as e:
-                print(f"Warning: could not build agreement notebook: {e}")
+            if args.agreement_notebook:
+                from ..evaluation.judge_agreement import build_agreement_notebook
+
+                try:
+                    notebook_path = output_dir / "agreement_report.ipynb"
+                    build_agreement_notebook(
+                        output_dir / "agreement_report.json", notebook_path
+                    )
+                    print(f"Agreement notebook: {notebook_path}")
+                except Exception as e:
+                    print(f"Warning: could not build agreement notebook: {e}")
         except ValueError as e:
             print(f"Skipping agreement analysis: {e}")
 

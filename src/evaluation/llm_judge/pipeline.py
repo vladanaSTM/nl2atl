@@ -1,23 +1,32 @@
 """Main LLM judge evaluation pipeline."""
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base import BaseEvaluator
+from ..exact_match import ExactMatchEvaluator
 from ...config import ModelConfig
+from ...data_utils import get_output_options
 from ...infra.io import load_json, save_json
 from ...infra.azure import AzureConfig
 
-from .client import AzureJudgeClient, LocalJudgeClient, JudgeClient, get_client
+from .client import AzureJudgeClient, JudgeClient
 from .metrics import (
     compute_metrics,
-    compute_metrics_with_difficulty,
     _empty_metrics,
     build_summary,
 )
-from .parser import JudgeVerdict, parse_judge_response
+from .parser import parse_judge_response
 from .prompts import PROMPT_VERSION, JudgePromptConfig, format_judge_prompt
+
+_EXACT_MATCH_EVALUATOR = ExactMatchEvaluator()
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 @dataclass
@@ -27,6 +36,11 @@ class JudgeDecision:
     correct: str
     reasoning: str
     decision_method: str
+    prompt_version: Optional[str] = None
+    judge_prompt_sha256: Optional[str] = None
+    raw_judge_response: Optional[str] = None
+    judge_parse_status: Optional[str] = None
+    judge_latency_ms: Optional[float] = None
 
 
 class LLMJudge:
@@ -58,19 +72,16 @@ class LLMJudge:
 
     def _init_client(self) -> None:
         """Initialize the appropriate client based on provider."""
-        if self.provider == "azure":
-            azure_config = AzureConfig.from_env()
-            self.client = AzureJudgeClient(azure_config, model=self.api_model)
+        if self.provider != "azure":
+            raise ValueError(
+                f"Unsupported judge provider: {self.provider}. "
+                "LLM judge models must use provider='azure'."
+            )
 
-        elif self.provider == "huggingface":
-            if not self.model_config:
-                raise ValueError("Local judge requires model_config.")
-            self.client = LocalJudgeClient(self.model_config)
+        azure_config = AzureConfig.from_env()
+        self.client = AzureJudgeClient(azure_config, model=self.api_model)
 
-        else:
-            raise ValueError(f"Unsupported judge provider: {self.provider}")
-
-    def _build_prompt(self, input_text: str, gold: str, prediction: str) -> str:
+    def _build_prompt(self, input_text: str, gold: Any, prediction: str) -> str:
         return format_judge_prompt(
             input_text=input_text,
             gold=gold,
@@ -82,24 +93,38 @@ class LLMJudge:
         verdict = parse_judge_response(raw)
         return verdict.decision, verdict.reasoning or "No reasoning provided."
 
-    def judge(self, input_text: str, gold: str, prediction: str) -> JudgeDecision:
+    def judge(self, input_text: str, gold: Any, prediction: str) -> JudgeDecision:
         """Judge a single prediction."""
         if self.no_llm:
             return JudgeDecision(
                 correct="no",
                 reasoning="LLM disabled; non-exact match treated as incorrect.",
                 decision_method="no_llm",
+                prompt_version=self.prompt_version,
             )
 
         if not self.client:
             raise RuntimeError("LLM client is not configured.")
 
         prompt = self._build_prompt(input_text, gold, prediction)
+        start_time = time.perf_counter()
         raw = self.client.complete(prompt, max_new_tokens=256)
+        latency_ms = (time.perf_counter() - start_time) * 1000
         correct, reasoning = self._parse_response(raw)
 
         return JudgeDecision(
-            correct=correct, reasoning=reasoning, decision_method="llm"
+            correct=correct,
+            reasoning=reasoning,
+            decision_method="llm",
+            prompt_version=self.prompt_version,
+            judge_prompt_sha256=_sha256_text(prompt),
+            raw_judge_response=raw,
+            judge_parse_status=(
+                "invalid"
+                if reasoning == "Judge response was not valid JSON."
+                else "parsed"
+            ),
+            judge_latency_ms=round(latency_ms, 2),
         )
 
 
@@ -130,38 +155,73 @@ class LLMJudgeEvaluator(BaseEvaluator):
             or prediction.get("output")
             or ""
         )
-        gold_text = (
-            reference.get("gold")
-            or reference.get("expected")
-            or reference.get("output", "")
-        )
+        gold_options = get_output_options(reference)
+        gold_text = gold_options[0] if gold_options else ""
+
+        if (
+            pred_text
+            and gold_options
+            and matches_any_gold_option(pred_text, gold_options)
+        ):
+            return {
+                "input": input_text,
+                "gold": gold_text,
+                "gold_options": gold_options,
+                "prediction": pred_text,
+                "correct": "yes",
+                "reasoning": "Exact match against an accepted gold formula.",
+                "decision_method": "exact",
+                "prompt_version": self.prompt_version,
+                "judge_prompt_sha256": None,
+                "raw_judge_response": None,
+                "judge_parse_status": "not_called_exact_match",
+                "judge_latency_ms": None,
+            }
 
         if self.no_llm:
             return {
                 "input": input_text,
                 "gold": gold_text,
+                "gold_options": gold_options,
                 "prediction": pred_text,
                 "correct": "no",
                 "reasoning": "LLM disabled; non-exact match treated as incorrect.",
                 "decision_method": "no_llm",
+                "prompt_version": self.prompt_version,
+                "judge_prompt_sha256": None,
+                "raw_judge_response": None,
+                "judge_parse_status": "not_called_no_llm",
+                "judge_latency_ms": None,
             }
 
         prompt = format_judge_prompt(
             input_text=input_text,
-            gold=gold_text,
+            gold=gold_options or gold_text,
             prediction=pred_text,
             config=self.prompt_config,
         )
+        start_time = time.perf_counter()
         raw = self.client.complete(prompt, max_new_tokens=256)
+        latency_ms = (time.perf_counter() - start_time) * 1000
         verdict = parse_judge_response(raw)
 
         result = {
             "input": input_text,
             "gold": gold_text,
+            "gold_options": gold_options,
             "prediction": pred_text,
             "correct": verdict.decision,
             "reasoning": verdict.reasoning or "No reasoning provided.",
             "decision_method": "llm",
+            "prompt_version": self.prompt_version,
+            "judge_prompt_sha256": _sha256_text(prompt),
+            "raw_judge_response": raw,
+            "judge_parse_status": (
+                "invalid"
+                if verdict.reasoning == "Judge response was not valid JSON."
+                else "parsed"
+            ),
+            "judge_latency_ms": round(latency_ms, 2),
         }
 
         return result
@@ -186,7 +246,40 @@ def normalize_text(text: Optional[str]) -> str:
     return " ".join(str(text).split())
 
 
-def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Optional[str]]]:
+def normalize_formula_for_match(text: Optional[str]) -> str:
+    """Normalize ATL formulas using the same rules as exact-match evaluation."""
+    return _EXACT_MATCH_EVALUATOR.normalize(normalize_text(text))
+
+
+def matches_any_gold_option(prediction: str, gold_options: List[str]) -> bool:
+    """Return whether prediction exactly matches any accepted gold formula."""
+    normalized_prediction = normalize_formula_for_match(prediction)
+    return any(
+        normalized_prediction == normalize_formula_for_match(gold)
+        for gold in gold_options
+    )
+
+
+def _gold_options_from_prediction_item(item: Dict[str, Any]) -> List[str]:
+    options: List[str] = []
+
+    def append(value: Any) -> None:
+        if isinstance(value, list):
+            for entry in value:
+                append(entry)
+            return
+        if isinstance(value, str) and value.strip() and value.strip() not in options:
+            options.append(value.strip())
+
+    for key in ("expected_options", "gold_options", "reference_options", "outputs"):
+        append(item.get(key))
+    for key in ("expected", "gold", "reference"):
+        append(item.get(key))
+
+    return options
+
+
+def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Any]]:
     """Extract prediction items from various input formats."""
     if isinstance(prediction_data, dict):
         items = prediction_data.get("detailed_results") or prediction_data.get(
@@ -210,14 +303,17 @@ def extract_prediction_items(prediction_data: Any) -> List[Dict[str, Optional[st
             or item.get("prediction")
             or item.get("model_output")
         )
-        gold = item.get("expected") or item.get("gold") or item.get("reference")
+        gold_options = _gold_options_from_prediction_item(item)
+        gold = gold_options[0] if gold_options else None
 
         parsed.append(
             {
                 "input": item.get("input"),
                 "prediction": prediction,
                 "gold": gold,
+                "gold_options": gold_options,
                 "exact_match": item.get("exact_match"),
+                "id": item.get("id"),
             }
         )
 
@@ -241,30 +337,42 @@ def evaluate_prediction_file(
     }
     rows = []
 
-    def is_exact_match(pred: str, gold: str, flag: Optional[bool]) -> bool:
-        if flag is not None:
-            return bool(flag)
-        return normalize_text(pred) == normalize_text(gold)
+    def is_positive_exact_flag(flag: Any) -> bool:
+        if isinstance(flag, str):
+            return flag.strip().lower() in {"1", "true", "yes"}
+        return bool(flag)
+
+    def is_exact_match(
+        pred: str, gold_options: List[str], flag: Optional[bool]
+    ) -> bool:
+        if flag is not None and is_positive_exact_flag(flag):
+            return True
+        return matches_any_gold_option(pred, gold_options)
 
     for item in prediction_items:
         input_text = item.get("input") or ""
         prediction = item.get("prediction") or ""
-        gold = item.get("gold") or ""
+        gold_options = item.get("gold_options") or []
+        gold = item.get("gold") or (gold_options[0] if gold_options else "")
         exact_flag = item.get("exact_match")
 
-        if not prediction or not gold:
+        if not prediction or not gold_options:
             stats["unmatched"] += 1
             decision = JudgeDecision(
                 correct="no",
                 reasoning="Missing prediction or gold.",
                 decision_method="unmatched",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_missing_data",
             )
-        elif is_exact_match(prediction, gold, exact_flag):
+        elif is_exact_match(prediction, gold_options, exact_flag):
             stats["auto_exact"] += 1
             decision = JudgeDecision(
                 correct="yes",
-                reasoning="Exact match (normalized).",
+                reasoning="Exact match against an accepted gold formula.",
                 decision_method="exact",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_exact_match",
             )
         elif no_llm:
             stats["no_llm"] += 1
@@ -272,9 +380,11 @@ def evaluate_prediction_file(
                 correct="no",
                 reasoning="LLM disabled; non-exact match treated as incorrect.",
                 decision_method="no_llm",
+                prompt_version=judge.prompt_version,
+                judge_parse_status="not_called_no_llm",
             )
         else:
-            decision = judge.judge(input_text, gold, prediction)
+            decision = judge.judge(input_text, gold_options, prediction)
             if decision.decision_method == "llm":
                 stats["llm_calls"] += 1
 
@@ -282,10 +392,17 @@ def evaluate_prediction_file(
             {
                 "input": input_text,
                 "gold": gold,
+                "gold_options": gold_options,
                 "prediction": prediction,
                 "correct": decision.correct,
                 "reasoning": decision.reasoning,
                 "decision_method": decision.decision_method,
+                "prompt_version": decision.prompt_version or judge.prompt_version,
+                "judge_prompt_sha256": decision.judge_prompt_sha256,
+                "raw_judge_response": decision.raw_judge_response,
+                "judge_parse_status": decision.judge_parse_status,
+                "judge_latency_ms": decision.judge_latency_ms,
+                "id": item.get("id"),
             }
         )
 
@@ -298,7 +415,7 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
         "cells": [
             {
                 "cell_type": "markdown",
-                "metadata": {},
+                "metadata": {"language": "markdown"},
                 "source": [
                     "# ATL LLM Judge Summary\n",
                     f"Summary file: {summary_path.name}\n",
@@ -306,7 +423,9 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
                     "import json\n",
                     "from pathlib import Path\n",
@@ -331,14 +450,17 @@ def build_summary_notebook(summary_path: Path, output_path: Path) -> None:
                     "    }\n",
                     "    for item in summary['per_file']\n",
                     "])\n",
-                    "df.sort_values('accuracy', ascending=False)\n",
+                    "display(pd.DataFrame([summary.get('overall', {})]))\n",
+                    "display(df.sort_values('accuracy', ascending=False))\n",
                 ],
             },
             {
                 "cell_type": "code",
-                "metadata": {},
+                "metadata": {"language": "python"},
+                "execution_count": None,
+                "outputs": [],
                 "source": [
-                    "plt.figure(figsize=(100, 40))\n",
+                    "plt.figure(figsize=(12, max(4, min(14, len(df) * 0.35))))\n",
                     "plt.bar(df['source_file'], df['accuracy'])\n",
                     "plt.xticks(rotation=45, ha='right')\n",
                     "plt.ylabel('Accuracy')\n",
@@ -398,7 +520,6 @@ __all__ = [
     "extract_prediction_items",
     "evaluate_prediction_file",
     "compute_metrics",
-    "compute_metrics_with_difficulty",
     "_empty_metrics",
     "build_summary",
     "build_summary_notebook",

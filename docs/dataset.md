@@ -1,104 +1,72 @@
 # Dataset
 
-This document describes the NL2ATL dataset structure, schema, and how to use it in experiments.
+NL2ATL uses a JSON list of natural-language requirements and accepted ATL formulas.
 
-## Overview
+## Default File
 
-The dataset is stored in [data/dataset.json](../data/dataset.json) as a JSON list. Each item contains a
-natural‑language requirement and its reference ATL formula.
+[../data/dataset_gold.json](../data/dataset_gold.json)
 
-Key properties:
+## Row Schema
 
-- Language: English
-- Logic: ATL
-- Labels: `easy` or `hard` (present in the released dataset)
+Required:
 
-## Schema
+| Field | Meaning |
+|---|---|
+| `input` | Natural-language requirement |
+| `outputs`, `output`, `output_1`, or `output_2` | At least one accepted ATL formula |
 
-Each dataset item follows this structure:
+Optional:
 
-```json
-{
-  "id": "ex01",
-  "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed",
-  "difficulty": "easy"
-}
-```
+| Field | Meaning |
+|---|---|
+| `id` | Stable example identifier |
 
-Field meanings:
+Rows may have multiple correct formulas. `load_data` creates:
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Unique identifier |
-| `input` | string | Natural‑language requirement |
-| `output` | string | Reference ATL formula |
-| `difficulty` | string | `easy` or `hard` |
-| `difficulty_scores` | object | Optional score breakdown (only present if you run the classifier) |
+- `outputs`: all accepted formulas, deduplicated in preferred order
+- `output`: the first preferred formula, kept for compatibility
 
-## Difficulty labels
+Preferred order is an existing `outputs` list when present, then `output`, then `output_2`, then `output_1`. Evaluation helpers also understand result-style fields such as `expected_options`, `gold_options`, and `reference_options`.
 
-Difficulty labels are produced by the rule‑based classifier in
-[src/evaluation/difficulty.py](../src/evaluation/difficulty.py). You can recompute labels (and optionally
-add `difficulty_scores`) with:
-
-```bash
-nl2atl classify-difficulty --input data/dataset.json --verbose
-```
-
-See [difficulty_classification.md](difficulty_classification.md) for the scoring model.
-
-## Examples
-
-### Easy example
+## Example
 
 ```json
 {
-  "id": "ex01",
-  "input": "The user can guarantee that sooner or later the ticket will be printed.",
-  "output": "<<User>>F ticket_printed",
-  "difficulty": "easy"
+  "id": "ex952",
+  "input": "Every authentication server can guarantee that in the immediately succeeding state the recovery token will be issued.",
+  "output_1": "<<AuthenticationServer1>>X recovery_token_issued_1 && <<AuthenticationServer2>>X recovery_token_issued_2",
+  "output_2": "<<AuthenticationServer1,AuthenticationServer2>>X recovery_token_issued"
 }
 ```
 
-### Hard example
-
-```json
-{
-  "id": "ex11",
-  "input": "The machine can guarantee that if the payment has been completed, then at the next step it will print the ticket.",
-  "output": "<<Machine>>G (paid -> X ticket_printed)",
-  "difficulty": "hard"
-}
-```
-
-## Using the dataset
-
-### Load from Python
+## Loading
 
 ```python
-from src.infra.io import load_json
+from src.data_utils import load_data
 
-dataset = load_json("data/dataset.json")
-for sample in dataset:
-    print(sample["input"], sample["output"], sample.get("difficulty"))
+data = load_data("data/dataset_gold.json")
+print(data[0]["input"])
+print(data[0]["outputs"])
 ```
 
-### Split into train, validation, test
+## Splits And Augmentation
+
+Splits are seeded shuffles, not stratified splits. The splitter uses `random.Random(seed).shuffle`, rounds the train and validation counts, and leaves the remainder for test.
 
 ```python
-from pathlib import Path
-from src.experiment import ExperimentDataManager
+from src.data_utils import split_data, augment_data
 
-manager = ExperimentDataManager(
-    data_path=Path("data/dataset.json"),
-    test_size=0.30,
-    val_size=0.6667,
-    seed=42,
-    augment_factor=10,
-)
-train_aug, val, test, full = manager.prepare_data()
+train, val, test = split_data(data, train_size=0.70, val_size=0.10, test_size=0.20, seed=42)
+train_aug = augment_data(train, augment_factor=2)
 ```
 
-  The split is stratified by `difficulty` when available. Augmentation uses simple paraphrasing and
-  returns training examples that only include `input` and `output` fields.
+Augmentation happens after splitting and only on the training split. Augmented rows keep the same `outputs` list.
+
+`augment_factor` is the total number of copies per original training row, including the original row. With the default factor of `2`, each training item contributes one original and one paraphrased training item. Split manifests record only original train/validation/test membership; augmented rows are deterministic from the training split, seed, and config.
+
+## How Multiple Gold Answers Are Used
+
+- Training creates one supervised target per accepted formula.
+- Exact match is correct if the prediction matches any accepted formula after normalization.
+- LLM judging sees all accepted formulas and can approve semantic equivalence to any one of them.
+- Few-shot examples use their preferred formula, so curated examples with alternatives should put the desired displayed target first by using `outputs` or `output`.

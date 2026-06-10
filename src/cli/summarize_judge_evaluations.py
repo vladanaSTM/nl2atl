@@ -2,7 +2,7 @@
 """Generate summaries from evaluated judge datasets.
 
 This script aggregates all judge evaluation results per judge model and creates
-summary JSON and notebook files following the same format as run_llm_judge.py.
+summary JSON files, with optional notebook files matching run_llm_judge.py.
 """
 
 import argparse
@@ -58,6 +58,7 @@ def summarize_judge_evaluations(
     output_dir: Path,
     judge_filter: List[str] = None,
     prompt_version: str = PROMPT_VERSION,
+    write_notebooks: bool = True,
 ) -> None:
     """Generate summaries for all judges in the evaluated_datasets directory.
 
@@ -66,6 +67,7 @@ def summarize_judge_evaluations(
         output_dir: Directory where summary files will be saved
         judge_filter: Optional list of judge names to process (default: all)
         prompt_version: Prompt version string for the summary metadata
+        write_notebooks: Whether to write one notebook per judge summary
     """
     if not input_dir.exists():
         raise FileNotFoundError(f"Input directory not found: {input_dir}")
@@ -116,7 +118,7 @@ def summarize_judge_evaluations(
 
             # Extract source filename (remove judge suffix if present)
             source_file = evaluated_path.name
-            # Remove judge suffix (e.g., __judge-llama-70b) from the filename
+            # Remove judge suffix (e.g., __judge-gpt-5.2) from the filename
             if "__judge-" in source_file:
                 stem = source_file.split("__judge-")[0]
             else:
@@ -155,10 +157,10 @@ def summarize_judge_evaluations(
         save_json(summary, summary_path)
         print(f"  Wrote summary: {summary_path}")
 
-        # Build and save summary notebook
-        notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
-        build_summary_notebook(summary_path, notebook_path)
-        print(f"  Wrote notebook: {notebook_path}")
+        if write_notebooks:
+            notebook_path = output_dir / f"summary__judge-{judge_name}.ipynb"
+            build_summary_notebook(summary_path, notebook_path)
+            print(f"  Wrote notebook: {notebook_path}")
 
         print(f"  Aggregated {len(results)} datasets for {judge_name}")
 
@@ -188,6 +190,11 @@ def main() -> None:
         default=PROMPT_VERSION,
         help="Prompt version string for summary metadata.",
     )
+    parser.add_argument(
+        "--no_notebook",
+        action="store_true",
+        help="Do not generate per-judge summary notebooks.",
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -199,6 +206,7 @@ def main() -> None:
             output_dir=output_dir,
             judge_filter=args.judges,
             prompt_version=args.prompt_version,
+            write_notebooks=not args.no_notebook,
         )
         print("\nSummary generation complete!")
     except Exception as e:

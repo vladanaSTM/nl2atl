@@ -1,10 +1,11 @@
 #!/usr/bin/env python
-"""Generate a model efficiency report from seed aggregate metrics."""
+"""Generate an accuracy-latency report from seed aggregate metrics."""
 
 import argparse
 from pathlib import Path
 from typing import Optional
 
+from ..constants import DEFAULT_LLM_EVAL_DIR
 from ..infra.io import save_json
 from ..evaluation.model_efficiency import (
     EfficiencyWeights,
@@ -14,18 +15,21 @@ from ..evaluation.model_efficiency import (
 
 
 def main() -> None:
+    default_aggregate_file = (
+        f"{DEFAULT_LLM_EVAL_DIR}/seed_aggregate_metrics_from_judged.json"
+    )
     parser = argparse.ArgumentParser(
-        description="Generate model efficiency report from seed aggregate metrics"
+        description="Generate accuracy-latency report from seed aggregate metrics"
     )
     parser.add_argument(
         "--aggregate_file",
-        default="outputs/seed_aggregate_metrics_from_judged.json",
+        default=default_aggregate_file,
         help="Path to seed_aggregate_metrics_from_judged.json",
     )
     parser.add_argument(
         "--output_dir",
-        default="outputs",
-        help="Directory for output files (default: outputs)",
+        default=DEFAULT_LLM_EVAL_DIR,
+        help=f"Directory for output files (default: {DEFAULT_LLM_EVAL_DIR})",
     )
     parser.add_argument(
         "--output",
@@ -45,7 +49,7 @@ def main() -> None:
     parser.add_argument(
         "--include_per_seed",
         action="store_true",
-        help="Include efficiency calculations per seed",
+        help="Include accuracy-latency calculations per seed",
     )
     parser.add_argument(
         "--top_k",
@@ -60,16 +64,10 @@ def main() -> None:
         help="Weight for accuracy in efficiency score (default: 0.5)",
     )
     parser.add_argument(
-        "--weight_cost",
-        type=float,
-        default=0.25,
-        help="Weight for cost in efficiency score (default: 0.25)",
-    )
-    parser.add_argument(
         "--weight_latency",
         type=float,
-        default=0.25,
-        help="Weight for latency in efficiency score (default: 0.25)",
+        default=0.5,
+        help="Weight for latency in efficiency score (default: 0.5)",
     )
 
     args = parser.parse_args()
@@ -85,7 +83,6 @@ def main() -> None:
         aggregate_path,
         weights=EfficiencyWeights(
             accuracy=args.weight_accuracy,
-            cost=args.weight_cost,
             latency=args.weight_latency,
         ),
         top_k=args.top_k,
@@ -105,9 +102,9 @@ def main() -> None:
         )
         build_efficiency_notebook(report_path, notebook_path)
 
-    print(f"Efficiency report: {report_path}")
+    print(f"Accuracy-latency report: {report_path}")
     if not args.no_notebook:
-        print(f"Efficiency notebook: {notebook_path}")
+        print(f"Accuracy-latency notebook: {notebook_path}")
 
 
 if __name__ == "__main__":

@@ -107,3 +107,24 @@ def test_generate_agreement_report_basic(tmp_path):
     report = judge_agreement.generate_agreement_report(eval_dir)
     assert report["n_judges"] == 2
     assert report["items_with_multiple_judges"] == 1
+
+
+def test_agreement_notebook_cells_have_language_metadata(tmp_path):
+    report_path = tmp_path / "agreement_report.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "pairwise_cohen_kappa": {},
+                "fleiss_kappa": {},
+                "krippendorff_alpha": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    notebook_path = tmp_path / "agreement_report.ipynb"
+
+    judge_agreement.build_agreement_notebook(report_path, notebook_path)
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+
+    assert notebook["cells"]
+    assert all(cell["metadata"].get("language") for cell in notebook["cells"])
