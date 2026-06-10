@@ -9,18 +9,17 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import torch
 from datasets import Dataset
-from transformers import TrainingArguments
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 
 from ..config import Config, ModelConfig, ExperimentCondition
-from ..constants import Provider
+from ..data_utils import get_output_options
 from ..evaluation.exact_match import ExactMatchEvaluator
 from ..models.few_shot import format_prompt
 from ..models.registry import load_model, get_model_type, clear_gpu_memory
 from ..models.utils import resolve_model_key
 
 from .data_manager import ExperimentDataManager
-from .reporter import ExperimentReporter
+from .reporter import ExperimentReporter, sha256_file
 
 
 class ExperimentRunner:
@@ -38,12 +37,15 @@ class ExperimentRunner:
 
         self.data_manager = data_manager or ExperimentDataManager(
             data_path=Path(config.data_path),
+            train_size=config.train_size,
             test_size=config.test_size,
             val_size=config.val_size,
             seed=config.seed,
             augment_factor=config.augment_factor,
         )
-        self.reporter = reporter or ExperimentReporter(output_dir=Path(config.output_dir))
+        self.reporter = reporter or ExperimentReporter(
+            output_dir=Path(config.output_dir)
+        )
 
         # Global seeding for reproducibility
         self._set_global_seed(self.config.seed)
@@ -60,8 +62,10 @@ class ExperimentRunner:
         self.model_cache: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
         self.reuse_models = os.getenv("REUSE_MODEL_CACHE", "1") != "0"
 
+        train_count = len(self.data_manager.train_data or [])
         print(
-            f"Data loaded: Train={len(self.train_data_aug)}, "
+            f"Data loaded: Train={train_count} "
+            f"(augmented={len(self.train_data_aug)}), "
             f"Val={len(self.val_data)}, Test={len(self.test_data)}"
         )
 
@@ -76,15 +80,40 @@ class ExperimentRunner:
         model_config = self.config.models[model_key]
         return f"{model_config.short_name}_{condition.name}{self._seed_suffix()}"
 
+    def _build_adapter_run_name(self, model_key: str) -> str:
+        """Build the shared fine-tuned adapter run name for a model and seed."""
+        model_config = self.config.models[model_key]
+        return f"{model_config.short_name}_finetuned{self._seed_suffix()}"
+
+    def _adapter_final_path(self, model_key: str) -> Path:
+        """Get the shared adapter path for a model and seed."""
+        return (
+            Path(self.config.models_dir)
+            / self._build_adapter_run_name(model_key)
+            / "final"
+        )
+
     def _set_global_seed(self, seed: int) -> None:
         """Set random seeds for reproducibility."""
         random.seed(seed)
         np.random.seed(seed)
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
+        try:
+            torch.use_deterministic_algorithms(True, warn_only=True)
+        except Exception:
+            pass
+        if torch.cuda.is_available():
+            try:
+                torch.backends.cuda.enable_flash_sdp(False)
+                torch.backends.cuda.enable_mem_efficient_sdp(False)
+                torch.backends.cuda.enable_math_sdp(True)
+            except Exception:
+                pass
 
     def _assert_finetune_allowed(self, model_config: ModelConfig) -> None:
         """Check if finetuning is allowed for this model."""
@@ -127,6 +156,149 @@ class ExperimentRunner:
 
         return model, tokenizer
 
+    @staticmethod
+    def _training_max_steps_from_env() -> int:
+        """Return an optional short-run training limit from TRAIN_MAX_STEPS."""
+        raw_value = os.getenv("TRAIN_MAX_STEPS")
+        if not raw_value:
+            return -1
+
+        try:
+            parsed = int(raw_value)
+        except ValueError:
+            print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={raw_value}")
+            return -1
+
+        return parsed if parsed > 0 else -1
+
+    @staticmethod
+    def _cuda_supports_tf32() -> bool:
+        """Return whether the active CUDA device supports TF32 kernels."""
+        if not torch.cuda.is_available():
+            return False
+        major, _minor = torch.cuda.get_device_capability()
+        return major >= 8
+
+    @staticmethod
+    def _cuda_supports_bf16() -> bool:
+        """Return whether the active CUDA device supports BF16 training."""
+        return torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+
+    @staticmethod
+    def _training_dataset(
+        items: List[Dict[str, Any]],
+        model_type: str,
+        tokenizer: Any,
+        max_seq_length: Optional[int] = None,
+    ) -> Dataset:
+        """Build prompt/completion pairs consumed by TRL's SFTTrainer.
+
+        Multi-output/QSA items are trained as a single assistant target containing
+        all required formulas, one formula per line. This prevents the model from
+        learning to choose only one admissible reading.
+        """
+        prompts = []
+        completions = []
+        for item in items:
+            outputs = get_output_options(item)
+            if not outputs:
+                raise ValueError(f"Training item is missing output: {item.get('id')}")
+
+            output_text = "\n".join(outputs)
+
+            prompt = format_prompt(
+                item["input"],
+                output_text=None,
+                few_shot=False,
+                model_type=model_type,
+                tokenizer=tokenizer,
+            )
+            full_prompt = format_prompt(
+                item["input"],
+                output_text,
+                few_shot=False,
+                model_type=model_type,
+                tokenizer=tokenizer,
+            )
+            if not full_prompt.startswith(prompt):
+                raise ValueError(
+                    "Training prompt template did not produce a prompt prefix; "
+                    f"cannot isolate completion for item {item.get('id')}"
+                )
+            if tokenizer is not None and max_seq_length is not None:
+                prompt_tokens = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+                full_tokens = tokenizer(full_prompt, add_special_tokens=False)[
+                    "input_ids"
+                ]
+                if len(prompt_tokens) >= max_seq_length:
+                    raise ValueError(
+                        "Training prompt exceeds max_seq_length before the "
+                        f"completion starts for item {item.get('id')}: "
+                        f"prompt_tokens={len(prompt_tokens)}, "
+                        f"max_seq_length={max_seq_length}"
+                    )
+                if len(full_tokens) > max_seq_length:
+                    raise ValueError(
+                        "Training prompt+completion exceeds max_seq_length for "
+                        f"item {item.get('id')}: full_tokens={len(full_tokens)}, "
+                        f"max_seq_length={max_seq_length}"
+                    )
+            prompts.append(prompt)
+            completions.append(full_prompt[len(prompt) :])
+        return Dataset.from_dict({"prompt": prompts, "completion": completions})
+
+    def _training_args(
+        self,
+        model_config: ModelConfig,
+        output_dir: Path,
+        max_steps: int,
+    ) -> SFTConfig:
+        """Build Hugging Face training arguments from global and model config."""
+        train_batch_size = model_config.train_batch_size or self.config.batch_size
+        eval_batch_size = model_config.eval_batch_size or train_batch_size
+        grad_accum_steps = (
+            model_config.gradient_accumulation_steps
+            or self.config.gradient_accumulation_steps
+        )
+
+        return SFTConfig(
+            output_dir=str(output_dir),
+            num_train_epochs=self.config.num_epochs,
+            per_device_train_batch_size=train_batch_size,
+            per_device_eval_batch_size=eval_batch_size,
+            gradient_accumulation_steps=grad_accum_steps,
+            learning_rate=self.config.learning_rate,
+            weight_decay=self.config.weight_decay,
+            warmup_ratio=self.config.warmup_ratio,
+            lr_scheduler_type=self.config.lr_scheduler_type,
+            logging_strategy="steps",
+            logging_steps=10,
+            eval_strategy=self.config.eval_strategy,
+            save_strategy=self.config.save_strategy,
+            save_total_limit=self.config.save_total_limit,
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
+            greater_is_better=False,
+            bf16=self.config.bf16 and self._cuda_supports_bf16(),
+            optim=self.config.optim,
+            report_to="none",
+            max_grad_norm=self.config.max_grad_norm,
+            seed=self.config.seed,
+            data_seed=self.config.seed,
+            ddp_find_unused_parameters=False,
+            gradient_checkpointing=self.config.gradient_checkpointing,
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+            max_steps=max_steps,
+            dataloader_num_workers=self.config.dataloader_num_workers,
+            dataloader_pin_memory=self.config.dataloader_pin_memory,
+            group_by_length=self.config.group_by_length,
+            tf32=self.config.tf32 and self._cuda_supports_tf32(),
+            max_length=model_config.max_seq_length,
+            completion_only_loss=True,
+            packing=self.config.packing,
+            dataset_text_field="text",
+        )
+
     def _train_model(
         self,
         model_config: ModelConfig,
@@ -138,80 +310,19 @@ class ExperimentRunner:
         print(f"\nTraining {model_config.short_name}...")
 
         model, tokenizer = load_model(model_config, for_training=True)
-
-        # Optional short-run probe
-        max_steps = -1
-        max_steps_env = os.getenv("TRAIN_MAX_STEPS")
-        if max_steps_env:
-            try:
-                parsed = int(max_steps_env)
-                max_steps = parsed if parsed > 0 else -1
-            except ValueError:
-                print(f"Warning: ignoring non-integer TRAIN_MAX_STEPS={max_steps_env}")
-
-        # Prepare datasets
-        def build_dataset(items: List[Dict]) -> Dataset:
-            return Dataset.from_dict(
-                {
-                    "text": [
-                        format_prompt(
-                            item["input"],
-                            item["output"],
-                            few_shot=False,
-                            model_type=model_type,
-                            tokenizer=tokenizer,
-                        )
-                        for item in items
-                    ]
-                }
-            )
-
-        train_dataset = build_dataset(self.train_data_aug)
-        val_dataset = build_dataset(self.val_data)
+        train_dataset = self._training_dataset(
+            self.train_data_aug, model_type, tokenizer, model_config.max_seq_length
+        )
+        val_dataset = self._training_dataset(
+            self.val_data, model_type, tokenizer, model_config.max_seq_length
+        )
 
         output_dir = Path(self.config.models_dir) / run_name
         output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Resolve per-model training overrides
-        train_batch_size = model_config.train_batch_size or self.config.batch_size
-        eval_batch_size = model_config.eval_batch_size or train_batch_size
-        grad_accum_steps = (
-            model_config.gradient_accumulation_steps
-            or self.config.gradient_accumulation_steps
-        )
-
-        training_args = TrainingArguments(
-            output_dir=str(output_dir),
-            num_train_epochs=self.config.num_epochs,
-            per_device_train_batch_size=train_batch_size,
-            per_device_eval_batch_size=eval_batch_size,
-            gradient_accumulation_steps=grad_accum_steps,
-            learning_rate=self.config.learning_rate,
-            weight_decay=self.config.weight_decay,
-            warmup_ratio=self.config.warmup_ratio,
-            lr_scheduler_type="cosine",
-            logging_steps=100,
-            eval_strategy="steps",
-            eval_steps=200,
-            save_strategy="steps",
-            save_steps=200,
-            save_total_limit=2,
-            load_best_model_at_end=True,
-            metric_for_best_model="eval_loss",
-            greater_is_better=False,
-            bf16=self.config.bf16,
-            optim="adamw_torch_fused",
-            report_to="none",
-            max_grad_norm=0.3,
-            seed=self.config.seed,
-            ddp_find_unused_parameters=False,
-            gradient_checkpointing=True,
-            gradient_checkpointing_kwargs={"use_reentrant": False},
-            max_steps=max_steps,
-            dataloader_num_workers=4,
-            dataloader_pin_memory=True,
-            group_by_length=True,
-            tf32=True,
+        training_args = self._training_args(
+            model_config=model_config,
+            output_dir=output_dir,
+            max_steps=self._training_max_steps_from_env(),
         )
 
         trainer = SFTTrainer(
@@ -230,6 +341,50 @@ class ExperimentRunner:
         self._cleanup_training(trainer, model, tokenizer, train_dataset, val_dataset)
 
         return str(final_path)
+
+    def _ensure_shared_adapter(
+        self,
+        model_key: str,
+        model_config: ModelConfig,
+        model_type: str,
+        overwrite: bool,
+    ) -> Tuple[str, bool, Optional[float]]:
+        """Train or reuse the shared adapter for all fine-tuned conditions."""
+        self._assert_finetune_allowed(model_config)
+
+        adapter_path = self._adapter_final_path(model_key)
+        if adapter_path.exists() and not overwrite:
+            print(f"Reusing fine-tuned adapter at {adapter_path}")
+            return str(adapter_path), True, None
+
+        start_time = time.perf_counter()
+        trained_path = self._train_model(
+            model_config,
+            model_type,
+            self._build_adapter_run_name(model_key),
+        )
+        duration = round(time.perf_counter() - start_time, 2)
+        return trained_path, False, duration
+
+    def _evaluate_model(
+        self,
+        model: Any,
+        tokenizer: Any,
+        model_config: ModelConfig,
+        model_type: str,
+        condition: ExperimentCondition,
+    ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
+        """Evaluate the loaded model and return metrics plus detailed rows."""
+        metrics = self.evaluator.evaluate(
+            model=model,
+            tokenizer=tokenizer,
+            test_data=self.test_data,
+            model_type=model_type,
+            few_shot=condition.few_shot,
+            num_few_shot=self.config.num_few_shot_examples,
+            verbose=True,
+        )
+        return metrics, list(self.evaluator.results)
 
     def _cleanup_training(
         self,
@@ -261,11 +416,64 @@ class ExperimentRunner:
         del model, tokenizer
         clear_gpu_memory()
 
-    def run_single_experiment(
+    def _record_result(
+        self,
+        model_config: ModelConfig,
+        condition: ExperimentCondition,
+        effective_finetuned: bool,
+        run_name: str,
+        metrics: Dict[str, Any],
+        detailed_results: List[Dict[str, Any]],
+        extra_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict:
+        """Persist one evaluated condition and record its metadata."""
+        self.reporter.stop_timer()
+        metadata = self.reporter.build_run_metadata(
+            config=self.config,
+            run_name=run_name,
+            model_config=model_config,
+            condition=condition,
+            effective_finetuned=effective_finetuned,
+            dataset_path=str(self.config.data_path),
+            total_samples=len(self.test_data),
+            results=detailed_results,
+        )
+        split_manifest_path = self.reporter.save_split_manifest(
+            run_name=run_name,
+            config=self.config,
+            dataset_path=str(self.config.data_path),
+            train_data=self.data_manager.train_data or [],
+            val_data=self.val_data,
+            test_data=self.test_data,
+        )
+        metadata["split_manifest_path"] = str(split_manifest_path)
+        metadata["split_manifest_sha256"] = sha256_file(split_manifest_path)
+        metadata["metrics"] = metrics
+        if extra_metadata:
+            metadata.update(extra_metadata)
+
+        print(f"\nResults for {run_name}:")
+        print(f"  Exact Match: {metrics['exact_match']:.1%}")
+        if "latency_mean_ms" in metadata:
+            print(f"  Mean Latency: {metadata['latency_mean_ms']:.1f}ms")
+        if metadata.get("duration_seconds"):
+            print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
+
+        result = {
+            "metadata": metadata,
+            "predictions": detailed_results,
+        }
+
+        self.all_results.append(result)
+        self.reporter.save_result(run_name, result)
+        return result
+
+    def _run_condition(
         self,
         model_key: str,
         condition: ExperimentCondition,
-        save_model: bool = True,
+        adapter_path: Optional[str] = None,
+        adapter_metadata: Optional[Dict[str, Any]] = None,
     ) -> Dict:
         """Run a single experiment (one model, one condition)."""
         model_key = resolve_model_key(model_key, self.config.models)
@@ -282,71 +490,45 @@ class ExperimentRunner:
         print(f"Running: {run_name}")
         print(f"{'='*60}")
 
-        # ============== Start experiment timer ==============
         self.reporter.start_timer()
 
-        adapter_path = None
         model = None
         tokenizer = None
 
         try:
-            # Train if needed
-            if effective_finetuned:
+            adapter_reused = adapter_path is not None
+            if effective_finetuned and adapter_path is None:
                 adapter_path = self._train_model(model_config, model_type, run_name)
 
             model, tokenizer = self._load_or_reuse_model(
                 model_config, adapter_path, effective_finetuned
             )
-
-            # Evaluate (with latency tracking)
-            metrics = self.evaluator.evaluate(
+            metrics, detailed_results = self._evaluate_model(
                 model=model,
                 tokenizer=tokenizer,
-                test_data=self.test_data,
+                model_config=model_config,
                 model_type=model_type,
-                few_shot=condition.few_shot,
-                num_few_shot=self.config.num_few_shot_examples,
-                verbose=True,
-                price_input_per_1k=model_config.price_input_per_1k,
-                price_output_per_1k=model_config.price_output_per_1k,
+                condition=condition,
             )
 
-            # ============== Stop timer before building metadata ==============
-            self.reporter.stop_timer()
+            metadata = dict(adapter_metadata or {})
+            if effective_finetuned:
+                metadata.update(
+                    {
+                        "adapter_path": adapter_path,
+                        "adapter_reused": adapter_reused,
+                    }
+                )
 
-            # ============== Get results with latency info ==============
-            detailed_results = self.evaluator.results
-
-            # ============== Build comprehensive metadata ==============
-            metadata = self.reporter.build_run_metadata(
-                config=self.config,
-                run_name=run_name,
+            result = self._record_result(
                 model_config=model_config,
                 condition=condition,
                 effective_finetuned=effective_finetuned,
-                dataset_path=str(self.config.data_path),
-                total_samples=len(self.test_data),
-                results=detailed_results,
+                run_name=run_name,
+                metrics=metrics,
+                detailed_results=detailed_results,
+                extra_metadata=metadata,
             )
-
-            # ============== Add metrics to metadata ==============
-            metadata["metrics"] = metrics
-
-            print(f"\nResults for {run_name}:")
-            print(f"  Exact Match: {metrics['exact_match']:.1%}")
-            if "latency_mean_ms" in metadata:
-                print(f"  Mean Latency: {metadata['latency_mean_ms']:.1f}ms")
-            if metadata.get("duration_seconds"):
-                print(f"  Total Duration: {metadata['duration_seconds']:.1f}s")
-
-            # ============== Restructured result with metadata ==============
-            result = {
-                "metadata": metadata,
-                "predictions": detailed_results,
-            }
-
-            self.all_results.append(result)
-            self.reporter.save_result(run_name, result)
 
         finally:
             if not (self.reuse_models and not effective_finetuned):
@@ -358,74 +540,108 @@ class ExperimentRunner:
 
         return result
 
-    def run_all_experiments(
+    def run_model_experiments(
         self,
-        models: Optional[List[str]] = None,
+        model_key: str,
         conditions: Optional[List[str]] = None,
-        model_provider: str = "hf",
         overwrite: bool = False,
     ) -> None:
-        """Run all specified experiments."""
-        if models is None:
-            models = list(self.config.models.keys())
+        """Run selected conditions for one model, sharing fine-tuning work."""
+        model_key = resolve_model_key(model_key, self.config.models)
+        model_config = self.config.models[model_key]
+        model_type = get_model_type(model_config.name)
 
-        if model_provider not in ("hf", "azure", "all"):
-            raise ValueError(
-                f"Invalid model_provider '{model_provider}'. Use 'hf', 'azure', or 'all'."
-            )
-
-        # Filter by provider
-        if model_provider != "all":
-            filtered = []
-            for model_key in models:
-                resolved_key = resolve_model_key(model_key, self.config.models)
-                model_cfg = self.config.models[resolved_key]
-                is_azure = model_cfg.is_azure
-
-                if (model_provider == "azure" and is_azure) or (
-                    model_provider == "hf" and not is_azure
-                ):
-                    filtered.append(model_key)
-            models = filtered
-
-        # Resolve conditions
         if conditions is None:
-            run_conditions = self.config.conditions
+            run_conditions = list(self.config.conditions)
         else:
-            run_conditions = [c for c in self.config.conditions if c.name in conditions]
+            requested = set(conditions)
+            run_conditions = [c for c in self.config.conditions if c.name in requested]
+            missing = requested.difference({c.name for c in run_conditions})
+            if missing:
+                raise ValueError(f"No conditions matched: {sorted(missing)}")
 
-        total = len(models) * len(run_conditions)
-        current = 0
+        baseline_conditions = [c for c in run_conditions if not c.finetuned]
+        finetuned_conditions = [c for c in run_conditions if c.finetuned]
 
-        print(f"\n{'='*60}")
-        print(f"RUNNING {total} EXPERIMENTS")
-        print(f"Models: {models}")
-        print(f"Conditions: {[c.name for c in run_conditions]}")
-        print(f"{'='*60}")
+        for condition in baseline_conditions:
+            run_name = self._build_run_name(model_key, condition)
+            result_path = self.reporter.get_result_path(run_name)
+            if result_path.exists() and not overwrite:
+                print(f"Skipping {run_name}: results exist at {result_path}")
+                continue
+            self._run_condition(model_key, condition)
 
-        for model_key in models:
-            for condition in run_conditions:
-                current += 1
-                print(f"\n[{current}/{total}] ", end="")
+        if not finetuned_conditions:
+            self._release_model_cache()
+            return
 
-                try:
-                    resolved_key = resolve_model_key(model_key, self.config.models)
-                    run_name = self._build_run_name(resolved_key, condition)
-                    result_path = self.reporter.get_result_path(run_name)
+        self._assert_finetune_allowed(model_config)
 
-                    if result_path.exists() and not overwrite:
-                        print(f"Skipping {run_name}: results exist at {result_path}")
-                        continue
+        missing_finetuned = []
+        for condition in finetuned_conditions:
+            run_name = self._build_run_name(model_key, condition)
+            result_path = self.reporter.get_result_path(run_name)
+            if result_path.exists() and not overwrite:
+                print(f"Skipping {run_name}: results exist at {result_path}")
+                continue
+            missing_finetuned.append(condition)
 
-                    print(f"Running {run_name}: writing results to {result_path}")
-                    self.run_single_experiment(resolved_key, condition)
+        if not missing_finetuned:
+            self._release_model_cache()
+            return
 
-                except Exception as e:
-                    print(f"ERROR: {e}")
-                    self.reporter.finalize()
-                    clear_gpu_memory()
+        adapter_path, adapter_reused, training_duration = self._ensure_shared_adapter(
+            model_key=model_key,
+            model_config=model_config,
+            model_type=model_type,
+            overwrite=overwrite,
+        )
+        adapter_metadata = {
+            "adapter_path": adapter_path,
+            "adapter_reused": adapter_reused,
+            "shared_adapter_run_id": self._build_adapter_run_name(model_key),
+        }
+        if training_duration is not None:
+            adapter_metadata["adapter_training_duration_seconds"] = training_duration
 
-        self._release_model_cache()
+        model = None
+        tokenizer = None
+        try:
+            model, tokenizer = self._load_or_reuse_model(
+                model_config,
+                adapter_path,
+                effective_finetuned=True,
+            )
+            for condition in missing_finetuned:
+                run_name = self._build_run_name(model_key, condition)
+
+                print(f"\n{'='*60}")
+                print(f"Running: {run_name}")
+                print(f"{'='*60}")
+
+                self.reporter.start_timer()
+                metrics, detailed_results = self._evaluate_model(
+                    model=model,
+                    tokenizer=tokenizer,
+                    model_config=model_config,
+                    model_type=model_type,
+                    condition=condition,
+                )
+                self._record_result(
+                    model_config=model_config,
+                    condition=condition,
+                    effective_finetuned=True,
+                    run_name=run_name,
+                    metrics=metrics,
+                    detailed_results=detailed_results,
+                    extra_metadata=adapter_metadata,
+                )
+        finally:
+            del model
+            del tokenizer
+            clear_gpu_memory()
+            self.reporter.finalize()
+            self._release_model_cache()
 
     def _release_model_cache(self) -> None:
         """Free all cached models."""
@@ -441,14 +657,3 @@ class ExperimentRunner:
 
         self.model_cache.clear()
         clear_gpu_memory()
-
-    def run(self) -> Dict[str, Any]:
-        """Run all experiments with defaults and return results."""
-        self.run_all_experiments()
-        return {"results": self.all_results}
-
-
-def run_experiment(config: Config) -> Dict[str, Any]:
-    """Run experiment with given config."""
-    runner = ExperimentRunner(config)
-    return runner.run()
