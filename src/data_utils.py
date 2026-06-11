@@ -10,9 +10,25 @@ from .infra.io import load_json, save_json
 
 
 def _append_unique_output(outputs: List[str], value: Any) -> None:
+    """Append one or more formula strings, preserving order and uniqueness.
+
+    Supports both legacy fields such as ``output``/``output_1`` and the
+    current unified schema ``outputs: [{"formula": "..."}, ...]``.
+    """
     if isinstance(value, list):
         for item in value:
             _append_unique_output(outputs, item)
+        return
+
+    if isinstance(value, dict):
+        # Current dataset schema: {"formula": "..."}.
+        if "formula" in value:
+            _append_unique_output(outputs, value.get("formula"))
+            return
+        # Defensive fallback for result-like dictionaries.
+        for key in ("output", "expected", "gold", "reference"):
+            if key in value:
+                _append_unique_output(outputs, value.get(key))
         return
 
     if not isinstance(value, str) or not value.strip():

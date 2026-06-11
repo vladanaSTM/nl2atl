@@ -191,55 +191,60 @@ class ExperimentRunner:
         tokenizer: Any,
         max_seq_length: Optional[int] = None,
     ) -> Dataset:
-        """Build prompt/completion pairs consumed by TRL's SFTTrainer."""
+        """Build prompt/completion pairs consumed by TRL's SFTTrainer.
+
+        Multi-output/QSA items are trained as a single assistant target containing
+        all required formulas, one formula per line. This prevents the model from
+        learning to choose only one admissible reading.
+        """
         prompts = []
         completions = []
         for item in items:
             outputs = get_output_options(item)
             if not outputs:
                 raise ValueError(f"Training item is missing output: {item.get('id')}")
-            for output in outputs:
-                prompt = format_prompt(
-                    item["input"],
-                    output_text=None,
-                    few_shot=False,
-                    model_type=model_type,
-                    tokenizer=tokenizer,
+
+            output_text = "\n".join(outputs)
+
+            prompt = format_prompt(
+                item["input"],
+                output_text=None,
+                few_shot=False,
+                model_type=model_type,
+                tokenizer=tokenizer,
+            )
+            full_prompt = format_prompt(
+                item["input"],
+                output_text,
+                few_shot=False,
+                model_type=model_type,
+                tokenizer=tokenizer,
+            )
+            if not full_prompt.startswith(prompt):
+                raise ValueError(
+                    "Training prompt template did not produce a prompt prefix; "
+                    f"cannot isolate completion for item {item.get('id')}"
                 )
-                full_prompt = format_prompt(
-                    item["input"],
-                    output,
-                    few_shot=False,
-                    model_type=model_type,
-                    tokenizer=tokenizer,
-                )
-                if not full_prompt.startswith(prompt):
+            if tokenizer is not None and max_seq_length is not None:
+                prompt_tokens = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+                full_tokens = tokenizer(full_prompt, add_special_tokens=False)[
+                    "input_ids"
+                ]
+                if len(prompt_tokens) >= max_seq_length:
                     raise ValueError(
-                        "Training prompt template did not produce a prompt prefix; "
-                        f"cannot isolate completion for item {item.get('id')}"
+                        "Training prompt exceeds max_seq_length before the "
+                        f"completion starts for item {item.get('id')}: "
+                        f"prompt_tokens={len(prompt_tokens)}, "
+                        f"max_seq_length={max_seq_length}"
                     )
-                if tokenizer is not None and max_seq_length is not None:
-                    prompt_tokens = tokenizer(prompt, add_special_tokens=False)[
-                        "input_ids"
-                    ]
-                    full_tokens = tokenizer(full_prompt, add_special_tokens=False)[
-                        "input_ids"
-                    ]
-                    if len(prompt_tokens) >= max_seq_length:
-                        raise ValueError(
-                            "Training prompt exceeds max_seq_length before the "
-                            f"completion starts for item {item.get('id')}: "
-                            f"prompt_tokens={len(prompt_tokens)}, "
-                            f"max_seq_length={max_seq_length}"
-                        )
-                    if len(full_tokens) > max_seq_length:
-                        raise ValueError(
-                            "Training prompt+completion exceeds max_seq_length for "
-                            f"item {item.get('id')}: full_tokens={len(full_tokens)}, "
-                            f"max_seq_length={max_seq_length}"
-                        )
-                prompts.append(prompt)
-                completions.append(full_prompt[len(prompt) :])
+                if len(full_tokens) > max_seq_length:
+                    raise ValueError(
+                        "Training prompt+completion exceeds max_seq_length for "
+                        f"item {item.get('id')}: full_tokens={len(full_tokens)}, "
+                        f"max_seq_length={max_seq_length}"
+                    )
+            prompts.append(prompt)
+            completions.append(full_prompt[len(prompt) :])
         return Dataset.from_dict({"prompt": prompts, "completion": completions})
 
     def _training_args(
