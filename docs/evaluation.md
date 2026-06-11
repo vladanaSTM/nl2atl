@@ -26,7 +26,7 @@ Exact match runs first. It normalizes formulas by lowercasing, removing whitespa
 
 Before comparison, model text is cleaned only at chat boundaries: prompt echoes and explicit assistant stop tokens are removed when present. The evaluator does not parse, repair, validate, or extract a best-looking ATL formula from a longer answer; malformed or verbose model output is kept in `generated` and evaluated as-is.
 
-For rows with multiple gold formulas, exact match succeeds if the prediction matches any formula in `expected_options`.
+For rows with multiple gold formulas, exact match succeeds only when the prediction contains all formulas in `expected_options`. The prediction is split into one formula per line and compared as a multiset, so ordering does not matter and exact duplicates collapse, but a prediction that returns only a subset of the required formulas is not an exact match.
 
 ## Step 2: LLM Judge
 
@@ -101,7 +101,7 @@ After annotators complete their blind XLSX workbooks, merge them with the privat
 uv run nl2atl human-eval-merge outputs/LLM-evaluation/human_evaluation/annotations/annotator_1_blind.xlsx outputs/LLM-evaluation/human_evaluation/annotations/annotator_2_blind.xlsx
 ```
 
-Annotators only need to fill the `correct` column with `yes` or `no`, marking `yes` when `prediction` is equivalent to either `gold_1` or a non-empty `gold_2`. Use the XLSX templates to avoid typos in the `correct` and `annotator_id` columns. The merge command reads completed XLSX files and writes analysis-ready CSV, JSON, and JSONL files under `outputs/LLM-evaluation/human_evaluation/merged/`, with human labels, human-human status, per-judge LLM-human agreement fields, generator metadata, judge decisions, and hidden sampling strata joined by `audit_id`. Human-human disagreements are marked with `needs_adjudication=yes`, `human_final_correct=pending_adjudication`, and per-annotator match columns, so they remain analyzable before the final discussion pass. Free-text human reasoning is intentionally not part of the annotation or merged output; keep any adjudication notes separately only when a disagreement needs discussion.
+Annotators only need to fill the `correct` column with `yes` or `no`. Mark `yes` only when the `prediction` covers every required reading: when `gold_2` is empty the prediction must be equivalent to `gold_1`, and when `gold_2` is non-empty the prediction must contain both `gold_1` and `gold_2` as separate formulas (in any order). Use the XLSX templates to avoid typos in the `correct` and `annotator_id` columns. The merge command reads completed XLSX files and writes analysis-ready CSV, JSON, and JSONL files under `outputs/LLM-evaluation/human_evaluation/merged/`, with human labels, human-human status, per-judge LLM-human agreement fields, generator metadata, judge decisions, and hidden sampling strata joined by `audit_id`. Human-human disagreements are marked with `needs_adjudication=yes`, `human_final_correct=pending_adjudication`, and per-annotator match columns, so they remain analyzable before the final discussion pass. Free-text human reasoning is intentionally not part of the annotation or merged output; keep any adjudication notes separately only when a disagreement needs discussion.
 
 To regenerate only the blank anonymous annotation workbooks from the existing 600-item key, without resampling the audit set, run:
 

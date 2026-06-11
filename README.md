@@ -8,8 +8,8 @@ NL2ATL translates natural-language strategic requirements into ATL formulas. The
 dataset + configs
   -> seeded train/validation/test split
   -> optional training on the training split
-  -> one ATL prediction per test input
-  -> minimally cleaned exact match against accepted gold formulas
+  -> one prediction per test input (all required ATL readings, one per line)
+  -> minimally cleaned exact match requiring all accepted gold formulas
   -> LLM judge only for non-exact predictions
   -> judge agreement and accuracy-latency reports
 ```
@@ -54,7 +54,7 @@ uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 
 The default dataset is [data/dataset_gold.json](data/dataset_gold.json). Each row needs `input` and at least one gold formula field: `outputs`, `output`, `output_1`, or `output_2`.
 
-Rows can have more than one correct formula. `load_data` normalizes those formulas into `outputs` and keeps the preferred formula in `output` for compatibility. A provided `outputs` list wins; otherwise the preferred order is `output`, `output_2`, then `output_1`. Training uses every formula in `outputs`; exact match accepts any of them; the LLM judge sees all of them when needed.
+Rows can have more than one correct formula. `load_data` normalizes those formulas into `outputs` and keeps the preferred formula in `output` for compatibility. A provided `outputs` list wins; otherwise the preferred order is `output`, `output_2`, then `output_1`. When a row has several formulas they are jointly required, not alternatives: training joins them into a single target (one formula per line) so the model learns to emit every reading, exact match requires all of them (order-insensitive), and the LLM judge, used only for non-exact predictions, also requires all of them.
 
 Splits are seeded shuffles, not stratified splits:
 

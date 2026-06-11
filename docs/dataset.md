@@ -32,12 +32,16 @@ Preferred order is an existing `outputs` list when present, then `output`, then 
 
 ```json
 {
-  "id": "ex952",
-  "input": "Every authentication server can guarantee that in the immediately succeeding state the recovery token will be issued.",
-  "output_1": "<<AuthenticationServer1>>X recovery_token_issued_1 && <<AuthenticationServer2>>X recovery_token_issued_2",
-  "output_2": "<<AuthenticationServer1,AuthenticationServer2>>X recovery_token_issued"
+  "id": "ex306",
+  "input": "Every agent can eventually prevent a breach",
+  "outputs": [
+    { "formula": "<<agent_1>>F prevent_breach_1 && <<agent_2>>F prevent_breach_2" },
+    { "formula": "<<agent_1,agent_2>>F prevent_breach" }
+  ]
 }
 ```
+
+This row has quantifier-scope ambiguity: it admits a distributive reading (each agent acts alone) and a collective reading (the agents act together). Both formulas are required, not interchangeable.
 
 ## Loading
 
@@ -66,7 +70,9 @@ Augmentation happens after splitting and only on the training split. Augmented r
 
 ## How Multiple Gold Answers Are Used
 
-- Training creates one supervised target per accepted formula.
-- Exact match is correct if the prediction matches any accepted formula after normalization.
-- LLM judging sees all accepted formulas and can approve semantic equivalence to any one of them.
-- Few-shot examples use their preferred formula, so curated examples with alternatives should put the desired displayed target first by using `outputs` or `output`.
+Some inputs have quantifier-scope ambiguity (QSA) and admit more than one correct reading. The pipeline treats every accepted formula as jointly required, not as interchangeable alternatives:
+
+- Training joins all accepted formulas into a single supervised target, one formula per line, so the model learns to emit every required reading instead of choosing one.
+- Exact match requires all accepted formulas after normalization. Order does not matter and exact duplicates collapse, but a prediction that returns only a subset of the required formulas is counted as incorrect.
+- LLM judging runs only on predictions that are not exact matches. It sees all accepted formulas and approves only when the prediction covers every required reading.
+- Few-shot examples display all accepted formulas, one per line, mirroring the expected output format.

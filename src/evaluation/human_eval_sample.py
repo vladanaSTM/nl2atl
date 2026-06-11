@@ -724,7 +724,7 @@ Agreement controls are retained: `llm_agree_yes` checks whether consensus accept
 
 ## Annotation Task
 
-For each row, decide whether `prediction` is semantically equivalent to `gold_1` or, when present, `gold_2` for the given natural-language `input`.
+For each row, decide whether `prediction` is a correct formalization of the natural-language `input`. When only `gold_1` is present, the prediction must be equivalent to `gold_1`. When `gold_2` is also present, the input is ambiguous and both readings are jointly required: mark `correct` as `yes` only when the prediction contains both `gold_1` and `gold_2` as separate formulas in any order, and `no` when it provides only one of them or collapses them into a single conjunctive formula.
 
 Mark `correct` as `yes` only when the prediction preserves the coalition/agent, temporal operator, temporal scope, polarity, logical structure, and atomic proposition meaning. Ignore whitespace and harmless parentheses. Do not mark a prediction correct when it changes an agent, changes temporal scope, flips polarity, drops or adds a condition, uses an unsupported alias, or introduces malformed ATL syntax.
 

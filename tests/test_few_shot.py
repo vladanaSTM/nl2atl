@@ -43,13 +43,16 @@ def test_get_few_shot_examples_does_not_mutate_global_random():
 def test_format_few_shot_prompt_includes_examples():
     prompt = few_shot._format_few_shot_section(
         [
-            {"input": "A", "output_2": "<<A>>F p"},
+            {"input": "A", "outputs": [{"formula": "<<A>>F p"}]},
             {"input": "B", "output": "<<B>>G q"},
         ]
     )
     assert "Example 1" in prompt
     assert "Input: A" in prompt
-    assert "Output: <<A>>F p" in prompt
+    assert "Output:\n<<A>>F p" in prompt
+    assert "Example 2" in prompt
+    assert "Input: B" in prompt
+    assert "Output:\n<<B>>G q" in prompt
 
 
 def test_format_prompt_generic():
@@ -73,10 +76,14 @@ def test_system_prompt_includes_few_shot_and_excludes():
     assert excluded[0] not in prompt
 
 
-def test_system_prompt_forbids_explanations_and_alternatives():
+def test_system_prompt_forbids_explanations_and_requires_all_readings():
     prompt = few_shot.get_system_prompt(few_shot=False)
-    assert "Choose one best formula" in prompt
+    # Explanations and trailing prose are forbidden.
+    assert "Do not include explanations" in prompt
     assert "Never append notes" in prompt
+    # Single-reading inputs get one formula; QSA inputs get every reading.
+    assert "return exactly one ATL/ATL* formula on a single line" in prompt
+    assert "return all required ATL/ATL* formulas, one per line" in prompt
 
 
 def test_format_prompt_qwen_tags():

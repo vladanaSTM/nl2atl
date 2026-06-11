@@ -11,7 +11,7 @@ class _LengthTokenizer:
         return {"input_ids": text.split()}
 
 
-def test_training_dataset_uses_prompt_completion_pairs_for_each_output():
+def test_training_dataset_joins_all_outputs_into_one_target():
     items = [
         {
             "id": "dual",
@@ -28,15 +28,14 @@ def test_training_dataset_uses_prompt_completion_pairs_for_each_output():
     )
 
     assert dataset.column_names == ["prompt", "completion"]
-    assert len(dataset) == 2
-    assert all(
-        dataset[index]["prompt"].endswith("<|assistant|>\n")
-        for index in range(len(dataset))
-    )
-    assert dataset[0]["completion"] == "<<agent_1,agent_2>>F prevent_breach<|end|>"
-    assert (
-        dataset[1]["completion"]
-        == "<<agent_1>>F prevent_breach_1 && <<agent_2>>F prevent_breach_2<|end|>"
+    # A multi-reading item is trained as a single target containing every
+    # required formula, one per line, so the model learns to emit all readings
+    # rather than choosing only one.
+    assert len(dataset) == 1
+    assert dataset[0]["prompt"].endswith("<|assistant|>\n")
+    assert dataset[0]["completion"] == (
+        "<<agent_1,agent_2>>F prevent_breach\n"
+        "<<agent_1>>F prevent_breach_1 && <<agent_2>>F prevent_breach_2<|end|>"
     )
 
 

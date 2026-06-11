@@ -105,21 +105,31 @@ def test_evaluate_single_preserves_latency():
     assert result["latency_ms"] == 12.3
 
 
-def test_evaluate_single_accepts_any_expected_option():
+def test_evaluate_single_requires_all_expected_options():
     evaluator = ExactMatchEvaluator()
-    prediction = {"input": "x", "generated": "<<A,B>>X p"}
     reference = {
         "input": "x",
-        "output_1": "<<A>>X p_1 && <<B>>X p_2",
-        "output_2": "<<A,B>>X p",
+        "outputs": [
+            "<<A>>X p_1 && <<B>>X p_2",
+            "<<A,B>>X p",
+        ],
     }
 
-    result = evaluator.evaluate_single(prediction, reference)
+    # A prediction with only one required reading is not an exact match.
+    partial = evaluator.evaluate_single(
+        {"input": "x", "generated": "<<A,B>>X p"}, reference
+    )
+    assert partial["exact_match"] == 0
 
-    assert result["exact_match"] == 1
-    assert result["expected_options"] == [
-        "<<A,B>>X p",
+    # A prediction with all required readings (any order) is an exact match.
+    complete = evaluator.evaluate_single(
+        {"input": "x", "generated": "<<A,B>>X p\n<<A>>X p_1 && <<B>>X p_2"},
+        reference,
+    )
+    assert complete["exact_match"] == 1
+    assert complete["expected_options"] == [
         "<<A>>X p_1 && <<B>>X p_2",
+        "<<A,B>>X p",
     ]
 
 
