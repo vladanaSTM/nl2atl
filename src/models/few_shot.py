@@ -64,7 +64,6 @@ Output rules:
 - Return only ATL/ATL* formula text.
 - For ordinary single-reading inputs, return exactly one ATL/ATL* formula on a single line.
 - For quantifier-scope ambiguity inputs with multiple admissible readings, return all required ATL/ATL* formulas, one per line.
-- Do not merge multiple QSA readings into one conjunctive formula unless the natural-language input explicitly requires a conjunction.
 - Do not include explanations, Markdown fences, labels, numbering, or natural-language text.
 - Stop immediately after the formula or formulas. Never append notes beginning with words like "where", "or equivalently", "which means", or "represents".
 
@@ -72,26 +71,29 @@ ATL/ATL* syntax rules:
 - Agent coalition: <<Agent>> or <<Agent1,Agent2>>
 - Coalitions may contain numbers or symbolic names, e.g. <<1>>, <<Machine>>, <<Robot,Operator>>
 - Temporal operators supported in this benchmark: G (always), F (eventually), X (next), U (until).
+- G, F, and X are unary; U is binary and is written p U q. Place a U formula under the strategic operator in parentheses, e.g. <<Drone>>(searching U target_detected).
 - Logical operators: -> (implies), && (and), || (or), ! (not)
+- Atomic propositions are lowercase snake_case identifiers, e.g. ticket_printed or at_loading_area; do not use spaces, camelCase, or quotation marks.
 - Parentheses are required whenever an operator scopes over a compound formula.
 - ATL formulas are valid ATL* formulas. ATL* additionally allows more general nesting of temporal operators, such as XF p, XG !p, G(F p), or G(p -> F q), when licensed by the input.
 
 Scope rules:
 - The strategic operator <<A>> scopes over the whole formula that follows it.
-- Do not merge the strategic operator and the temporal operator conceptually.
+- Do not merge the strategic operator with the temporal operator that follows it.
 - For example, write <<Machine>>G(paid -> ticket_printed), not <<Machine>>(G paid -> ticket_printed).
 - If a temporal operator applies to a whole implication or conjunction, place the full compound formula inside its scope.
 - Example: "always, if p then q" becomes G(p -> q), not G p -> q.
 - Example: "next, p and q" becomes X(p && q), unless the sentence explicitly says that each condition is next separately.
 - Do not introduce negation unless it is explicitly expressed in the natural-language input.
+- Express inability ("cannot guarantee") by negating the strategic operator, not the objective: write !<<Y>>F goal, not <<Y>>F !goal, and never simply drop the clause. For "X can, but Y cannot, guarantee G safe", write <<X>>G safe && !<<Y>>G safe.
 - Do not introduce temporal operators that are not licensed by the natural-language input.
 
 Ambiguity rules:
 - For VP ellipsis, repeat the full recovered strategic-temporal formula for the second agent.
 - For Right Node Raising, attach the same shared right-peripheral objective to both coordinated strategic clauses.
-- For quantifier-scope ambiguity, produce all admissible readings as separate ATL/ATL* formulas.
-- In QSA cases, do not choose only one reading. If both distributive and collective readings are admissible, include both.
-- Keep distinct QSA readings on separate lines; do not collapse them into a single conjunction unless the input itself requires one conjunctive specification.
+- For quantifier-scope ambiguity (QSA), output every reading the input admits, one per line; do not pick just one.
+- A single reading may itself be a conjunction (e.g. a distributive reading that ascribes the ability to each agent separately with &&); the only constraint is that two distinct readings are never joined into one formula.
+- Distributive vs. collective concerns who holds the strategy: each agent individually (<<A1>>... && <<A2>>...) versus the coalition jointly (<<A1,A2>>...).
 """
 
 
