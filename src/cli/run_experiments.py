@@ -320,6 +320,7 @@ def write_manifest(
             "time": args.time_limit,
             "env_setup": list(args.env_setup),
             "train_max_steps": args.train_max_steps,
+            "max_eval_samples": args.max_eval_samples,
         },
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -361,6 +362,8 @@ def _render_sbatch_script(
         worker_args.append("--overwrite")
     if args.train_max_steps is not None:
         worker_args.extend(["--train-max-steps", str(args.train_max_steps)])
+    if args.max_eval_samples is not None:
+        worker_args.extend(["--max-eval-samples", str(args.max_eval_samples)])
 
     command = (
         '"$PYTHON_BIN" -m src.cli.run_experiments '
@@ -622,8 +625,10 @@ def main() -> None:
         default=None,
         help=(
             "Smoke test only: evaluate just this many test examples, stratified "
-            "to include both single- and multi-formula cases. Local runs only "
-            "(not serialized into SLURM manifests). Omit for full evaluation."
+            "to include both single- and multi-formula cases. Works for local "
+            "and SLURM runs (propagated to array workers); predictions are "
+            "written under model_predictions/smoke_test/. Omit for full "
+            "evaluation."
         ),
     )
 

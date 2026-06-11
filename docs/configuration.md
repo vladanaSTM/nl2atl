@@ -209,7 +209,7 @@ uv run nl2atl run --slurm \
   --train-max-steps 20
 ```
 
-To verify output formatting end-to-end without running a full evaluation, cap the number of evaluated test examples:
+To verify output formatting end-to-end without running a full evaluation, cap the number of evaluated test examples. Azure/API models need no GPU, so run them locally:
 
 ```bash
 uv run nl2atl run \
@@ -218,7 +218,16 @@ uv run nl2atl run \
   --max-eval-samples 2
 ```
 
-`--max-eval-samples N` evaluates only `N` test examples, chosen by a stratified sample so the subset covers both single- and multi-formula (QSA) cases. With `N=2` you get one single-answer and one multi-answer example, which is enough to confirm the prediction file has the right shape. The runner prints the selected ids and their expected formula counts. Smoke predictions and their split manifests are written under `outputs/model_predictions/smoke_test/` (and `outputs/split_manifests/smoke_test/`) so they never mix with real results or get picked up by aggregation. This flag is for local smoke checks only: it is never written into SLURM manifests and must be omitted for reported results.
+Hugging Face models need a GPU, so smoke-test them through SLURM; the cap is forwarded to every array worker:
+
+```bash
+uv run nl2atl run --slurm \
+  --models all --model_provider hf \
+  --conditions baseline_zero_shot \
+  --max-eval-samples 2
+```
+
+`--max-eval-samples N` evaluates only `N` test examples, chosen by a stratified sample so the subset covers both single- and multi-formula (QSA) cases. With `N=2` you get one single-answer and one multi-answer example, which is enough to confirm the prediction file has the right shape. The runner prints the selected ids and their expected formula counts. Smoke predictions and their split manifests are written under `outputs/model_predictions/smoke_test/` (and `outputs/split_manifests/smoke_test/`) so they never mix with real results or get picked up by aggregation. The cap is recorded in the SLURM manifest and propagated to array workers, so it works for both local and SLURM runs; always omit it for reported results.
 
 ## Environment Variables
 

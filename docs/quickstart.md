@@ -63,11 +63,20 @@ uv run nl2atl run --slurm \
 
 Fine-tuned zero-shot and fine-tuned few-shot runs share one adapter per model and seed. Multi-seed runs write adapters under `models/<model>_finetuned_seed<seed>/final`; single-seed runs omit the seed suffix. Existing adapters are reused unless `--overwrite` is set.
 
-For a quick check that predictions come out in the expected format, evaluate just a couple of test examples:
+For a quick check that predictions come out in the expected format, evaluate just a couple of test examples. Azure/API models run locally:
 
 ```bash
 uv run nl2atl run \
 	--models gpt-5.4 --model_provider azure \
+	--conditions baseline_zero_shot \
+	--max-eval-samples 2
+```
+
+Hugging Face models need a GPU, so smoke-test them through SLURM; the cap is forwarded to each array worker:
+
+```bash
+uv run nl2atl run --slurm \
+	--models all --model_provider hf \
 	--conditions baseline_zero_shot \
 	--max-eval-samples 2
 ```

@@ -230,6 +230,7 @@ def test_render_sbatch_script_includes_tuning_controls(tmp_path):
         experiments_config="configs/experiments.yaml",
         overwrite=False,
         train_max_steps=20,
+        max_eval_samples=None,
         job_name="nl2atl-tune",
         partition="A100",
         gres="gpu:1",
@@ -255,3 +256,38 @@ def test_render_sbatch_script_includes_tuning_controls(tmp_path):
     assert "module load python/3.12.3 cuda/12.4.1" in script
     assert "source .venv/bin/activate" in script
     assert "export TRAIN_MAX_STEPS=20" in script
+
+
+def test_render_sbatch_script_propagates_smoke_eval_cap(tmp_path):
+    args = Namespace(
+        logs_dir="logs",
+        output=None,
+        error=None,
+        max_parallel_gpus=None,
+        models_config="configs/models.yaml",
+        experiments_config="configs/experiments.yaml",
+        overwrite=False,
+        train_max_steps=None,
+        max_eval_samples=2,
+        job_name="nl2atl-smoke",
+        partition="A100",
+        gres="gpu:1",
+        cpus_per_task=8,
+        mem="32G",
+        time_limit="00:30:00",
+        sbatch_arg=[],
+        python_bin="python3",
+        env_setup=["source .venv/bin/activate"],
+    )
+
+    script = _render_sbatch_script(
+        args=args,
+        repo_root=Path("/repo"),
+        manifest_path=tmp_path / "manifest.json",
+        task_count=4,
+    )
+
+    # The smoke cap must reach the array workers so HF models, which require a
+    # GPU and therefore run via SLURM, can be format-checked on a few examples.
+    assert "--max-eval-samples 2" in script
+    assert "export TRAIN_MAX_STEPS" not in script
