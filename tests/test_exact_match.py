@@ -211,3 +211,45 @@ def test_evaluate_model_keeps_raw_generation_when_cleaning_changes_it(monkeypatc
     assert row["generated"] == "<<A>>F p"
     # Cleaning stripped the stop token, so the pre-clean text is preserved.
     assert row["raw_generation"] == "<<A>>F p<|im_end|>"
+
+
+def test_evaluate_model_continues_after_content_filter(monkeypatch):
+    from src.infra.azure import ContentFilterError
+
+    def fake_generate(model, tokenizer, prompt, max_new_tokens=256, return_usage=False):
+        if "blocked" in prompt:
+            raise ContentFilterError("HTTP 500: content_filter")
+        return GenerationResult(text="<<A>>F p", usage=None)
+
+    monkeypatch.setattr("src.models.registry.generate", fake_generate)
+
+    evaluator = ExactMatchEvaluator()
+    metrics = evaluator.evaluate_model(
+        model=object(),
+        tokenizer=None,
+        test_data=[
+            {"id": "blocked-1", "input": "blocked", "outputs": ["<<A>>F p"]},
+            {"id": "ok-1", "input": "ok", "outputs": ["<<A>>F p"]},
+        ],
+        model_type="generic",
+        few_shot=False,
+        verbose=False,
+    )
+
+    # The run completes for all examples instead of aborting on the filter.
+    assert metrics["n_examples"] == 2
+    assert metrics["exact_match"] == 0.5
+
+    filtered = evaluator.results[0]
+    assert filtered["id"] == "blocked-1"
+    assert filtered["generated"] == ""
+    assert filtered["exact_match"] == 0
+    assert "content_filter" in filtered["generation_error"]
+    # An empty generation must not carry a duplicate raw_generation field.
+    assert "raw_generation" not in filtered
+
+    succeeded = evaluator.results[1]
+    assert succeeded["id"] == "ok-1"
+    assert succeeded["generated"] == "<<A>>F p"
+    assert succeeded["exact_match"] == 1
+    assert "generation_error" not in succeeded

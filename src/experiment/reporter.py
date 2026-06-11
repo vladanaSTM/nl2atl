@@ -227,6 +227,9 @@ class ExperimentReporter:
         """Build complete metadata for a run."""
         successful = sum(1 for r in results if r.get("generated"))
         failed = total_samples - successful
+        content_filtered_ids = [
+            r.get("id") for r in results if r.get("generation_error")
+        ]
 
         # Compute latency statistics if available
         latencies = [r["latency_ms"] for r in results if "latency_ms" in r]
@@ -253,6 +256,8 @@ class ExperimentReporter:
             "total_samples": total_samples,
             "successful_predictions": successful,
             "failed_predictions": failed,
+            "content_filtered_predictions": len(content_filtered_ids),
+            "content_filtered_ids": content_filtered_ids,
             "models_config_path": config.models_config_path,
             "models_config_sha256": (
                 sha256_file(Path(config.models_config_path))

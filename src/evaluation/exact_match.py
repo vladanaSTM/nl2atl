@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import BaseEvaluator
 from ..data_utils import get_output_options
+from ..infra.azure import ContentFilterError
 from ..models.few_shot import (
     format_prompt,
     get_few_shot_example_id,
@@ -257,14 +258,29 @@ class ExactMatchEvaluator(BaseEvaluator):
 
             prompt_sha256 = _sha256_text(prompt)
 
+            generation_error = None
+            raw_generation: Any = ""
+            usage = None
+            usage_estimated = False
             try:
-                response = generate(model, tokenizer, prompt, return_usage=True)
-            except TypeError:
-                response = generate(model, tokenizer, prompt)
+                try:
+                    response = generate(model, tokenizer, prompt, return_usage=True)
+                except TypeError:
+                    response = generate(model, tokenizer, prompt)
+                raw_generation = getattr(response, "text", response)
+                usage = getattr(response, "usage", None)
+                usage_estimated = bool(getattr(response, "usage_estimated", False))
+            except ContentFilterError as exc:
+                # The provider's safety layer rejected this prompt. Record an
+                # empty, failed prediction and continue rather than aborting the
+                # whole run; an empty "generated" counts as a failed prediction.
+                generation_error = str(exc)
+                if verbose:
+                    print(
+                        f"  Content filter rejected example "
+                        f"{item.get('id', i)}; recording empty prediction"
+                    )
 
-            raw_generation = getattr(response, "text", response)
-            usage = getattr(response, "usage", None)
-            usage_estimated = bool(getattr(response, "usage_estimated", False))
             generated = self.clean_output(str(raw_generation), model_type)
 
             # Calculate latency
@@ -297,6 +313,10 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "usage_estimated": usage_estimated,
             }
 
+            # Record why a prediction is empty when the provider rejected it.
+            if generation_error is not None:
+                result_dict["generation_error"] = generation_error
+
             # Only keep the raw generation when cleaning actually changed it
             # (e.g. local models emit chat/stop tokens). On API paths the raw
             # text is already clean, so storing it would just duplicate
@@ -309,6 +329,17 @@ class ExactMatchEvaluator(BaseEvaluator):
 
             if verbose and (i + 1) % 10 == 0:
                 print(f"  Processed {i + 1}/{len(test_data)}")
+
+        if verbose:
+            filtered_ids = [
+                r["id"] for r in self.results if r.get("generation_error")
+            ]
+            if filtered_ids:
+                print(
+                    f"\n{len(filtered_ids)} example(s) skipped by the content "
+                    f"filter (recorded as empty, failed predictions): "
+                    f"{filtered_ids}"
+                )
 
         return self.aggregate_metrics()
 

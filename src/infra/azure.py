@@ -24,6 +24,27 @@ load_env()
 requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
 
+class ContentFilterError(RuntimeError):
+    """Raised when the provider's content management policy rejects a prompt.
+
+    This is a deterministic, input-specific rejection: retrying the same prompt
+    will not succeed, so callers should record the example as a failed/empty
+    prediction and move on rather than aborting the whole run.
+    """
+
+
+def _is_content_filter_error(body: str) -> bool:
+    """Return True if a response body indicates a content-filter rejection."""
+    if not body:
+        return False
+    markers = (
+        "content_filter",
+        "ResponsibleAIPolicyViolation",
+        "content management policy",
+    )
+    return any(marker in body for marker in markers)
+
+
 @dataclass
 class GenerationResult:
     """Result from model generation including usage stats."""
@@ -238,9 +259,14 @@ class AzureClient:
                 )
                 if response.status_code >= 400:
                     body = response.text[:500]
+                    if _is_content_filter_error(response.text):
+                        raise ContentFilterError(f"HTTP {response.status_code}: {body}")
                     raise RuntimeError(f"HTTP {response.status_code}: {body}")
                 response.raise_for_status()
                 break
+            except ContentFilterError:
+                # Deterministic input rejection; retrying cannot succeed.
+                raise
             except Exception as e:
                 if attempt == 2:
                     raise RuntimeError(

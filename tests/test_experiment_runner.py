@@ -1,7 +1,7 @@
 import json
 
 from src.constants import ModelType
-from src.config import Config, ModelConfig
+from src.config import Config, ModelConfig, ExperimentCondition
 from src.experiment.reporter import ExperimentReporter, sha256_file
 from src.experiment.runner import ExperimentRunner
 
@@ -195,3 +195,44 @@ def test_reporter_subdir_isolates_smoke_outputs(tmp_path):
         test_data=[{"id": "t1", "input": "a", "outputs": ["<<A>>F p"]}],
     )
     assert manifest_path.parent == tmp_path / "split_manifests" / "smoke_test"
+
+
+def test_run_metadata_surfaces_content_filtered_examples(tmp_path):
+    dataset_path = tmp_path / "dataset.json"
+    dataset_path.write_text(
+        json.dumps([{"id": "t1", "input": "a", "outputs": [{"formula": "<<A>>F p"}]}]),
+        encoding="utf-8",
+    )
+    config = Config(
+        seed=42, train_size=0.7, val_size=0.1, test_size=0.2, augment_factor=1
+    )
+    model_config = ModelConfig(name="m", short_name="m")
+    condition = ExperimentCondition(name="baseline_zero_shot", finetuned=False, few_shot=False)
+    reporter = ExperimentReporter(output_dir=tmp_path)
+
+    results = [
+        {"id": "ok-1", "generated": "<<A>>F p", "exact_match": 1, "latency_ms": 1.0},
+        {
+            "id": "blocked-1",
+            "generated": "",
+            "exact_match": 0,
+            "latency_ms": 1.0,
+            "generation_error": "HTTP 500: content_filter",
+        },
+    ]
+
+    metadata = reporter.build_run_metadata(
+        config=config,
+        run_name="run-1",
+        model_config=model_config,
+        condition=condition,
+        effective_finetuned=False,
+        dataset_path=str(dataset_path),
+        total_samples=2,
+        results=results,
+    )
+
+    assert metadata["successful_predictions"] == 1
+    assert metadata["failed_predictions"] == 1
+    assert metadata["content_filtered_predictions"] == 1
+    assert metadata["content_filtered_ids"] == ["blocked-1"]

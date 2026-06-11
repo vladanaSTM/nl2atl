@@ -17,6 +17,9 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 - `token_usage` and `usage_estimated` when usage data is available
 - `exact_match`
 - `latency_ms`
+- `generation_error` only when the provider's content filter rejected the prompt; the row then has an empty `generated` and counts as a failed prediction
+
+If a provider's content management policy rejects a prompt, that single example is recorded with an empty `generated` and a `generation_error` marker, and evaluation continues; the run is not aborted. These rows are reflected in the metadata `failed_predictions` count, and their IDs are listed in `content_filtered_ids` (with `content_filtered_predictions` as the count) so you can find and inspect them. The evaluator also prints a consolidated list of skipped IDs at the end of the run. Other provider errors (timeouts, server errors) are still retried and, if persistent, raised so the run fails fast.
 
 Top-level metadata records the dataset path/hash, model and experiment config paths/hashes, `pyproject.toml` and `uv.lock` hashes when present, command arguments, run timing, latency summaries, and a `split_manifest_path`/`split_manifest_sha256`. The split manifest under `outputs/split_manifests/` records ordered train, validation, and test membership by stable IDs and content hashes. Augmentation is deterministic from the training split, seed, and config, so augmented rows are not duplicated there.
 
