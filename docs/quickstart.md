@@ -63,13 +63,24 @@ uv run nl2atl run --slurm \
 
 Fine-tuned zero-shot and fine-tuned few-shot runs share one adapter per model and seed. Multi-seed runs write adapters under `models/<model>_finetuned_seed<seed>/final`; single-seed runs omit the seed suffix. Existing adapters are reused unless `--overwrite` is set.
 
+For a quick check that predictions come out in the expected format, evaluate just a couple of test examples:
+
+```bash
+uv run nl2atl run \
+	--models gpt-5.4 --model_provider azure \
+	--conditions baseline_zero_shot \
+	--max-eval-samples 2
+```
+
+`--max-eval-samples 2` runs a stratified sample of the test set, giving one single-formula and one multi-formula (QSA) example so you can confirm the output shape for both. Predictions land in `outputs/model_predictions/smoke_test/` so they stay separate from real runs. Use it for smoke checks only, never for reported numbers.
+
 ## Inspect Predictions
 
 ```bash
 uv run python -c "from src.infra.io import load_json; r=load_json('outputs/model_predictions/qwen-3b_baseline_few_shot_seed42.json'); p=r['predictions'][0]; print(p['input']); print(p['expected_options']); print(p['generated']); print(p['exact_match'])"
 ```
 
-Each prediction row includes the input, accepted gold formulas, minimally cleaned model output, raw generation, prompt hash, deterministic decoding settings, few-shot example IDs when used, token usage when available, exact-match flag, and latency. The top-level metadata also records dataset/config hashes, command arguments, and a split manifest path/hash.
+Each prediction row includes the input, accepted gold formulas, minimally cleaned model output, the raw generation when cleaning changed it, prompt hash, deterministic decoding settings, few-shot example IDs when used, token usage when available, exact-match flag, and latency. The top-level metadata also records dataset/config hashes, command arguments, and a split manifest path/hash.
 
 ## Evaluate And Report
 

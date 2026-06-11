@@ -40,6 +40,24 @@ def test_get_few_shot_examples_does_not_mutate_global_random():
     assert random.random() == expected
 
 
+def test_get_few_shot_examples_defaults_to_all_curated():
+    # The default (n=None) shows every curated exemplar in fixed curated order
+    # so all distinct linguistic cases are demonstrated to the model.
+    examples = few_shot.get_few_shot_examples()
+    assert len(examples) == len(few_shot.FEW_SHOT_EXAMPLES)
+    assert examples == few_shot.FEW_SHOT_EXAMPLES
+
+    # n at least the pool size also returns the full curated pool in order.
+    capped = few_shot.get_few_shot_examples(n=len(few_shot.FEW_SHOT_EXAMPLES) + 5)
+    assert capped == few_shot.FEW_SHOT_EXAMPLES
+
+    # The multi-reading (QSA) cases must always be present in the default pool.
+    multi_reading = [
+        e for e in examples if len(few_shot.get_all_output_formulas(e)) > 1
+    ]
+    assert len(multi_reading) >= 1
+
+
 def test_format_few_shot_prompt_includes_examples():
     prompt = few_shot._format_few_shot_section(
         [

@@ -172,10 +172,42 @@ def test_evaluate_model_records_generation_provenance(monkeypatch):
     row = evaluator.results[0]
     assert metrics["exact_match"] == 1.0
     assert row["generated"] == "<<A>>F p"
-    assert row["raw_generation"] == "<<A>>F p"
+    # The raw generation equals the cleaned output here, so it is omitted to
+    # avoid duplicating "generated".
+    assert "raw_generation" not in row
     assert row["generation_prompt_sha256"]
     assert row["generation_config"]["do_sample"] is False
     assert row["token_usage"]["tokens_total"] == 14
     assert len(row["few_shot_example_ids"]) == 2
     assert "generation_prompt" not in row
     assert "few_shot_examples" not in row
+
+
+def test_evaluate_model_keeps_raw_generation_when_cleaning_changes_it(monkeypatch):
+    def fake_generate(model, tokenizer, prompt, max_new_tokens=256, return_usage=False):
+        # Emulate a local model emitting chat/stop tokens around the answer.
+        return GenerationResult(
+            text="<<A>>F p<|im_end|>",
+            usage={
+                "tokens_input": 10,
+                "tokens_output": 5,
+                "tokens_total": 15,
+            },
+        )
+
+    monkeypatch.setattr("src.models.registry.generate", fake_generate)
+
+    evaluator = ExactMatchEvaluator()
+    evaluator.evaluate_model(
+        model=object(),
+        tokenizer=None,
+        test_data=[{"id": "row-1", "input": "x", "outputs": ["<<A>>F p"]}],
+        model_type="qwen",
+        few_shot=False,
+        verbose=False,
+    )
+
+    row = evaluator.results[0]
+    assert row["generated"] == "<<A>>F p"
+    # Cleaning stripped the stop token, so the pre-clean text is preserved.
+    assert row["raw_generation"] == "<<A>>F p<|im_end|>"

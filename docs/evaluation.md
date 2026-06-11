@@ -10,7 +10,7 @@ Experiments write JSON files under `outputs/model_predictions/`. Each row includ
 - `expected`
 - `expected_options`
 - `generated`
-- `raw_generation`
+- `raw_generation` only when minimal cleaning changed the model output (for example local models that emit chat/stop tokens); omitted when it would duplicate `generated`
 - `generation_prompt_sha256`
 - `generation_config`
 - `few_shot_example_ids` when few-shot prompting is enabled
@@ -124,6 +124,8 @@ The pipeline has skip flags for each stage: `--skip_judge_summaries`, `--skip_ag
 The publication notebook is intentionally compact for paper writing: final judged accuracy, seed variability, exact-match versus LLM-judge contribution, judge reliability, accuracy-latency Pareto analysis, and a reproducibility snapshot. Use `--individual_notebooks` only when you explicitly need the older per-report notebooks for debugging.
 
 Seed aggregates are grouped by judge by default, so results from different judges are not silently pooled. Use `nl2atl aggregate-seeds --combine_judges` only when you intentionally want a combined exploratory view.
+
+Aggregation also separates results by `split_type`. Canonical runs on the fixed split are aggregated over training seeds and reported as mean +/- standard deviation (the seed ablation), while cross-validation runs are aggregated over folds and reported as their own mean +/- standard deviation (partition robustness). Each aggregate entry carries `split_type`, `num_seeds`, `num_folds`, and `num_runs` so the two axes are never mixed.
 
 The manifest records input/report hashes, the current git commit when available, Python/platform details, and reproducibility limitations. Azure judge calls request `temperature=0`, but strict reproducibility still depends on preserving the Azure deployment mapping and any provider-side model snapshot guarantees. For publication claims, keep the raw predictions, split manifests, judged outputs, configs, lockfile, prompt versions, judge agreement report, publication notebook, and any human-validation sample used to calibrate the judges.
 

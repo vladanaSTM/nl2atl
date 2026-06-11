@@ -32,6 +32,7 @@ class TaskSpec:
     seed: int
     model_key: str
     condition_names: List[str]
+    cv_fold: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -39,15 +40,18 @@ class TaskSpec:
             "seed": self.seed,
             "model_key": self.model_key,
             "condition_names": list(self.condition_names),
+            "cv_fold": self.cv_fold,
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "TaskSpec":
+        cv_fold = data.get("cv_fold")
         return cls(
             index=int(data["index"]),
             seed=int(data["seed"]),
             model_key=str(data["model_key"]),
             condition_names=[str(name) for name in data["condition_names"]],
+            cv_fold=None if cv_fold is None else int(cv_fold),
         )
 
 
@@ -190,42 +194,72 @@ def build_tasks(
     models: Optional[Sequence[str]],
     conditions: Optional[Sequence[str]],
     model_provider: str,
+    cv_folds: int = 0,
 ) -> Tuple[List[TaskSpec], List[SkippedSpec]]:
-    """Build grouped model/seed tasks and skip impossible fine-tuning combos."""
+    """Build the experiment task matrix.
+
+    The headline results use a single fixed (stratified) canonical split: each
+    baseline condition runs once (deterministic under greedy decoding) while
+    fine-tuned conditions run for every training seed (the seed ablation, used
+    for mean +/- std). When ``cv_folds >= 2``, every model/condition also runs
+    once per stratified cross-validation fold (single training seed) for the
+    partition-robustness analysis.
+    """
     model_keys = select_models(config, models, model_provider)
     selected_conditions = select_conditions(config, conditions)
 
     tasks: List[TaskSpec] = []
     skipped: List[SkippedSpec] = []
     index = 0
+    base_seed = int(seeds[0]) if seeds else int(config.seed or 0)
 
-    for seed in seeds:
-        for model_key in model_keys:
-            model_config = config.models[model_key]
-            runnable_conditions = []
+    for model_key in model_keys:
+        model_config = config.models[model_key]
 
-            for condition in selected_conditions:
-                if condition.finetuned:
-                    allowed, reason = can_finetune(model_config)
-                    if not allowed:
-                        skipped.append(
-                            SkippedSpec(
-                                seed=seed,
-                                model_key=model_key,
-                                condition_name=condition.name,
-                                reason=reason,
-                            )
+        # Resolve runnable conditions once per model (records skips once).
+        all_runnable: List[str] = []
+        finetuned_runnable: List[str] = []
+        for condition in selected_conditions:
+            if condition.finetuned:
+                allowed, reason = can_finetune(model_config)
+                if not allowed:
+                    skipped.append(
+                        SkippedSpec(
+                            seed=base_seed,
+                            model_key=model_key,
+                            condition_name=condition.name,
+                            reason=reason,
                         )
-                        continue
-                runnable_conditions.append(condition.name)
+                    )
+                    continue
+                finetuned_runnable.append(condition.name)
+            all_runnable.append(condition.name)
 
-            if runnable_conditions:
+        # Canonical split: baselines once (first seed), fine-tuned per seed.
+        for seed_index, seed in enumerate(seeds):
+            conditions_subset = all_runnable if seed_index == 0 else finetuned_runnable
+            if conditions_subset:
                 tasks.append(
                     TaskSpec(
                         index=index,
                         seed=int(seed),
                         model_key=model_key,
-                        condition_names=runnable_conditions,
+                        condition_names=conditions_subset,
+                        cv_fold=None,
+                    )
+                )
+                index += 1
+
+        # Cross-validation folds: all conditions per fold, single training seed.
+        if cv_folds and cv_folds >= 2 and all_runnable:
+            for fold in range(cv_folds):
+                tasks.append(
+                    TaskSpec(
+                        index=index,
+                        seed=base_seed,
+                        model_key=model_key,
+                        condition_names=all_runnable,
+                        cv_fold=fold,
                     )
                 )
                 index += 1
@@ -430,8 +464,9 @@ def submit_slurm(
 def _print_tasks(tasks: Sequence[TaskSpec], skipped: Sequence[SkippedSpec]) -> None:
     for task in tasks:
         conditions = ",".join(task.condition_names)
+        fold = "canonical" if task.cv_fold is None else f"fold{task.cv_fold}"
         print(
-            f"{task.index}\tseed={task.seed}\tmodel={task.model_key}\tconditions={conditions}"
+            f"{task.index}\tseed={task.seed}\t{fold}\tmodel={task.model_key}\tconditions={conditions}"
         )
 
     if skipped:
@@ -453,9 +488,11 @@ def run_task(
 
     config.seed = task.seed
     config.seeds = [int(seed) for seed in selected_seeds]
+    config.cv_fold = task.cv_fold
 
+    fold = "canonical" if task.cv_fold is None else f"fold{task.cv_fold}"
     print(
-        f"Running task {task.index}: seed={task.seed}, "
+        f"Running task {task.index}: seed={task.seed}, {fold}, "
         f"model={task.model_key}, conditions={task.condition_names}"
     )
     runner = ExperimentRunner(config)
@@ -485,9 +522,22 @@ def _load_plan(
     args: argparse.Namespace,
 ) -> Tuple[Config, List[int], List[TaskSpec], List[SkippedSpec]]:
     config = Config.from_yaml(args.models_config, args.experiments_config)
+    if args.cv_folds is not None:
+        config.cv_folds = args.cv_folds
+    if args.max_eval_samples is not None:
+        if args.max_eval_samples <= 0:
+            raise ValueError("--max-eval-samples must be greater than 0")
+        config.max_eval_samples = args.max_eval_samples
 
     if args.task_manifest:
         seeds, tasks, payload = load_manifest(Path(args.task_manifest))
+        # Recover the fold count from the manifest so CV workers split data
+        # into the same number of folds used to generate the task plan.
+        derived_folds = (
+            max((t.cv_fold for t in tasks if t.cv_fold is not None), default=-1) + 1
+        )
+        if derived_folds >= 2:
+            config.cv_folds = derived_folds
         skipped = [
             SkippedSpec(
                 seed=int(item["seed"]),
@@ -506,6 +556,7 @@ def _load_plan(
         models=args.models,
         conditions=args.conditions,
         model_provider=args.model_provider,
+        cv_folds=config.cv_folds,
     )
     return config, seeds, tasks, skipped
 
@@ -535,6 +586,16 @@ def main() -> None:
     )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--seeds", nargs="+", type=int, default=None)
+    parser.add_argument(
+        "--cv-folds",
+        "--cv_folds",
+        type=int,
+        default=None,
+        help=(
+            "Number of stratified cross-validation folds for the robustness "
+            "analysis (overrides experiments.yaml data.cv_folds). 0 disables CV."
+        ),
+    )
     parser.add_argument("--models_config", default="configs/models.yaml")
     parser.add_argument("--experiments_config", default="configs/experiments.yaml")
     parser.add_argument("--overwrite", "--force", action="store_true")
@@ -553,6 +614,17 @@ def main() -> None:
         type=int,
         default=None,
         help="Limit training steps for OOM smoke tests; omitted for full training.",
+    )
+    parser.add_argument(
+        "--max-eval-samples",
+        "--max_eval_samples",
+        type=int,
+        default=None,
+        help=(
+            "Smoke test only: evaluate just this many test examples, stratified "
+            "to include both single- and multi-formula cases. Local runs only "
+            "(not serialized into SLURM manifests). Omit for full evaluation."
+        ),
     )
 
     parser.add_argument("--slurm", action="store_true", help="Submit as a SLURM array.")

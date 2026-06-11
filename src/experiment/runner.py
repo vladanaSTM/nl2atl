@@ -9,10 +9,10 @@ from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
 import torch
 from datasets import Dataset
-from trl import SFTConfig, SFTTrainer
+from trl import SFTConfig, SFTTrainer  # type: ignore[attr-defined]
 
 from ..config import Config, ModelConfig, ExperimentCondition
-from ..data_utils import get_output_options
+from ..data_utils import get_output_options, stratified_sample, default_stratum
 from ..evaluation.exact_match import ExactMatchEvaluator
 from ..models.few_shot import format_prompt
 from ..models.registry import load_model, get_model_type, clear_gpu_memory
@@ -35,19 +35,29 @@ class ExperimentRunner:
         self.evaluator = ExactMatchEvaluator()
         self.all_results: List[Dict] = []
 
+        # The split partition is fixed by ``split_seed`` (independent of the
+        # per-run training ``seed``) so every model is compared on the same
+        # test set; ``cv_fold`` selects a cross-validation fold when enabled.
+        split_seed = config.split_seed if config.split_seed is not None else config.seed
         self.data_manager = data_manager or ExperimentDataManager(
             data_path=Path(config.data_path),
             train_size=config.train_size,
             test_size=config.test_size,
             val_size=config.val_size,
-            seed=config.seed,
+            seed=split_seed,
             augment_factor=config.augment_factor,
+            stratify=config.stratify,
+            cv_folds=config.cv_folds,
+            cv_fold=config.cv_fold,
         )
         self.reporter = reporter or ExperimentReporter(
-            output_dir=Path(config.output_dir)
+            output_dir=Path(config.output_dir),
+            predictions_subdir=(
+                "smoke_test" if config.max_eval_samples is not None else None
+            ),
         )
 
-        # Global seeding for reproducibility
+        # Global seeding for reproducibility (training stochasticity only).
         self._set_global_seed(self.config.seed)
 
         # Load and split data once
@@ -57,6 +67,30 @@ class ExperimentRunner:
             self.test_data,
             self.data,
         ) = self.data_manager.prepare_data()
+
+        # Optional smoke-test cap: evaluate only a tiny stratified subset of the
+        # test split (covering single- and multi-formula examples) for a cheap
+        # end-to-end format check. Never use for reported results.
+        if self.config.max_eval_samples is not None:
+            full_test = self.test_data
+            self.test_data = stratified_sample(
+                full_test,
+                self.config.max_eval_samples,
+                seed=split_seed,
+                stratify_key=default_stratum,
+            )
+            print(
+                f"[smoke] --max-eval-samples={self.config.max_eval_samples}: "
+                f"evaluating {len(self.test_data)} of {len(full_test)} test "
+                f"examples (stratified by formula count):"
+            )
+            for item in self.test_data:
+                n_formulas = len(get_output_options(item))
+                print(f"  - {item.get('id', '?')}: {n_formulas} expected formula(s)")
+            print(
+                f"[smoke] writing predictions under "
+                f"{Path(self.config.output_dir) / 'model_predictions' / 'smoke_test'}"
+            )
 
         # Model caching
         self.model_cache: Dict[Tuple[str, str], Tuple[Any, Any]] = {}
@@ -70,10 +104,13 @@ class ExperimentRunner:
         )
 
     def _seed_suffix(self) -> str:
-        """Get seed suffix for run naming."""
+        """Get the run-name suffix for the active seed and/or CV fold."""
+        suffix = ""
         if self.config.seeds and len(self.config.seeds) > 1:
-            return f"_seed{self.config.seed}"
-        return ""
+            suffix += f"_seed{self.config.seed}"
+        if self.config.cv_fold is not None:
+            suffix += f"_fold{self.config.cv_fold}"
+        return suffix
 
     def _build_run_name(self, model_key: str, condition: ExperimentCondition) -> str:
         """Build a unique run name."""

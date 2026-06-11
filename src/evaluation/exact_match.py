@@ -4,7 +4,7 @@ from collections import Counter
 import hashlib
 import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .base import BaseEvaluator
 from ..data_utils import get_output_options
@@ -111,7 +111,9 @@ class ExactMatchEvaluator(BaseEvaluator):
         """
         return [line.strip() for line in str(text or "").splitlines() if line.strip()]
 
-    def outputs_exact_match(self, prediction_text: str, gold_outputs: List[str]) -> bool:
+    def outputs_exact_match(
+        self, prediction_text: str, gold_outputs: List[str]
+    ) -> bool:
         """Return True iff predicted formulas match all gold outputs.
 
         The comparison is order-insensitive but multiplicity-sensitive. This means
@@ -148,9 +150,7 @@ class ExactMatchEvaluator(BaseEvaluator):
             "input": prediction.get("input") or reference.get("input"),
             "expected": reference_text,
             "expected_options": reference_options,
-            "expected_outputs": reference_options,
             "generated": prediction_text,
-            "predicted_outputs": self.split_formula_lines(prediction_text),
             "exact_match": exact_match,
         }
         # Preserve latency if it was already computed
@@ -200,7 +200,7 @@ class ExactMatchEvaluator(BaseEvaluator):
         test_data: List[Dict],
         model_type: str,
         few_shot: bool = False,
-        num_few_shot: int = 5,
+        num_few_shot: Optional[int] = None,
         verbose: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -212,7 +212,7 @@ class ExactMatchEvaluator(BaseEvaluator):
             test_data: List of test items
             model_type: Model family type
             few_shot: Whether to use few-shot prompting
-            num_few_shot: Number of few-shot examples
+            num_few_shot: Number of few-shot examples; None shows all curated examples
             verbose: Whether to print progress
 
         Returns:
@@ -279,10 +279,7 @@ class ExactMatchEvaluator(BaseEvaluator):
                 "input": item["input"],
                 "expected": "\n".join(expected_options),
                 "expected_options": expected_options,
-                "expected_outputs": expected_options,
                 "generated": generated,
-                "predicted_outputs": self.split_formula_lines(generated),
-                "raw_generation": str(raw_generation),
                 "exact_match": exact_match,
                 "latency_ms": round(latency_ms, 2),
                 "generation_prompt_sha256": prompt_sha256,
@@ -292,13 +289,21 @@ class ExactMatchEvaluator(BaseEvaluator):
                     "temperature": 0,
                     "model_type": model_type,
                     "few_shot": few_shot,
-                    "num_few_shot": num_few_shot if few_shot else 0,
+                    "num_few_shot": len(few_shot_example_ids),
                     "few_shot_seed": few_shot_seed if few_shot else None,
                 },
                 "few_shot_example_ids": few_shot_example_ids,
                 "token_usage": usage,
                 "usage_estimated": usage_estimated,
             }
+
+            # Only keep the raw generation when cleaning actually changed it
+            # (e.g. local models emit chat/stop tokens). On API paths the raw
+            # text is already clean, so storing it would just duplicate
+            # "generated".
+            raw_generation_text = str(raw_generation)
+            if raw_generation_text != generated:
+                result_dict["raw_generation"] = raw_generation_text
 
             self.results.append(result_dict)
 

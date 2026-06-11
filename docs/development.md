@@ -57,7 +57,7 @@ cmd /c C:\Users\perlicv1\AppData\Local\Programs\Python\Python312\python.exe -m p
 ## Code Guidelines
 
 - Keep data normalization at the dataset boundary.
-- Do not read `output_1` or `output_2` directly outside data utilities; use `get_output_options`.
+- Read accepted gold formulas with `get_output_options`; do not index raw `outputs` entries directly outside data utilities.
 - Keep augmentation train-only.
 - Keep generated artifacts under `outputs/` or `models/`.
 - Add focused tests for behavior changes.

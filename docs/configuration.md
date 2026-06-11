@@ -20,6 +20,7 @@ experiment:
   name: "nl2atl_300_examples"
   seed: 42
   num_seeds: 3
+  split_seed: 42
 
 data:
   path: "./data/dataset_gold.json"
@@ -27,6 +28,8 @@ data:
   val_size: 0.10
   test_size: 0.20
   augment_factor: 2
+  stratify: true
+  cv_folds: 0
 
 training:
   num_epochs: 8
@@ -50,8 +53,10 @@ training:
   packing: false
 
 few_shot:
-  num_examples: 5
+  num_examples: null
 ```
+
+`num_examples: null` (the default) shows every curated few-shot exemplar to each model, so all distinct linguistic cases are demonstrated. Set an integer only to cap the count for an ablation; the cap selects a reproducible random subset.
 
 `train_size + val_size + test_size` must equal `1.0`.
 
@@ -124,7 +129,28 @@ experiment:
   num_seeds: 3
 ```
 
-Each seed creates a different train/validation/test shuffle. CLI overrides use either `--seed 42` for one seed or `--seeds 42 43 44` for a list. Passing both is an error.
+CLI overrides use either `--seed 42` for one seed or `--seeds 42 43 44` for a list. Passing both is an error.
+
+### Split Seed Versus Training Seed
+
+The split seed is decoupled from the training seed:
+
+- `split_seed` fixes one canonical stratified split that stays comparable across all models and future work. If omitted, it defaults to `seed`.
+- The training `seed` (and the `seeds` list) only controls training stochasticity.
+
+Because baselines are deterministic under greedy decoding on the fixed split, the planner runs each baseline condition once and repeats only the fine-tuned conditions across the seed list. That seed ablation is reported as mean +/- standard deviation, isolating training variance from partition luck.
+
+### Cross-Validation
+
+Set `cv_folds` to add a stratified cross-validation pass for partition-robustness:
+
+```yaml
+data:
+  stratify: true
+  cv_folds: 5
+```
+
+When `cv_folds >= 2`, every model and condition also runs once per fold (held-out fold = test, remaining folds = train + val) using the first training seed. Folds are stratified on formula structure so the rare multi-reading (QSA) items stay balanced. Override at the CLI with `--cv-folds 5`; `--cv-folds 0` disables cross-validation. Aggregation reports fold results as their own mean +/- standard deviation, separate from the seed ablation.
 
 ## Models
 
@@ -182,6 +208,17 @@ uv run nl2atl run --slurm \
   --models all --conditions all --model_provider hf \
   --train-max-steps 20
 ```
+
+To verify output formatting end-to-end without running a full evaluation, cap the number of evaluated test examples:
+
+```bash
+uv run nl2atl run \
+  --models gpt-5.4 --model_provider azure \
+  --conditions baseline_zero_shot \
+  --max-eval-samples 2
+```
+
+`--max-eval-samples N` evaluates only `N` test examples, chosen by a stratified sample so the subset covers both single- and multi-formula (QSA) cases. With `N=2` you get one single-answer and one multi-answer example, which is enough to confirm the prediction file has the right shape. The runner prints the selected ids and their expected formula counts. Smoke predictions and their split manifests are written under `outputs/model_predictions/smoke_test/` (and `outputs/split_manifests/smoke_test/`) so they never mix with real results or get picked up by aggregation. This flag is for local smoke checks only: it is never written into SLURM manifests and must be omitted for reported results.
 
 ## Environment Variables
 

@@ -13,7 +13,7 @@ Required:
 | Field | Meaning |
 |---|---|
 | `input` | Natural-language requirement |
-| `outputs`, `output`, `output_1`, or `output_2` | At least one accepted ATL formula |
+| `outputs` | List of accepted ATL formulas (at least one) |
 
 Optional:
 
@@ -21,12 +21,7 @@ Optional:
 |---|---|
 | `id` | Stable example identifier |
 
-Rows may have multiple correct formulas. `load_data` creates:
-
-- `outputs`: all accepted formulas, deduplicated in preferred order
-- `output`: the first preferred formula, kept for compatibility
-
-Preferred order is an existing `outputs` list when present, then `output`, then `output_2`, then `output_1`. Evaluation helpers also understand result-style fields such as `expected_options`, `gold_options`, and `reference_options`.
+Rows may have multiple correct formulas. Each entry in `outputs` is an object with a `formula` field. `load_data` validates rows and normalizes `outputs` into a deduplicated list of formula strings, preserving order. Evaluation helpers also understand result-style fields such as `expected_options`, `gold_options`, and `reference_options` when re-scoring external prediction files.
 
 ## Example
 
@@ -55,13 +50,34 @@ print(data[0]["outputs"])
 
 ## Splits And Augmentation
 
-Splits are seeded shuffles, not stratified splits. The splitter uses `random.Random(seed).shuffle`, rounds the train and validation counts, and leaves the remainder for test.
+Splits are deterministic and, by default, stratified on formula structure. Stratification keeps the rare multi-reading (QSA) items balanced across train, validation, and test, because there is no difficulty field in the dataset. The splitter groups rows by stratum (single-formula vs multi-formula), shuffles each stratum with a fixed `split_seed`, rounds the train and validation counts per stratum, leaves the remainder for test, then shuffles the combined splits. Set `stratify: false` to fall back to a plain seeded shuffle.
 
 ```python
-from src.data_utils import split_data, augment_data
+from src.data_utils import split_data, augment_data, default_stratum
 
-train, val, test = split_data(data, train_size=0.70, val_size=0.10, test_size=0.20, seed=42)
+train, val, test = split_data(
+    data,
+    train_size=0.70,
+    val_size=0.10,
+    test_size=0.20,
+    seed=42,
+    stratify_key=default_stratum,
+)
 train_aug = augment_data(train, augment_factor=2)
+```
+
+The split seed is decoupled from the training seed: a single fixed `split_seed` defines one canonical split that stays comparable across models and future work, while the training `seed` only controls training stochasticity. Curated few-shot exemplars are held out of every split so demonstrations never leak into train, validation, or test.
+
+For partition-robustness, the same data can be split into stratified cross-validation folds. `kfold_split` uses the held-out fold as the test set and carves a validation slice from the remaining folds:
+
+```python
+from src.data_utils import kfold_split, stratified_folds
+
+# One fold (held-out fold = test, rest = train + val).
+train, val, test = kfold_split(data, n_folds=5, fold_index=0, val_size=0.10, seed=42)
+
+# Or the raw fold partition for custom loops.
+folds = stratified_folds(data, n_folds=5, seed=42)
 ```
 
 Augmentation happens after splitting and only on the training split. Augmented rows keep the same `outputs` list.

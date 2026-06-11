@@ -14,27 +14,15 @@ from ..constants import ModelType
 FEW_SHOT_EXAMPLES = [
     {
         "input": "They can guarantee that at the next step the alarm will be sent, the surveillance system and the operator.",
-        "outputs": [
-            {
-                "formula": "<<System,Operator>>X alarm_sent"
-            }
-        ],
+        "outputs": [{"formula": "<<System,Operator>>X alarm_sent"}],
     },
     {
         "input": "The gate, the machine can guarantee that it will open at the next step.",
-        "outputs": [
-            {
-                "formula": "<<Machine>>X gate_open"
-            }
-        ],
+        "outputs": [{"formula": "<<Machine>>X gate_open"}],
     },
     {
         "input": "Robot number 1 has a strategy to ensure that eventually position 3 holds, and robot number 2 does too.",
-        "outputs": [
-            {
-                "formula": "<<Robot1>>F pos3 && <<Robot2>>F pos3"
-            }
-        ],
+        "outputs": [{"formula": "<<Robot1>>F pos3 && <<Robot2>>F pos3"}],
     },
     {
         "input": "Every robot can guarantee that it will eventually reach a safe spot.",
@@ -42,9 +30,7 @@ FEW_SHOT_EXAMPLES = [
             {
                 "formula": "<<Robot1>>F at_safe_spot_1 && <<Robot2>>F at_safe_spot_2 && <<Robot3>>F at_safe_spot_3"
             },
-            {
-                "formula": "<<Robot1,Robot2,Robot3>>F at_safe_spot"
-            }
+            {"formula": "<<Robot1,Robot2,Robot3>>F at_safe_spot"},
         ],
     },
     {
@@ -57,11 +43,7 @@ FEW_SHOT_EXAMPLES = [
     },
     {
         "input": "The user can guarantee that sooner or later the ticket will be printed.",
-        "outputs": [
-            {
-                "formula": "<<User>>F ticket_printed"
-            }
-        ],
+        "outputs": [{"formula": "<<User>>F ticket_printed"}],
     },
     {
         "input": "If we do not wish to fight, we can prevent the enemy from engaging us even though the lines of our encampment be merely traced out on the ground. All we need do is to throw something odd and unaccountable in his way.",
@@ -112,6 +94,7 @@ Ambiguity rules:
 - Keep distinct QSA readings on separate lines; do not collapse them into a single conjunction unless the input itself requires one conjunctive specification.
 """
 
+
 def get_all_output_formulas(example: Dict[str, Any]) -> List[str]:
     """
     Return all expected ATL/ATL* formulas for an example.
@@ -146,16 +129,23 @@ def get_output_text(example: Dict[str, Any]) -> Optional[str]:
 
 
 def get_few_shot_examples(
-    n: int = 5,
+    n: Optional[int] = None,
     seed: Optional[int] = None,
     exclude_inputs: Optional[List[str]] = None,
 ) -> List[Dict]:
     """
-    Get n few-shot examples, optionally excluding certain inputs.
+    Get few-shot examples, optionally excluding certain inputs.
+
+    The curated pool covers a set of distinct linguistic phenomena (collective
+    coordination, VP ellipsis, Right Node Raising, ability asymmetry, and
+    quantifier-scope ambiguity). When ``n`` is None (the default) or is at least
+    the pool size, every curated exemplar is returned in its fixed curated order
+    so all distinct cases are shown to the model. A smaller ``n`` selects a
+    reproducible random subset and is intended only for ablations.
 
     Args:
-        n: Number of examples to return
-        seed: Random seed for reproducibility
+        n: Number of examples to return; None (default) returns all curated examples
+        seed: Random seed for reproducibility when subsampling
         exclude_inputs: Inputs to exclude (for avoiding data leakage)
 
     Returns:
@@ -169,8 +159,21 @@ def get_few_shot_examples(
             e for e in examples if e["input"].lower().strip() not in exclude_set
         ]
 
+    if n is None or n >= len(examples):
+        return examples
+
     rng = random.Random(seed)
-    return rng.sample(examples, min(n, len(examples)))
+    return rng.sample(examples, n)
+
+
+def few_shot_example_inputs() -> set:
+    """Return the normalized inputs of all curated few-shot exemplars.
+
+    These inputs are held out of the evaluation dataset so the few-shot
+    demonstrations stay constant across splits/folds and never leak into any
+    test set.
+    """
+    return {e["input"].lower().strip() for e in FEW_SHOT_EXAMPLES}
 
 
 def get_few_shot_example_id(example: Dict[str, Any]) -> str:
@@ -198,7 +201,7 @@ def _format_few_shot_section(examples: List[Dict]) -> str:
 
 def get_system_prompt(
     few_shot: bool = False,
-    num_examples: int = 5,
+    num_examples: Optional[int] = None,
     seed: int = 42,
     exclude_inputs: Optional[List[str]] = None,
 ) -> str:
@@ -207,8 +210,8 @@ def get_system_prompt(
 
     Args:
         few_shot: Whether to include few-shot examples
-        num_examples: Number of examples to include
-        seed: Random seed for example selection
+        num_examples: Number of examples to include; None shows all curated examples
+        seed: Random seed for example selection when subsampling
         exclude_inputs: Inputs to exclude from examples
 
     Returns:
@@ -346,7 +349,7 @@ def format_prompt(
     input_text: str,
     output_text: Optional[str] = None,
     few_shot: bool = False,
-    num_examples: int = 5,
+    num_examples: Optional[int] = None,
     model_type: str = ModelType.QWEN,
     exclude_inputs: Optional[List[str]] = None,
     tokenizer: Optional[Any] = None,
@@ -358,7 +361,7 @@ def format_prompt(
         input_text: Natural language input
         output_text: Expected output (for training) or None (for inference)
         few_shot: Whether to include few-shot examples
-        num_examples: Number of few-shot examples
+        num_examples: Number of few-shot examples; None shows all curated examples
         model_type: Model family type
         exclude_inputs: Inputs to exclude from few-shot examples
         tokenizer: Optional tokenizer used for native chat templates

@@ -57,14 +57,29 @@ class Config:
     output_dir: str = DEFAULT_OUTPUT_DIR
     models_dir: str = DEFAULT_MODELS_DIR
 
-    # Data settings
-    train_size: Optional[float] = None
-    test_size: Optional[float] = None
-    val_size: Optional[float] = None
-    augment_factor: Optional[int] = None
-    seed: Optional[int] = None
+    # Data settings. Required values are populated by ``from_yaml`` (which fails
+    # fast when they are absent), so they are typed concretely with sensible
+    # defaults rather than Optional.
+    train_size: float = 0.7
+    test_size: float = 0.2
+    val_size: float = 0.1
+    augment_factor: int = 1
+    seed: int = 42
     seeds: List[int] = field(default_factory=list)
     num_seeds: int = 1
+
+    # Split settings (decoupled from the per-run training seed). ``split_seed``
+    # fixes the canonical train/val/test partition for ALL runs so models are
+    # comparable on the same test set; ``cv_folds``/``cv_fold`` enable stratified
+    # cross-validation for the robustness analysis.
+    split_seed: Optional[int] = None
+    stratify: bool = True
+    cv_folds: int = 0
+    cv_fold: Optional[int] = None
+
+    # Runtime smoke-test override (not loaded from YAML): cap the number of
+    # evaluated test examples for a cheap end-to-end format check.
+    max_eval_samples: Optional[int] = None
 
     # Training settings
     num_epochs: int = 10
@@ -88,7 +103,8 @@ class Config:
     packing: bool = False
 
     # Few-shot settings
-    num_few_shot_examples: int = 5
+    # None shows all curated exemplars; an int caps the number (ablation only).
+    num_few_shot_examples: Optional[int] = None
 
     # Model and experiment configs
     models: Dict[str, ModelConfig] = field(default_factory=dict)
@@ -115,6 +131,39 @@ class Config:
 
         data_settings = exp_cfg["data"]
         train_size, val_size, test_size = cls._load_split_sizes(data_settings)
+        augment_factor = data_settings.get("augment_factor")
+
+        # Fail fast with a friendly message when required values are absent, then
+        # narrow the Optionals so the dataclass fields stay concretely typed.
+        missing = []
+        if seed is None:
+            missing.append("experiment.seed")
+        if train_size is None:
+            missing.append("data.train_size")
+        if val_size is None:
+            missing.append("data.val_size")
+        if test_size is None:
+            missing.append("data.test_size")
+        if augment_factor is None:
+            missing.append("data.augment_factor")
+        if missing:
+            raise ValueError(
+                f"Missing required config values in experiments.yaml: {', '.join(missing)}"
+            )
+        assert (
+            seed is not None
+            and train_size is not None
+            and val_size is not None
+            and test_size is not None
+            and augment_factor is not None
+        )
+
+        # Split partition controls (decoupled from the per-run training seed).
+        split_seed = exp_settings.get("split_seed")
+        if split_seed is None:
+            split_seed = seed
+        stratify = data_settings.get("stratify", True)
+        cv_folds = data_settings.get("cv_folds", 0)
 
         # Build config
         config = cls(
@@ -126,10 +175,13 @@ class Config:
             train_size=train_size,
             val_size=val_size,
             test_size=test_size,
-            augment_factor=data_settings["augment_factor"],
+            augment_factor=augment_factor,
             seed=seed,
             seeds=seeds,
             num_seeds=num_seeds,
+            split_seed=split_seed,
+            stratify=stratify,
+            cv_folds=cv_folds,
             num_epochs=exp_cfg["training"]["num_epochs"],
             batch_size=exp_cfg["training"]["batch_size"],
             gradient_accumulation_steps=exp_cfg["training"][
@@ -163,7 +215,7 @@ class Config:
             ),
             tf32=exp_cfg["training"].get("tf32", cls.tf32),
             packing=exp_cfg["training"].get("packing", cls.packing),
-            num_few_shot_examples=exp_cfg["few_shot"]["num_examples"],
+            num_few_shot_examples=exp_cfg["few_shot"].get("num_examples"),
         )
 
         # Load models
@@ -202,24 +254,7 @@ class Config:
         return train_size, val_size, test_size
 
     def _validate(self) -> None:
-        """Validate that required configuration values are present."""
-        missing = []
-        if self.seed is None:
-            missing.append("experiment.seed")
-        if self.train_size is None:
-            missing.append("data.train_size")
-        if self.test_size is None:
-            missing.append("data.test_size")
-        if self.val_size is None:
-            missing.append("data.val_size")
-        if self.augment_factor is None:
-            missing.append("data.augment_factor")
-
-        if missing:
-            raise ValueError(
-                f"Missing required config values in experiments.yaml: {', '.join(missing)}"
-            )
-
+        """Validate cross-field constraints (presence is checked in ``from_yaml``)."""
         split_total = self.train_size + self.val_size + self.test_size
         if not 0.999 <= split_total <= 1.001:
             raise ValueError(

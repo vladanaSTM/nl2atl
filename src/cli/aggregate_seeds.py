@@ -174,9 +174,9 @@ def aggregate_predictions(
         agreement_report_path: Optional path to agreement_report.json
         combine_judges: Combine files from different judges into one group
     """
-    grouped: Dict[Tuple[str, str, bool, bool, Optional[str]], List[Dict[str, Any]]] = (
-        defaultdict(list)
-    )
+    grouped: Dict[
+        Tuple[str, str, bool, bool, Optional[str], str], List[Dict[str, Any]]
+    ] = defaultdict(list)
 
     # Load agreement scores if provided
     agreement_scores = _load_agreement_scores(agreement_report_path)
@@ -193,6 +193,11 @@ def aggregate_predictions(
         finetuned = bool(metadata.get("finetuned", False))
         few_shot = bool(metadata.get("few_shot", False))
         seed = metadata.get("seed")
+        cv_fold = metadata.get("cv_fold")
+        # Canonical (fixed split) runs vary by training seed (the seed ablation);
+        # cross-validation runs vary by fold. Keep them in separate groups so we
+        # report mean +/- std over the correct axis for each.
+        split_type = "cv" if cv_fold is not None else "canonical"
         judge_model = (
             metadata.get("judge_model")
             or metadata.get("judge")
@@ -216,9 +221,12 @@ def aggregate_predictions(
         if base_source in agreement_scores:
             metrics["judge_agreement"] = agreement_scores[base_source]
 
-        grouped[(model_short, condition, finetuned, few_shot, group_judge)].append(
+        grouped[
+            (model_short, condition, finetuned, few_shot, group_judge, split_type)
+        ].append(
             {
                 "seed": seed,
+                "cv_fold": cv_fold,
                 "judge_model": judge_model,
                 "model": metadata.get("model"),
                 "model_short": model_short,
@@ -237,6 +245,7 @@ def aggregate_predictions(
         finetuned,
         few_shot,
         judge_model,
+        split_type,
     ), items in grouped.items():
         agg_metrics: Dict[str, Dict[str, float]] = {}
         for field in NUMERIC_FIELDS:
@@ -269,6 +278,9 @@ def aggregate_predictions(
         unique_seeds = sorted(
             {item["seed"] for item in items if item.get("seed") is not None}
         )
+        unique_folds = sorted(
+            {item["cv_fold"] for item in items if item.get("cv_fold") is not None}
+        )
         judge_models = sorted(
             {str(item["judge_model"]) for item in items if item.get("judge_model")}
         )
@@ -278,14 +290,17 @@ def aggregate_predictions(
             "condition": condition,
             "finetuned": finetuned,
             "few_shot": few_shot,
+            "split_type": split_type,
             "judge_model": judge_model,
             "judge_models": judge_models,
             "num_seeds": len(unique_seeds) if unique_seeds else len(items),
+            "num_folds": len(unique_folds),
             "num_runs": len(items),
             "metrics": agg_metrics,
             "per_seed": [
                 {
                     "seed": i["seed"],
+                    "cv_fold": i["cv_fold"],
                     "judge_model": i["judge_model"],
                     "metrics": i["metrics"],
                     "source": i["source"],

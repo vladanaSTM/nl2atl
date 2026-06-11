@@ -52,19 +52,24 @@ uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 
 ## Dataset
 
-The default dataset is [data/dataset_gold.json](data/dataset_gold.json). Each row needs `input` and at least one gold formula field: `outputs`, `output`, `output_1`, or `output_2`.
+The default dataset is [data/dataset_gold.json](data/dataset_gold.json). Each row needs `input` and an `outputs` list with at least one gold formula.
 
-Rows can have more than one correct formula. `load_data` normalizes those formulas into `outputs` and keeps the preferred formula in `output` for compatibility. A provided `outputs` list wins; otherwise the preferred order is `output`, `output_2`, then `output_1`. When a row has several formulas they are jointly required, not alternatives: training joins them into a single target (one formula per line) so the model learns to emit every reading, exact match requires all of them (order-insensitive), and the LLM judge, used only for non-exact predictions, also requires all of them.
+Rows can have more than one correct formula. `load_data` normalizes the `outputs` entries into a deduplicated list of formula strings. When a row has several formulas they are jointly required, not alternatives: training joins them into a single target (one formula per line) so the model learns to emit every reading, exact match requires all of them (order-insensitive), and the LLM judge, used only for non-exact predictions, also requires all of them.
 
-Splits are seeded shuffles, not stratified splits:
+Splits are deterministic and stratified on formula structure by default, keeping the rare multi-reading (QSA) items balanced. The split seed (`split_seed`) is decoupled from the training seed, so one fixed canonical split stays comparable across models and runs. Set `cv_folds` to add a stratified cross-validation pass for partition-robustness:
 
 ```yaml
+experiment:
+  split_seed: 42
+
 data:
   path: "./data/dataset_gold.json"
   train_size: 0.70
   val_size: 0.10
   test_size: 0.20
   augment_factor: 2
+  stratify: true
+  cv_folds: 0
 ```
 
 Augmentation is applied only after splitting, and only to the training split.
@@ -94,7 +99,7 @@ outputs/LLM-evaluation/         judge outputs, report JSON, publication notebook
 models/                         fine-tuned adapters
 ```
 
-Prediction artifacts keep the fields needed for post-hoc analysis without duplicating bulky prompts: cleaned and raw generations, prompt hash, deterministic decoding settings, few-shot example IDs when used, token usage when available, latency, dataset/config hashes, command arguments, and a split manifest path/hash. LLM-judge artifacts keep the judge model/provider, prompt version, source prediction hash, prompt hash, raw judge response, parse status, and judge latency.
+Prediction artifacts keep the fields needed for post-hoc analysis without duplicating bulky prompts: the cleaned generation (plus the raw generation only when cleaning changed it), prompt hash, deterministic decoding settings, few-shot example IDs when used, token usage when available, latency, dataset/config hashes, command arguments, and a split manifest path/hash. LLM-judge artifacts keep the judge model/provider, prompt version, source prediction hash, prompt hash, raw judge response, parse status, and judge latency.
 
 ## Fine-Tuning Defaults
 

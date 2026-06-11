@@ -7,6 +7,7 @@ from src.cli.run_experiments import (
     build_tasks,
     format_slurm_array_range,
     select_models,
+    TaskSpec,
 )
 from src.config import Config, ExperimentCondition, ModelConfig
 
@@ -81,13 +82,88 @@ def test_build_tasks_groups_conditions_by_model_and_seed():
     assert len(tasks) == 2
     assert tasks[0].seed == 42
     assert tasks[0].model_key == "qwen-3b"
+    assert tasks[0].cv_fold is None
     assert tasks[0].condition_names == [
         "baseline_zero_shot",
         "baseline_few_shot",
         "finetuned_zero_shot",
         "finetuned_few_shot",
     ]
+    # Baselines are deterministic on the fixed canonical split, so only the
+    # fine-tuned conditions repeat for the extra training seed (seed ablation).
+    assert tasks[1].seed == 43
+    assert tasks[1].cv_fold is None
+    assert tasks[1].condition_names == [
+        "finetuned_zero_shot",
+        "finetuned_few_shot",
+    ]
     assert skipped == []
+
+
+def test_build_tasks_adds_stratified_cv_fold_tasks():
+    tasks, skipped = build_tasks(
+        config=_config(),
+        seeds=[42, 43],
+        models=["qwen-3b"],
+        conditions=["all"],
+        model_provider="hf",
+        cv_folds=3,
+    )
+
+    canonical = [task for task in tasks if task.cv_fold is None]
+    fold_tasks = [task for task in tasks if task.cv_fold is not None]
+
+    # 2 canonical tasks (one per seed) + 3 cross-validation folds.
+    assert len(canonical) == 2
+    assert [task.cv_fold for task in fold_tasks] == [0, 1, 2]
+    # Folds use the first (canonical) training seed and exercise every condition.
+    for task in fold_tasks:
+        assert task.seed == 42
+        assert task.condition_names == [
+            "baseline_zero_shot",
+            "baseline_few_shot",
+            "finetuned_zero_shot",
+            "finetuned_few_shot",
+        ]
+    assert skipped == []
+
+
+def test_build_tasks_skips_cv_for_single_fold():
+    tasks, _ = build_tasks(
+        config=_config(),
+        seeds=[42],
+        models=["qwen-3b"],
+        conditions=["all"],
+        model_provider="hf",
+        cv_folds=1,
+    )
+
+    assert all(task.cv_fold is None for task in tasks)
+
+
+def test_taskspec_round_trips_cv_fold():
+    task = TaskSpec(
+        index=3,
+        seed=42,
+        model_key="qwen-3b",
+        condition_names=["baseline_zero_shot"],
+        cv_fold=2,
+    )
+
+    restored = TaskSpec.from_dict(task.to_dict())
+
+    assert restored == task
+    assert restored.cv_fold == 2
+    # Missing cv_fold in legacy manifests defaults to the canonical split.
+    legacy = TaskSpec.from_dict(
+        {
+            "index": 0,
+            "seed": 42,
+            "model_key": "qwen-3b",
+            "condition_names": ["baseline_zero_shot"],
+        }
+    )
+    assert legacy.cv_fold is None
 
 
 def test_build_tasks_skips_finetuning_for_azure_models():

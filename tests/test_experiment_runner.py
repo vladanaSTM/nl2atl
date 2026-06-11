@@ -75,6 +75,53 @@ def test_training_args_enable_completion_only_loss(tmp_path):
     assert args.completion_only_loss is True
 
 
+def test_max_eval_samples_caps_test_set_with_stratified_coverage(tmp_path):
+    from src.data_utils import default_stratum
+
+    dataset_path = tmp_path / "dataset.json"
+    data = []
+    for i in range(20):
+        data.append(
+            {
+                "id": f"single{i}",
+                "input": f"single requirement {i}",
+                "outputs": [{"formula": "<<A>>F p"}],
+            }
+        )
+    for i in range(10):
+        data.append(
+            {
+                "id": f"multi{i}",
+                "input": f"multi requirement {i}",
+                "outputs": [{"formula": "<<A>>F p"}, {"formula": "<<B>>G q"}],
+            }
+        )
+    dataset_path.write_text(json.dumps(data), encoding="utf-8")
+
+    config = Config(
+        seed=42,
+        train_size=0.7,
+        val_size=0.1,
+        test_size=0.2,
+        augment_factor=1,
+        max_eval_samples=2,
+        data_path=str(dataset_path),
+        output_dir=str(tmp_path / "out"),
+    )
+
+    runner = ExperimentRunner(config)
+
+    # The smoke cap shrinks the evaluated test set and keeps both formula
+    # structures so a tiny run still exercises single- and multi-answer output.
+    assert len(runner.test_data) == 2
+    assert {default_stratum(item) for item in runner.test_data} == {"single", "multi"}
+    # Smoke results are routed into a dedicated subfolder so they never mix with
+    # real prediction files.
+    assert runner.reporter.predictions_subdir == "smoke_test"
+    result_path = runner.reporter.get_result_path("gpt-5.4_baseline_zero_shot_seed42")
+    assert result_path.parent == tmp_path / "out" / "model_predictions" / "smoke_test"
+
+
 def test_reporter_writes_reproducible_split_manifest(tmp_path):
     dataset_path = tmp_path / "dataset.json"
     dataset_path.write_text(
@@ -115,3 +162,36 @@ def test_reporter_writes_reproducible_split_manifest(tmp_path):
     assert manifest["train"][0]["id"] == "train-1"
     assert manifest["test"][0]["id"] == "test-1"
     assert "train_augmented" not in manifest
+
+
+def test_reporter_subdir_isolates_smoke_outputs(tmp_path):
+    default_reporter = ExperimentReporter(output_dir=tmp_path)
+    smoke_reporter = ExperimentReporter(
+        output_dir=tmp_path, predictions_subdir="smoke_test"
+    )
+
+    assert default_reporter.get_result_path("run-1") == (
+        tmp_path / "model_predictions" / "run-1.json"
+    )
+    assert smoke_reporter.get_result_path("run-1") == (
+        tmp_path / "model_predictions" / "smoke_test" / "run-1.json"
+    )
+
+    config = Config(
+        seed=42, train_size=0.7, val_size=0.1, test_size=0.2, augment_factor=1
+    )
+    dataset_path = tmp_path / "dataset.json"
+    dataset_path.write_text(
+        json.dumps([{"id": "t1", "input": "a", "outputs": [{"formula": "<<A>>F p"}]}]),
+        encoding="utf-8",
+    )
+
+    manifest_path = smoke_reporter.save_split_manifest(
+        run_name="run-1",
+        config=config,
+        dataset_path=str(dataset_path),
+        train_data=[],
+        val_data=[],
+        test_data=[{"id": "t1", "input": "a", "outputs": ["<<A>>F p"]}],
+    )
+    assert manifest_path.parent == tmp_path / "split_manifests" / "smoke_test"

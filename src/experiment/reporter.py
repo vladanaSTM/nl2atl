@@ -55,9 +55,7 @@ def _stable_item_id(item: Dict[str, Any], index: int) -> str:
         "index": index,
         "input": item.get("input"),
         "outputs": (
-            item.get("outputs")
-            or item.get("expected_options")
-            or item.get("expected")
+            item.get("outputs") or item.get("expected_options") or item.get("expected")
         ),
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
@@ -138,8 +136,14 @@ class ExperimentTimer:
 class ExperimentReporter:
     """Handles experiment logging, metrics, and result persistence."""
 
-    def __init__(self, output_dir: Path) -> None:
+    def __init__(
+        self, output_dir: Path, predictions_subdir: Optional[str] = None
+    ) -> None:
         self.output_dir = Path(output_dir)
+        # When set (e.g. "smoke_test"), results and split manifests are nested
+        # under this subfolder so throwaway smoke runs never mix with or get
+        # aggregated alongside real prediction files.
+        self.predictions_subdir = predictions_subdir
         self._timer: Optional[ExperimentTimer] = None
         self._git_commit = get_git_commit()
 
@@ -167,6 +171,12 @@ class ExperimentReporter:
             "model_revision": model_config.revision,
             "condition": condition.name,
             "seed": config.seed,
+            "split_seed": (
+                config.split_seed if config.split_seed is not None else config.seed
+            ),
+            "stratify": config.stratify,
+            "cv_folds": config.cv_folds,
+            "cv_fold": config.cv_fold,
             "finetuned": effective_finetuned,
             "few_shot": condition.few_shot,
             "num_epochs": config.num_epochs if effective_finetuned else 0,
@@ -280,13 +290,28 @@ class ExperimentReporter:
         test_data: List[Dict[str, Any]],
     ) -> Path:
         """Save the exact split membership used by a run."""
-        manifest_path = self.output_dir / "split_manifests" / f"{run_name}.json"
+        manifest_dir = self.output_dir / "split_manifests"
+        if self.predictions_subdir:
+            manifest_dir = manifest_dir / self.predictions_subdir
+        manifest_path = manifest_dir / f"{run_name}.json"
+        split_seed = config.split_seed if config.split_seed is not None else config.seed
+        if config.cv_folds and config.cv_folds >= 2 and config.cv_fold is not None:
+            split_algorithm = (
+                f"stratified {config.cv_folds}-fold CV; held-out fold "
+                f"{config.cv_fold} = test; remaining folds = train+val"
+            )
+        elif config.stratify:
+            split_algorithm = (
+                "stratified random.Random(split_seed) shuffle; round counts"
+            )
+        else:
+            split_algorithm = "random.Random(split_seed).shuffle; round counts"
         manifest = {
             "created_at": get_utc_timestamp(),
             "run_id": run_name,
             "dataset_path": dataset_path,
             "dataset_sha256": sha256_file(Path(dataset_path)),
-            "split_algorithm": "random.Random(seed).shuffle; round counts",
+            "split_algorithm": split_algorithm,
             "split_sizes": {
                 "train_size": config.train_size,
                 "val_size": config.val_size,
@@ -294,6 +319,10 @@ class ExperimentReporter:
                 "augment_factor": config.augment_factor,
             },
             "seed": config.seed,
+            "split_seed": split_seed,
+            "stratify": config.stratify,
+            "cv_folds": config.cv_folds,
+            "cv_fold": config.cv_fold,
             "counts": {
                 "train": len(train_data),
                 "validation": len(val_data),
@@ -308,7 +337,10 @@ class ExperimentReporter:
 
     def get_result_path(self, run_name: str) -> Path:
         """Get path for saving results."""
-        return self.output_dir / "model_predictions" / f"{run_name}.json"
+        predictions_dir = self.output_dir / "model_predictions"
+        if self.predictions_subdir:
+            predictions_dir = predictions_dir / self.predictions_subdir
+        return predictions_dir / f"{run_name}.json"
 
     def save_result(self, run_name: str, result: Dict[str, Any]) -> Path:
         """Save result to JSON file."""
