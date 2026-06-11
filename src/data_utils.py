@@ -12,8 +12,8 @@ from .infra.io import load_json, save_json
 def _append_unique_output(outputs: List[str], value: Any) -> None:
     """Append one or more formula strings, preserving order and uniqueness.
 
-    Supports both legacy fields such as ``output``/``output_1`` and the
-    current unified schema ``outputs: [{"formula": "..."}, ...]``.
+    Handles the unified dataset schema ``outputs: [{"formula": "..."}, ...]``
+    as well as result-file gold fields such as ``expected``/``gold``.
     """
     if isinstance(value, list):
         for item in value:
@@ -26,7 +26,7 @@ def _append_unique_output(outputs: List[str], value: Any) -> None:
             _append_unique_output(outputs, value.get("formula"))
             return
         # Defensive fallback for result-like dictionaries.
-        for key in ("output", "expected", "gold", "reference"):
+        for key in ("expected", "gold", "reference"):
             if key in value:
                 _append_unique_output(outputs, value.get(key))
         return
@@ -45,16 +45,10 @@ def get_output_options(item: Dict[str, Any]) -> List[str]:
     for key in ("outputs", "expected_options", "gold_options", "reference_options"):
         _append_unique_output(outputs, item.get(key))
 
-    for key in ("output", "output_2", "output_1", "expected", "gold", "reference"):
+    for key in ("expected", "gold", "reference"):
         _append_unique_output(outputs, item.get(key))
 
     return outputs
-
-
-def get_preferred_output(item: Dict[str, Any]) -> Optional[str]:
-    """Return the preferred output formula for a dataset item."""
-    outputs = get_output_options(item)
-    return outputs[0] if outputs else None
 
 
 def normalize_dataset_item(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -65,12 +59,9 @@ def normalize_dataset_item(item: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(item)
     output_options = get_output_options(normalized)
     if not output_options:
-        raise ValueError(
-            "Dataset item is missing an output, output_1, or output_2 field"
-        )
+        raise ValueError("Dataset item is missing a non-empty 'outputs' field")
 
     normalized["outputs"] = output_options
-    normalized["output"] = output_options[0]
     return normalized
 
 
@@ -208,7 +199,6 @@ def augment_data(
             augmented.append(
                 {
                     "input": new_input,
-                    "output": get_preferred_output(normalized_item),
                     "outputs": get_output_options(normalized_item),
                 }
             )

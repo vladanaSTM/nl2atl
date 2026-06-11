@@ -116,35 +116,19 @@ def get_all_output_formulas(example: Dict[str, Any]) -> List[str]:
     """
     Return all expected ATL/ATL* formulas for an example.
 
-    Current dataset schema:
+    Dataset schema:
       "outputs": [{"formula": "..."}, ...]
-
-    Legacy fallback:
-      "output": "..."
-      "output_1": "...", "output_2": ...
     """
-    if "outputs" in example:
-        outputs = example["outputs"]
-        if not isinstance(outputs, list):
-            return []
-
-        formulas = []
-        for out in outputs:
-            if isinstance(out, dict) and out.get("formula"):
-                formulas.append(str(out["formula"]).strip())
-            elif isinstance(out, str) and out.strip():
-                formulas.append(out.strip())
-        return formulas
-
-    if example.get("output"):
-        return [str(example["output"]).strip()]
+    outputs = example.get("outputs")
+    if not isinstance(outputs, list):
+        return []
 
     formulas = []
-    i = 1
-    while example.get(f"output_{i}"):
-        formulas.append(str(example[f"output_{i}"]).strip())
-        i += 1
-
+    for out in outputs:
+        if isinstance(out, dict) and out.get("formula"):
+            formulas.append(str(out["formula"]).strip())
+        elif isinstance(out, str) and out.strip():
+            formulas.append(out.strip())
     return formulas
 
 

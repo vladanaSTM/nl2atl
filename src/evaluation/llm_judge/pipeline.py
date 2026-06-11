@@ -162,7 +162,7 @@ class LLMJudgeEvaluator(BaseEvaluator):
         if (
             pred_text
             and gold_options
-            and matches_any_gold_option(pred_text, gold_options)
+            and matches_all_gold_outputs(pred_text, gold_options)
         ):
             return {
                 "input": input_text,
@@ -274,15 +274,6 @@ def matches_all_gold_outputs(prediction: str, gold_options: List[str]) -> bool:
         normalize_formula_for_match(gold) for gold in gold_options
     )
     return normalized_prediction == normalized_gold
-
-
-def matches_any_gold_option(prediction: str, gold_options: List[str]) -> bool:
-    """Backward-compatible alias for the old single-output name.
-
-    With the current dataset schema, multi-output gold entries are jointly
-    required, so this now delegates to ``matches_all_gold_outputs``.
-    """
-    return matches_all_gold_outputs(prediction, gold_options)
 
 
 def _gold_options_from_prediction_item(item: Dict[str, Any]) -> List[str]:

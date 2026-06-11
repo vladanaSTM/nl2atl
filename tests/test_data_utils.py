@@ -6,13 +6,12 @@ from src import data_utils
 
 
 def test_save_and_load(tmp_path):
-    data = [{"input": "Agent A can guarantee p", "output_2": "<<A>>F p"}]
+    data = [{"input": "Agent A can guarantee p", "outputs": [{"formula": "<<A>>F p"}]}]
     p = tmp_path / "data.json"
     data_utils.save_data(data, str(p))
     loaded = data_utils.load_data(str(p))
     assert isinstance(loaded, list)
     assert loaded[0]["input"] == data[0]["input"]
-    assert loaded[0]["output"] == "<<A>>F p"
     assert loaded[0]["outputs"] == ["<<A>>F p"]
 
 
@@ -20,8 +19,10 @@ def test_load_data_preserves_multiple_correct_outputs(tmp_path):
     data = [
         {
             "input": "Every server can guarantee that next p holds.",
-            "output_1": "<<Server1>>X p_1 && <<Server2>>X p_2",
-            "output_2": "<<Server1,Server2>>X p",
+            "outputs": [
+                {"formula": "<<Server1,Server2>>X p"},
+                {"formula": "<<Server1>>X p_1 && <<Server2>>X p_2"},
+            ],
         }
     ]
     p = tmp_path / "data.json"
@@ -29,7 +30,6 @@ def test_load_data_preserves_multiple_correct_outputs(tmp_path):
 
     loaded = data_utils.load_data(str(p))
 
-    assert loaded[0]["output"] == "<<Server1,Server2>>X p"
     assert loaded[0]["outputs"] == [
         "<<Server1,Server2>>X p",
         "<<Server1>>X p_1 && <<Server2>>X p_2",
@@ -38,7 +38,10 @@ def test_load_data_preserves_multiple_correct_outputs(tmp_path):
 
 def test_augment_data_preserves_and_expands():
     data = [
-        {"input": "The system can guarantee that eventually p", "output_2": "<<S>>F p"}
+        {
+            "input": "The system can guarantee that eventually p",
+            "outputs": [{"formula": "<<S>>F p"}],
+        }
     ]
     random.seed(123)
     augmented = data_utils.augment_data(data, augment_factor=3)
@@ -46,12 +49,15 @@ def test_augment_data_preserves_and_expands():
     # ensure original present
     assert any(item["input"] == data[0]["input"] for item in augmented)
     # ensure outputs preserved
-    assert all("output" in item for item in augmented)
+    assert all("outputs" in item for item in augmented)
 
 
 def test_augment_data_seed_is_independent_of_global_random_state():
     data = [
-        {"input": "The system can guarantee that eventually p", "output_2": "<<S>>F p"}
+        {
+            "input": "The system can guarantee that eventually p",
+            "outputs": [{"formula": "<<S>>F p"}],
+        }
     ]
 
     random.seed(1)
@@ -67,14 +73,17 @@ def test_augment_data_seed_is_independent_of_global_random_state():
 
 
 def test_augment_data_no_change_when_factor_one():
-    data = [{"input": "The system will always stay safe", "output_2": "<<S>>G safe"}]
+    data = [
+        {
+            "input": "The system will always stay safe",
+            "outputs": [{"formula": "<<S>>G safe"}],
+        }
+    ]
     augmented = data_utils.augment_data(data, augment_factor=1)
     assert augmented == [
         {
             "input": "The system will always stay safe",
-            "output_2": "<<S>>G safe",
             "outputs": ["<<S>>G safe"],
-            "output": "<<S>>G safe",
         }
     ]
 
@@ -83,8 +92,10 @@ def test_augment_data_preserves_multiple_correct_outputs():
     data = [
         {
             "input": "Every server can guarantee that next p holds.",
-            "output_1": "<<Server1>>X p_1 && <<Server2>>X p_2",
-            "output_2": "<<Server1,Server2>>X p",
+            "outputs": [
+                {"formula": "<<Server1,Server2>>X p"},
+                {"formula": "<<Server1>>X p_1 && <<Server2>>X p_2"},
+            ],
         }
     ]
 
@@ -101,8 +112,8 @@ def test_augment_data_preserves_multiple_correct_outputs():
 def test_split_data_counts_without_stratification():
     data = []
     for i in range(10):
-        data.append({"input": f"item a {i}", "output": "<<A>>F p"})
-        data.append({"input": f"item b {i}", "output_2": "<<A>>G p"})
+        data.append({"input": f"item a {i}", "outputs": [{"formula": "<<A>>F p"}]})
+        data.append({"input": f"item b {i}", "outputs": [{"formula": "<<A>>G p"}]})
 
     train, val, test = data_utils.split_data(
         data, train_size=0.7, val_size=0.1, test_size=0.2, seed=123
@@ -118,7 +129,7 @@ def test_split_data_counts_without_stratification():
 
 
 def test_split_data_rejects_invalid_ratios():
-    data = [{"input": "A", "output": "<<A>>F p"}]
+    data = [{"input": "A", "outputs": [{"formula": "<<A>>F p"}]}]
     with pytest.raises(ValueError, match="sum to 1.0"):
         data_utils.split_data(data, train_size=0.7, val_size=0.2, test_size=0.2)
 
@@ -127,7 +138,7 @@ def test_load_data_rejects_missing_output(tmp_path):
     p = tmp_path / "data.json"
     data_utils.save_data([{"input": "Agent A can guarantee p"}], str(p))
 
-    with pytest.raises(ValueError, match="missing an output"):
+    with pytest.raises(ValueError, match="missing a non-empty 'outputs'"):
         data_utils.load_data(str(p))
 
 

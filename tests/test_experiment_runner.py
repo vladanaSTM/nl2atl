@@ -44,7 +44,7 @@ def test_training_dataset_rejects_truncated_completions():
         {
             "id": "too-long",
             "input": " ".join(["agent"] * 1200),
-            "output": "<<agent>>F safe",
+            "outputs": [{"formula": "<<agent>>F safe"}],
         }
     ]
 
@@ -80,8 +80,8 @@ def test_reporter_writes_reproducible_split_manifest(tmp_path):
     dataset_path.write_text(
         json.dumps(
             [
-                {"id": "train-1", "input": "a", "output": "<<A>>F p"},
-                {"id": "test-1", "input": "b", "output": "<<B>>G q"},
+                {"id": "train-1", "input": "a", "outputs": [{"formula": "<<A>>F p"}]},
+                {"id": "test-1", "input": "b", "outputs": [{"formula": "<<B>>G q"}]},
             ]
         ),
         encoding="utf-8",

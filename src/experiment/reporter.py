@@ -54,8 +54,11 @@ def _stable_item_id(item: Dict[str, Any], index: int) -> str:
     payload = {
         "index": index,
         "input": item.get("input"),
-        "outputs": item.get("outputs") or item.get("expected_options"),
-        "output": item.get("output") or item.get("expected"),
+        "outputs": (
+            item.get("outputs")
+            or item.get("expected_options")
+            or item.get("expected")
+        ),
     }
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]

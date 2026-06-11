@@ -44,7 +44,7 @@ def test_format_few_shot_prompt_includes_examples():
     prompt = few_shot._format_few_shot_section(
         [
             {"input": "A", "outputs": [{"formula": "<<A>>F p"}]},
-            {"input": "B", "output": "<<B>>G q"},
+            {"input": "B", "outputs": [{"formula": "<<B>>G q"}]},
         ]
     )
     assert "Example 1" in prompt

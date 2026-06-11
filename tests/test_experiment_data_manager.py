@@ -7,8 +7,8 @@ def test_prepare_data_splits_and_augments(tmp_path):
     dataset_path = tmp_path / "dataset.json"
     data = []
     for i in range(10):
-        data.append({"input": f"item a {i}", "output": "<<A>>F p"})
-        data.append({"input": f"item b {i}", "output_2": "<<A>>G p"})
+        data.append({"input": f"item a {i}", "outputs": [{"formula": "<<A>>F p"}]})
+        data.append({"input": f"item b {i}", "outputs": [{"formula": "<<A>>G p"}]})
     dataset_path.write_text(json.dumps(data))
 
     manager = ExperimentDataManager(
@@ -33,7 +33,7 @@ def test_prepare_data_augmentation_uses_manager_seed(tmp_path):
     data = [
         {
             "input": f"item {index} can guarantee that eventually p",
-            "output": "<<A>>F p",
+            "outputs": [{"formula": "<<A>>F p"}],
         }
         for index in range(10)
     ]

@@ -100,7 +100,7 @@ def test_evaluate_predictions_length_mismatch():
 def test_evaluate_single_preserves_latency():
     evaluator = ExactMatchEvaluator()
     prediction = {"input": "x", "generated": "<<A>>F p", "latency_ms": 12.3}
-    reference = {"input": "x", "output": "<<A>>F p"}
+    reference = {"input": "x", "outputs": ["<<A>>F p"]}
     result = evaluator.evaluate_single(prediction, reference)
     assert result["latency_ms"] == 12.3
 
@@ -137,7 +137,7 @@ def test_aggregate_metrics_reports_exact_match_only():
     evaluator = ExactMatchEvaluator()
     metrics = evaluator.evaluate_predictions(
         [{"input": "x", "generated": ""}],
-        [{"input": "x", "output": "<<A>>F p"}],
+        [{"input": "x", "outputs": ["<<A>>F p"]}],
     )
 
     assert metrics == {"n_examples": 1, "exact_match": 0.0}
@@ -162,7 +162,7 @@ def test_evaluate_model_records_generation_provenance(monkeypatch):
     metrics = evaluator.evaluate_model(
         model=object(),
         tokenizer=None,
-        test_data=[{"id": "row-1", "input": "x", "output": "<<A>>F p"}],
+        test_data=[{"id": "row-1", "input": "x", "outputs": ["<<A>>F p"]}],
         model_type="generic",
         few_shot=True,
         num_few_shot=2,
