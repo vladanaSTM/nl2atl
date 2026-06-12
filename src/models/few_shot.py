@@ -70,6 +70,7 @@ Output rules:
 ATL/ATL* syntax rules:
 - Agent coalition: <<Agent>> or <<Agent1,Agent2>>
 - Coalitions may contain numbers or symbolic names, e.g. <<1>>, <<Machine>>, <<Robot,Operator>>
+- Agent and coalition names use PascalCase with no separators: capitalize each word and concatenate them, e.g. <<SecuritySystem>>, <<TrafficMonitor>>, <<FoodSafetyInspector>>. Do not write agent names in snake_case; only propositions use snake_case.
 - Temporal operators supported in this benchmark: G (always), F (eventually), X (next), U (until).
 - G, F, and X are unary; U is binary and is written p U q. Place a U formula under the strategic operator in parentheses, e.g. <<Drone>>(searching U target_detected).
 - Logical operators: -> (implies), && (and), || (or), ! (not)

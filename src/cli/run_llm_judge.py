@@ -168,6 +168,7 @@ def compute_stats_from_rows(rows: list) -> dict:
         "auto_exact": 0,
         "llm_calls": 0,
         "no_llm": 0,
+        "cached": 0,
     }
 
     for row in rows:
@@ -178,6 +179,8 @@ def compute_stats_from_rows(rows: list) -> dict:
             stats["auto_exact"] += 1
         elif decision_method == "llm":
             stats["llm_calls"] += 1
+            if row.get("from_cache"):
+                stats["cached"] += 1
         elif decision_method == "no_llm":
             stats["no_llm"] += 1
 
@@ -297,6 +300,7 @@ def main():
             "auto_exact": 0,
             "llm_calls": 0,
             "no_llm": 0,
+            "cached": 0,
         }
 
         for pred_path in prediction_files:
@@ -315,6 +319,7 @@ def main():
                     totals["auto_exact"] += stats.get("auto_exact", 0)
                     totals["llm_calls"] += stats.get("llm_calls", 0)
                     totals["no_llm"] += stats.get("no_llm", 0)
+                    totals["cached"] += stats.get("cached", 0)
                     continue
 
                 print(
@@ -353,8 +358,18 @@ def main():
             totals["auto_exact"] += stats.get("auto_exact", 0)
             totals["llm_calls"] += stats.get("llm_calls", 0)
             totals["no_llm"] += stats.get("no_llm", 0)
+            totals["cached"] += stats.get("cached", 0)
 
         print(f"Wrote evaluated datasets to {evaluated_dir}")
+        cached = totals["cached"]
+        if cached:
+            unique_api_calls = totals["llm_calls"] - cached
+            print(
+                f"  {judge_name}: {totals['llm_calls']} judged, "
+                f"{unique_api_calls} unique API calls, "
+                f"{cached} served from cache "
+                f"({getattr(judge, 'api_calls', unique_api_calls)} actual calls)."
+            )
 
     # After processing all judges, compute inter-rater agreement if multiple judges
     if len(judge_entries) > 1:

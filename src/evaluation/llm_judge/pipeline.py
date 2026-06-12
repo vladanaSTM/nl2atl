@@ -1,7 +1,7 @@
 """Main LLM judge evaluation pipeline."""
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from pathlib import Path
 import time
@@ -42,6 +42,7 @@ class JudgeDecision:
     raw_judge_response: Optional[str] = None
     judge_parse_status: Optional[str] = None
     judge_latency_ms: Optional[float] = None
+    from_cache: bool = False
 
 
 class LLMJudge:
@@ -67,6 +68,9 @@ class LLMJudge:
         self.model_config = model_config
         self.client: Optional[JudgeClient] = None
         self.prompt_config = prompt_config
+        self._decision_cache: Dict[str, JudgeDecision] = {}
+        self.cache_hits = 0
+        self.api_calls = 0
 
         if not self.no_llm:
             self._init_client()
@@ -108,17 +112,31 @@ class LLMJudge:
             raise RuntimeError("LLM client is not configured.")
 
         prompt = self._build_prompt(input_text, gold, prediction)
+        prompt_hash = _sha256_text(prompt)
+        # Tag the cache key with the judge identity so a cached verdict can never
+        # be served for a different judge (the prompt itself does not encode which
+        # model answers it). This preserves judge independence: dedup only avoids
+        # asking the SAME judge the SAME (input, gold, prediction) twice.
+        cache_key = "\x1f".join(
+            [self.judge_model, self.api_model, self.prompt_version or "", prompt_hash]
+        )
+
+        cached = self._decision_cache.get(cache_key)
+        if cached is not None:
+            self.cache_hits += 1
+            return replace(cached, from_cache=True)
+
         start_time = time.perf_counter()
         raw = self.client.complete(prompt, max_new_tokens=256)
         latency_ms = (time.perf_counter() - start_time) * 1000
         correct, reasoning = self._parse_response(raw)
 
-        return JudgeDecision(
+        decision = JudgeDecision(
             correct=correct,
             reasoning=reasoning,
             decision_method="llm",
             prompt_version=self.prompt_version,
-            judge_prompt_sha256=_sha256_text(prompt),
+            judge_prompt_sha256=prompt_hash,
             raw_judge_response=raw,
             judge_parse_status=(
                 "invalid"
@@ -127,6 +145,9 @@ class LLMJudge:
             ),
             judge_latency_ms=round(latency_ms, 2),
         )
+        self._decision_cache[cache_key] = decision
+        self.api_calls += 1
+        return decision
 
 
 class LLMJudgeEvaluator(BaseEvaluator):
@@ -336,6 +357,7 @@ def evaluate_prediction_file(
         "auto_exact": 0,
         "llm_calls": 0,
         "no_llm": 0,
+        "cached": 0,
     }
     rows = []
 
@@ -389,6 +411,8 @@ def evaluate_prediction_file(
             decision = judge.judge(input_text, gold_options, prediction)
             if decision.decision_method == "llm":
                 stats["llm_calls"] += 1
+                if decision.from_cache:
+                    stats["cached"] += 1
 
         rows.append(
             {
@@ -404,6 +428,7 @@ def evaluate_prediction_file(
                 "raw_judge_response": decision.raw_judge_response,
                 "judge_parse_status": decision.judge_parse_status,
                 "judge_latency_ms": decision.judge_latency_ms,
+                "from_cache": decision.from_cache,
                 "id": item.get("id"),
             }
         )

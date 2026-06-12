@@ -99,9 +99,30 @@ class ExactMatchEvaluator(BaseEvaluator):
 
         return normalized
 
+    def _normalize_coalition_names(self, formula: str) -> str:
+        """Drop word-separating underscores inside agent/coalition names.
+
+        Gold spells agents as concatenated PascalCase (e.g. SecuritySystem)
+        while models often emit snake_case (e.g. security_system). Casing is
+        already neutralized by lowercasing, so the only residual difference is
+        the underscore. We remove underscores only inside <<...>>, leaving
+        propositions outside untouched, so two distinct propositions that differ
+        only by an underscore (e.g. at_waypoint vs atwaypoint) are never merged,
+        and genuinely different agent roots (e.g. cybersecurity_system vs
+        SecuritySystem) still do not match.
+        """
+        if not formula or "<<" not in formula:
+            return formula
+        return re.sub(
+            r"<<[^>]*>>",
+            lambda match: match.group(0).replace("_", ""),
+            formula,
+        )
+
     def normalize(self, formula: str) -> str:
         """Normalize formula for comparison."""
         normalized = self._normalize_symbols(formula)
+        normalized = self._normalize_coalition_names(normalized)
         return re.sub(r"\s+", "", normalized.strip().lower())
 
     def split_formula_lines(self, text: str) -> List[str]:

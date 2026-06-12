@@ -306,3 +306,104 @@ def test_summary_notebook_cells_have_language_metadata(tmp_path):
 
     assert notebook["cells"]
     assert all(cell["metadata"].get("language") for cell in notebook["cells"])
+
+
+class _CountingClient:
+    """Judge client stub that counts API calls and returns a fixed verdict."""
+
+    def __init__(self, verdict='{"correct": "yes", "reasoning": "Equivalent."}'):
+        self.verdict = verdict
+        self.calls = 0
+
+    def complete(self, prompt, max_new_tokens=256):
+        self.calls += 1
+        return self.verdict
+
+    def complete_batch(self, prompts, max_new_tokens=256):
+        return [self.complete(prompt, max_new_tokens) for prompt in prompts]
+
+
+def test_judge_caches_identical_calls_within_one_judge():
+    judge = LLMJudge(judge_model="test", no_llm=True)
+    judge.no_llm = False
+    judge.client = _CountingClient()
+
+    first = judge.judge("input", ["<<A>>F p"], "<<A>>F q")
+    second = judge.judge("input", ["<<A>>F p"], "<<A>>F q")
+
+    # Identical (input, gold, prediction) is judged once; the second is reused.
+    assert judge.client.calls == 1
+    assert judge.api_calls == 1
+    assert judge.cache_hits == 1
+    assert first.from_cache is False
+    assert second.from_cache is True
+    assert first.correct == second.correct == "yes"
+    # The reused verdict is identical to the original (deterministic judge).
+    assert second.raw_judge_response == first.raw_judge_response
+
+
+def test_judge_does_not_cache_distinct_predictions():
+    judge = LLMJudge(judge_model="test", no_llm=True)
+    judge.no_llm = False
+    judge.client = _CountingClient()
+
+    judge.judge("input", ["<<A>>F p"], "<<A>>F q")
+    judge.judge("input", ["<<A>>F p"], "<<A>>G q")
+
+    assert judge.client.calls == 2
+    assert judge.api_calls == 2
+    assert judge.cache_hits == 0
+
+
+def test_cache_key_is_scoped_per_judge_identity():
+    # Even if two judges shared a single cache dict, a verdict from one judge must
+    # never be served for another judge: the judge identity is part of the key.
+    # This preserves judge independence for inter-rater agreement.
+    shared_cache = {}
+
+    judge_a = LLMJudge(judge_model="judge-a", no_llm=True)
+    judge_a.no_llm = False
+    judge_a.client = _CountingClient('{"correct": "yes", "reasoning": "A: yes."}')
+    judge_a._decision_cache = shared_cache
+
+    judge_b = LLMJudge(judge_model="judge-b", no_llm=True)
+    judge_b.no_llm = False
+    judge_b.client = _CountingClient('{"correct": "no", "reasoning": "B: no."}')
+    judge_b._decision_cache = shared_cache
+
+    verdict_a = judge_a.judge("input", ["<<A>>F p"], "<<A>>F q")
+    verdict_b = judge_b.judge("input", ["<<A>>F p"], "<<A>>F q")
+
+    assert verdict_a.correct == "yes"
+    assert verdict_b.correct == "no"  # not served judge A's cached "yes"
+    assert judge_a.client.calls == 1
+    assert judge_b.client.calls == 1
+    # Identical prompt, two judges -> two distinct cache entries.
+    assert len(shared_cache) == 2
+
+
+def test_evaluate_prediction_file_dedups_identical_predictions(tmp_path):
+    prediction_path = tmp_path / "pred.json"
+    payload = {
+        "predictions": [
+            {"input": "x", "prediction": "<<A>>F q", "gold": "<<A>>F p"},
+            {"input": "x", "prediction": "<<A>>F q", "gold": "<<A>>F p"},
+        ]
+    }
+    prediction_path.write_text(json.dumps(payload))
+
+    judge = LLMJudge(judge_model="test", no_llm=True)
+    judge.no_llm = False
+    judge.client = _CountingClient()
+
+    rows, stats = evaluate_prediction_file(
+        Path(prediction_path), judge, no_llm=False
+    )
+
+    assert stats["llm_calls"] == 2
+    assert stats["cached"] == 1
+    assert judge.client.calls == 1
+    assert rows[0]["from_cache"] is False
+    assert rows[1]["from_cache"] is True
+    assert rows[0]["correct"] == rows[1]["correct"] == "yes"
+

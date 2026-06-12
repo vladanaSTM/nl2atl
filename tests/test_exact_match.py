@@ -91,6 +91,56 @@ def test_normalize_symbols_equivalence():
     assert evaluator.normalize(a) == evaluator.normalize(b)
 
 
+def test_normalize_treats_agent_casing_and_underscores_as_equal():
+    evaluator = ExactMatchEvaluator()
+    # PascalCase gold vs snake_case model output denote the same agent.
+    assert evaluator.normalize(
+        "<<ClimateSystem>>F goal_reached"
+    ) == evaluator.normalize("<<climate_system>>F goal_reached")
+    # Multi-word agents and comma-separated coalitions also match.
+    assert evaluator.normalize("<<FoodSafetyInspector>>X done") == evaluator.normalize(
+        "<<food_safety_inspector>>X done"
+    )
+    assert evaluator.normalize(
+        "<<SecuritySystem,TrafficMonitor>>G safe"
+    ) == evaluator.normalize("<<security_system,traffic_monitor>>G safe")
+
+
+def test_normalize_does_not_merge_distinct_agents_or_propositions():
+    evaluator = ExactMatchEvaluator()
+    # Different agent roots must remain distinct.
+    assert evaluator.normalize("<<SecuritySystem>>G safe") != evaluator.normalize(
+        "<<CyberSecuritySystem>>G safe"
+    )
+    # Distinct numbered agents must remain distinct.
+    assert evaluator.normalize("<<agent_1>>F p") != evaluator.normalize(
+        "<<agent_2>>F p"
+    )
+    # Underscores in propositions (outside <<>>) are preserved, so propositions
+    # that differ only by an underscore are NOT treated as equal.
+    assert evaluator.normalize("<<X>>F at_waypoint") != evaluator.normalize(
+        "<<X>>F atwaypoint"
+    )
+
+
+def test_outputs_exact_match_rescues_agent_snake_case():
+    evaluator = ExactMatchEvaluator()
+    # The whole formula matches gold despite snake_case agent spelling.
+    assert evaluator.outputs_exact_match(
+        "<<food_safety_inspector>>X contaminated_batch_isolated "
+        "&& !<<batch_packager>>X contaminated_batch_isolated",
+        [
+            "<<FoodSafetyInspector>>X contaminated_batch_isolated "
+            "&& !<<BatchPackager>>X contaminated_batch_isolated"
+        ],
+    )
+    # But a genuine lexical difference in the agent root is still not a match.
+    assert not evaluator.outputs_exact_match(
+        "<<cybersecurity_system>>G !unauthorized_access",
+        ["<<SecuritySystem>>G !unauthorized_access"],
+    )
+
+
 def test_evaluate_predictions_length_mismatch():
     evaluator = ExactMatchEvaluator()
     with pytest.raises(ValueError):
