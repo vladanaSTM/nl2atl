@@ -236,6 +236,8 @@ class ExperimentRunner:
         """
         prompts = []
         completions = []
+        prompt_overflows: List[Tuple[Any, int]] = []
+        full_overflows: List[Tuple[Any, int]] = []
         for item in items:
             outputs = get_output_options(item)
             if not outputs:
@@ -268,20 +270,39 @@ class ExperimentRunner:
                     "input_ids"
                 ]
                 if len(prompt_tokens) >= max_seq_length:
-                    raise ValueError(
-                        "Training prompt exceeds max_seq_length before the "
-                        f"completion starts for item {item.get('id')}: "
-                        f"prompt_tokens={len(prompt_tokens)}, "
-                        f"max_seq_length={max_seq_length}"
-                    )
-                if len(full_tokens) > max_seq_length:
-                    raise ValueError(
-                        "Training prompt+completion exceeds max_seq_length for "
-                        f"item {item.get('id')}: full_tokens={len(full_tokens)}, "
-                        f"max_seq_length={max_seq_length}"
-                    )
+                    prompt_overflows.append((item.get("id"), len(prompt_tokens)))
+                elif len(full_tokens) > max_seq_length:
+                    full_overflows.append((item.get("id"), len(full_tokens)))
             prompts.append(prompt)
             completions.append(full_prompt[len(prompt) :])
+
+        # Scan every item before failing so a single run reports the full set of
+        # offenders and the largest observed length. This makes the required
+        # max_seq_length obvious instead of surfacing one item at a time.
+        if prompt_overflows or full_overflows:
+            messages = []
+            if prompt_overflows:
+                worst = max(length for _, length in prompt_overflows)
+                ids = ", ".join(str(item_id) for item_id, _ in prompt_overflows[:10])
+                messages.append(
+                    f"{len(prompt_overflows)} item(s) reach or exceed "
+                    f"max_seq_length before the completion starts "
+                    f"(max prompt_tokens={worst}; ids: {ids})"
+                )
+            if full_overflows:
+                worst = max(length for _, length in full_overflows)
+                ids = ", ".join(str(item_id) for item_id, _ in full_overflows[:10])
+                messages.append(
+                    f"{len(full_overflows)} item(s) have prompt+completion "
+                    f"exceeding max_seq_length (max full_tokens={worst}; "
+                    f"ids: {ids})"
+                )
+            raise ValueError(
+                f"Training data does not fit max_seq_length={max_seq_length}. "
+                + " ".join(messages)
+                + ". Increase max_seq_length for this model so every required "
+                "formula is trained without truncation."
+            )
         return Dataset.from_dict({"prompt": prompts, "completion": completions})
 
     def _training_args(
