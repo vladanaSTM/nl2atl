@@ -14,6 +14,14 @@ import numpy as np
 
 from ..infra.io import load_json, save_json
 
+# Decision methods where no LLM judge call was made. The verdict for these is
+# deterministic and identical across judges (exact matches are always "yes",
+# unmatched/missing items are always "no", no_llm is a non-LLM fallback), so
+# including them would artificially inflate inter-rater agreement. They are
+# therefore excluded from agreement metrics. Human annotations ("human") are
+# kept so human-vs-judge comparisons remain possible.
+NON_LLM_DECISION_METHODS = frozenset({"exact", "no_llm", "unmatched"})
+
 
 def create_item_key(item: dict) -> str:
     """Create a unique key for an (input, gold, prediction) tuple."""
@@ -152,9 +160,19 @@ def merge_judge_results(
 
 def align_judgments(
     judge_results: Dict[str, Dict[str, List[dict]]],
+    llm_only: bool = True,
 ) -> Tuple[Dict[str, Dict[str, str]], Dict[str, dict]]:
     """
     Align judgments across judges for the same items.
+
+    Args:
+        judge_results: {judge_name: {source_file: [items]}}
+        llm_only: When True (default), only verdicts produced by an actual LLM
+            judge call (decision_method == "llm") or a human annotation
+            (decision_method == "human") are aligned. Deterministic verdicts
+            (exact matches, unmatched/missing items, no_llm fallbacks) are
+            skipped so they do not inflate agreement metrics. Items lacking a
+            decision_method are kept for backward compatibility.
 
     Returns:
         aligned: {item_key: {judge_name: "yes"|"no"}}
@@ -166,6 +184,10 @@ def align_judgments(
     for judge_name, source_files in judge_results.items():
         for source_file, items in source_files.items():
             for item in items:
+                if llm_only:
+                    method = (item.get("decision_method") or "").lower()
+                    if method in NON_LLM_DECISION_METHODS:
+                        continue
                 item_key = f"{source_file}::{create_item_key(item)}"
                 decision = item.get("correct", "no").lower()
                 if decision not in {"yes", "no"}:
@@ -796,6 +818,7 @@ def _generate_agreement_report(
     judges: Optional[List[str]] = None,
     include_disagreements: bool = True,
     max_disagreements: int = 50,
+    llm_only: bool = True,
 ) -> dict:
     """Generate a complete inter-rater agreement report from judge results."""
     if judges:
@@ -812,9 +835,14 @@ def _generate_agreement_report(
     judges = sorted(judge_results.keys())
     print(f"Found {len(judges)} judges: {judges}")
 
-    aligned, item_details = align_judgments(judge_results)
+    aligned, item_details = align_judgments(judge_results, llm_only=llm_only)
     common_aligned = filter_common_items(aligned, min_judges=2)
 
+    if llm_only:
+        print(
+            "Scope: LLM-judged items only "
+            "(exact-match / unmatched / no_llm verdicts excluded)"
+        )
     print(f"Total unique items: {len(aligned)}")
     print(f"Items rated by 2+ judges: {len(common_aligned)}")
 
@@ -847,6 +875,7 @@ def _generate_agreement_report(
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "judges": judges,
         "n_judges": len(judges),
+        "agreement_scope": "llm_judged_only" if llm_only else "all_items",
         "total_unique_items": len(aligned),
         "items_with_multiple_judges": len(common_aligned),
         "summary": summary,
@@ -888,6 +917,7 @@ def generate_agreement_report(
     judges: Optional[List[str]] = None,
     include_disagreements: bool = True,
     max_disagreements: int = 50,
+    llm_only: bool = True,
 ) -> dict:
     """Generate a complete inter-rater agreement report."""
     judge_results = load_evaluated_files(eval_dir)
@@ -897,6 +927,7 @@ def generate_agreement_report(
         judges=judges,
         include_disagreements=include_disagreements,
         max_disagreements=max_disagreements,
+        llm_only=llm_only,
     )
 
 
@@ -907,6 +938,7 @@ def generate_agreement_report_with_human(
     judges: Optional[List[str]] = None,
     include_disagreements: bool = True,
     max_disagreements: int = 50,
+    llm_only: bool = True,
 ) -> dict:
     """Generate agreement report including human annotations."""
     judge_results = load_evaluated_files(eval_dir)
@@ -927,6 +959,7 @@ def generate_agreement_report_with_human(
         judges=judges,
         include_disagreements=include_disagreements,
         max_disagreements=max_disagreements,
+        llm_only=llm_only,
     )
 
 
@@ -937,6 +970,11 @@ def print_agreement_summary(report: dict) -> None:
     print("=" * 70)
 
     print(f"\nJudges: {', '.join(report['judges'])}")
+    scope = report.get("agreement_scope")
+    if scope == "llm_judged_only":
+        print("Scope: LLM-judged items only (exact-match / unmatched excluded)")
+    elif scope == "all_items":
+        print("Scope: all items (including exact-match)")
     print(f"Items rated by 2+ judges: {report['items_with_multiple_judges']}")
 
     print("\n--- Pairwise Cohen's Kappa ---")

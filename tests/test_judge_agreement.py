@@ -128,3 +128,110 @@ def test_agreement_notebook_cells_have_language_metadata(tmp_path):
 
     assert notebook["cells"]
     assert all(cell["metadata"].get("language") for cell in notebook["cells"])
+
+
+def test_align_judgments_excludes_non_llm_decisions():
+    judge_results = {
+        "judge1": {
+            "file1": [
+                {
+                    "input": "x",
+                    "gold": "g",
+                    "prediction": "g",
+                    "correct": "yes",
+                    "decision_method": "exact",
+                },
+                {
+                    "input": "y",
+                    "gold": "g2",
+                    "prediction": "p2",
+                    "correct": "yes",
+                    "decision_method": "llm",
+                },
+                {
+                    "input": "z",
+                    "gold": "g3",
+                    "prediction": "",
+                    "correct": "no",
+                    "decision_method": "unmatched",
+                },
+            ]
+        },
+        "judge2": {
+            "file1": [
+                {
+                    "input": "x",
+                    "gold": "g",
+                    "prediction": "g",
+                    "correct": "yes",
+                    "decision_method": "exact",
+                },
+                {
+                    "input": "y",
+                    "gold": "g2",
+                    "prediction": "p2",
+                    "correct": "no",
+                    "decision_method": "llm",
+                },
+            ]
+        },
+    }
+
+    # Default: only LLM-judged items are aligned.
+    aligned, _ = judge_agreement.align_judgments(judge_results)
+    assert len(aligned) == 1
+    key = next(iter(aligned.keys()))
+    assert aligned[key] == {"judge1": "yes", "judge2": "no"}
+
+    # Opt-out keeps every item, including exact-match and unmatched.
+    aligned_all, _ = judge_agreement.align_judgments(judge_results, llm_only=False)
+    assert len(aligned_all) == 3
+
+
+def test_generate_agreement_report_excludes_exact_matches(tmp_path):
+    eval_dir = tmp_path / "evaluated"
+    judge1 = eval_dir / "judge1"
+    judge2 = eval_dir / "judge2"
+    judge1.mkdir(parents=True)
+    judge2.mkdir(parents=True)
+
+    payload_j1 = [
+        {
+            "input": "x",
+            "gold": "g",
+            "prediction": "g",
+            "correct": "yes",
+            "decision_method": "exact",
+        },
+        {
+            "input": "y",
+            "gold": "g2",
+            "prediction": "p2",
+            "correct": "yes",
+            "decision_method": "llm",
+        },
+    ]
+    payload_j2 = [
+        {
+            "input": "x",
+            "gold": "g",
+            "prediction": "g",
+            "correct": "yes",
+            "decision_method": "exact",
+        },
+        {
+            "input": "y",
+            "gold": "g2",
+            "prediction": "p2",
+            "correct": "no",
+            "decision_method": "llm",
+        },
+    ]
+    (judge1 / "model__judge-judge1.json").write_text(json.dumps(payload_j1))
+    (judge2 / "model__judge-judge2.json").write_text(json.dumps(payload_j2))
+
+    report = judge_agreement.generate_agreement_report(eval_dir)
+    assert report["agreement_scope"] == "llm_judged_only"
+    # Only the LLM-judged item counts; the exact match is excluded.
+    assert report["total_unique_items"] == 1
+    assert report["items_with_multiple_judges"] == 1
