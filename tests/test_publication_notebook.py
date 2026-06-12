@@ -113,13 +113,16 @@ def test_publication_notebook_cells_have_language_metadata_and_focused_content(
     joined_source = "\n".join(
         "".join(cell.get("source", [])) for cell in notebook["cells"]
     )
-    assert "Main Model Results" in joined_source
-    assert "Combined-Judge Ranking" in joined_source
-    assert "Paired Top-Model Tests" in joined_source
-    assert "deterministic_exact_match_lower_bound" in joined_source
-    assert "randomization_p_value" in joined_source
-    assert "Judge Reliability" in joined_source
+    assert "Experimental Setup" in joined_source
+    assert "Main Results" in joined_source
+    assert "Accuracy Decomposition" in joined_source
+    assert "Statistical Significance" in joined_source
+    assert "Judge Reliability and Human Validation" in joined_source
     assert "Accuracy-Latency Tradeoff" in joined_source
+    assert "Reproducibility" in joined_source
+    assert "randomization_p_value" in joined_source
+    assert "accuracy_boost_from_llm" in joined_source
+    assert "human_comparison" in joined_source
     assert "efficiency_score" not in joined_source
 
     for cell in notebook["cells"]:
