@@ -12,7 +12,7 @@ from ..exact_match import ExactMatchEvaluator
 from ...config import ModelConfig
 from ...data_utils import get_output_options
 from ...infra.io import load_json, save_json
-from ...infra.azure import AzureConfig
+from ...infra.azure import AzureConfig, ContentFilterError
 
 from .client import AzureJudgeClient, JudgeClient
 from .metrics import (
@@ -127,7 +127,26 @@ class LLMJudge:
             return replace(cached, from_cache=True)
 
         start_time = time.perf_counter()
-        raw = self.client.complete(prompt, max_new_tokens=256)
+        try:
+            raw = self.client.complete(prompt, max_new_tokens=256)
+        except ContentFilterError as exc:
+            # The Azure Responsible AI filter deterministically rejected this
+            # (input, gold, prediction) prompt. Retrying cannot succeed, so
+            # record it as unjudgeable and let the batch continue.
+            latency_ms = (time.perf_counter() - start_time) * 1000
+            decision = JudgeDecision(
+                correct="no",
+                reasoning=f"Judge prompt blocked by content filter: {exc}",
+                decision_method="content_filtered",
+                prompt_version=self.prompt_version,
+                judge_prompt_sha256=prompt_hash,
+                raw_judge_response=None,
+                judge_parse_status="content_filtered",
+                judge_latency_ms=round(latency_ms, 2),
+            )
+            self._decision_cache[cache_key] = decision
+            return decision
+
         latency_ms = (time.perf_counter() - start_time) * 1000
         correct, reasoning = self._parse_response(raw)
 
@@ -358,6 +377,7 @@ def evaluate_prediction_file(
         "llm_calls": 0,
         "no_llm": 0,
         "cached": 0,
+        "content_filtered": 0,
     }
     rows = []
 
@@ -413,6 +433,8 @@ def evaluate_prediction_file(
                 stats["llm_calls"] += 1
                 if decision.from_cache:
                     stats["cached"] += 1
+            elif decision.decision_method == "content_filtered":
+                stats["content_filtered"] += 1
 
         rows.append(
             {

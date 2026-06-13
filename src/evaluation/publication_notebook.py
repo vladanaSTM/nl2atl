@@ -133,6 +133,20 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
         return (KNOWN_CONDITION_ORDER.get(condition, 50), str(condition))
 
 
+    # Human-facing model labels for the paper. Keys are the short names stored in
+    # the prediction and report files; values are how the model should be named in
+    # tables and figures (e.g. disambiguating the 7B Mistral checkpoint).
+    MODEL_DISPLAY_NAMES = {
+        "mistral": "mistral-7b",
+    }
+
+
+    def display_model_name(model_short):
+        if model_short is None:
+            return model_short
+        return MODEL_DISPLAY_NAMES.get(str(model_short), model_short)
+
+
     def metric_field(metrics, name, stat="mean"):
         value = (metrics or {}).get(name)
         if isinstance(value, dict):
@@ -178,7 +192,7 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
             exact_base = metric_field(metrics, "exact_match_rate")
         aggregate_rows.append(
             {
-                "model_short": item.get("model_short"),
+                "model_short": display_model_name(item.get("model_short")),
                 "condition": item.get("condition"),
                 "judge_model": judge_label(item),
                 "split_type": item.get("split_type"),
@@ -209,6 +223,10 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
 
     efficiency_df = pd.DataFrame(efficiency.get("models", []))
     pareto_df = pd.DataFrame(efficiency.get("pareto_frontier", []))
+    for frame in (efficiency_df, pareto_df):
+        for column in ("model_short", "model"):
+            if column in frame.columns:
+                frame[column] = frame[column].map(display_model_name)
     if not efficiency_df.empty:
         if "judge_model" not in efficiency_df.columns:
             efficiency_df["judge_model"] = None
@@ -463,7 +481,9 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
     # Each item gets a combined judge score in {0, 0.5, 1} (the mean of the judge votes).
     item_votes = {}
     for judge_model, payload in iter_evaluated_payloads(EVAL_DIR):
-        model_short = payload.get("model_short") or payload.get("model") or "unknown"
+        model_short = display_model_name(
+            payload.get("model_short") or payload.get("model") or "unknown"
+        )
         condition = payload.get("condition") or "unknown"
         seed = payload.get("seed")
         for item in payload.get("detailed_results") or []:
