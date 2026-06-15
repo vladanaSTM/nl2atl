@@ -876,6 +876,219 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
             print(f"- {note}")
     """
 
+    content_filter_cell = """
+    # Azure's Responsible AI content filter can block a prompt outright. Two
+    # failure modes are recorded in the evaluated datasets and surfaced here:
+    #   * generation blocked -> the Azure model (gpt-4.1, gpt-5.4) produced no
+    #     answer; the row has an empty prediction and counts as incorrect.
+    #   * judging blocked     -> the judge prompt itself was blocked; the row is
+    #     marked decision_method == "content_filtered" and counts as incorrect.
+    generation_skip_rows = []
+    judge_refusal_rows = []
+    eval_rows = []
+    inputs_by_id = {}
+
+    for judge_model, payload in iter_evaluated_payloads(EVAL_DIR):
+        model_short = display_model_name(
+            payload.get("model_short") or payload.get("model") or "unknown"
+        )
+        condition = payload.get("condition") or "unknown"
+        seed = payload.get("seed")
+
+        # Generation skips are stored once per prediction file and copied into the
+        # evaluated-dataset metadata, so they repeat across judges; dedup later.
+        for example_id in payload.get("content_filtered_ids") or []:
+            generation_skip_rows.append(
+                {"model_short": model_short, "condition": condition, "id": example_id}
+            )
+
+        for item in payload.get("detailed_results") or []:
+            if not isinstance(item, dict):
+                continue
+            example_id = item.get("id")
+            if (
+                example_id is not None
+                and example_id not in inputs_by_id
+                and item.get("input")
+            ):
+                inputs_by_id[example_id] = item.get("input")
+            eval_rows.append(
+                {
+                    "judge_model": judge_model,
+                    "model_short": model_short,
+                    "condition": condition,
+                    "seed": seed,
+                    "id": example_id,
+                    "correct": int(normalized_yes(item.get("correct"))),
+                }
+            )
+            if item.get("decision_method") == "content_filtered":
+                judge_refusal_rows.append(
+                    {
+                        "judge_model": judge_model,
+                        "model_short": model_short,
+                        "condition": condition,
+                        "seed": seed,
+                        "id": example_id,
+                    }
+                )
+
+    generation_skip_df = (
+        pd.DataFrame(generation_skip_rows).drop_duplicates()
+        if generation_skip_rows
+        else pd.DataFrame(columns=["model_short", "condition", "id"])
+    )
+    judge_refusal_df = pd.DataFrame(judge_refusal_rows)
+    eval_rows_df = pd.DataFrame(eval_rows)
+
+    flagged_ids = sorted(
+        set(generation_skip_df["id"].tolist())
+        | (set(judge_refusal_df["id"].tolist()) if not judge_refusal_df.empty else set())
+    )
+
+    if not flagged_ids:
+        print("No provider content-filter events were recorded; nothing to disclose.")
+    else:
+        print(
+            f"{len(flagged_ids)} example(s) were blocked by the Azure content filter "
+            "at generation and/or judging time."
+        )
+
+        affected_records = []
+        for example_id in flagged_ids:
+            input_text = str(inputs_by_id.get(example_id, ""))
+            preview = input_text if len(input_text) <= 90 else input_text[:87] + "..."
+            n_gen = int((generation_skip_df["id"] == example_id).sum())
+            n_judge = (
+                0
+                if judge_refusal_df.empty
+                else int((judge_refusal_df["id"] == example_id).sum())
+            )
+            affected_records.append(
+                {
+                    "id": example_id,
+                    "blocked_generation_runs": n_gen,
+                    "blocked_judging_rows": n_judge,
+                    "input": preview,
+                }
+            )
+        print("Affected examples (the wording, not the task, trips the filter):")
+        display(pd.DataFrame(affected_records))
+
+        if generation_skip_df.empty:
+            print("No generation-time content-filter skips were recorded.")
+        else:
+            gen_summary = (
+                generation_skip_df.groupby(["model_short", "condition"])["id"]
+                .agg(lambda values: ", ".join(sorted(set(values))))
+                .reset_index()
+                .rename(columns={"id": "skipped_ids"})
+            )
+            gen_summary["n_skipped"] = gen_summary["skipped_ids"].map(
+                lambda text: len(text.split(", "))
+            )
+            print(
+                "Generation blocked by the provider "
+                "(counts as incorrect in the reported accuracy):"
+            )
+            display(
+                gen_summary.sort_values(["model_short", "condition"]).reset_index(drop=True)
+            )
+
+        if judge_refusal_df.empty:
+            print("No judge-time content-filter refusals were recorded.")
+        else:
+            refusal_summary = (
+                judge_refusal_df.groupby(
+                    ["judge_model", "model_short", "condition", "seed"]
+                )["id"]
+                .agg(lambda values: ", ".join(sorted(set(values))))
+                .reset_index()
+                .rename(columns={"id": "refused_ids"})
+            )
+            print(
+                "Judge refused to score "
+                "(counts as incorrect for that prediction under that judge):"
+            )
+            display(refusal_summary.reset_index(drop=True))
+
+        # Ranking sensitivity: recompute each model/condition accuracy from the
+        # evaluated rows with the flagged examples counted as incorrect (as
+        # reported) versus excluded from scoring, pooled across judges and seeds.
+        if eval_rows_df.empty:
+            print("No evaluated rows were available to recompute the ranking.")
+        else:
+            reported = eval_rows_df.groupby(["model_short", "condition"])["correct"].mean()
+            kept_rows = eval_rows_df[~eval_rows_df["id"].isin(flagged_ids)]
+            excluded = kept_rows.groupby(["model_short", "condition"])["correct"].mean()
+            sensitivity = (
+                pd.DataFrame(
+                    {
+                        "accuracy_reported": reported,
+                        "accuracy_excluding_flagged": excluded,
+                    }
+                )
+                .reset_index()
+                .dropna(subset=["accuracy_reported", "accuracy_excluding_flagged"])
+            )
+            sensitivity["delta"] = (
+                sensitivity["accuracy_excluding_flagged"]
+                - sensitivity["accuracy_reported"]
+            )
+            sensitivity["rank_reported"] = (
+                sensitivity["accuracy_reported"]
+                .rank(ascending=False, method="min")
+                .astype(int)
+            )
+            sensitivity["rank_excluding_flagged"] = (
+                sensitivity["accuracy_excluding_flagged"]
+                .rank(ascending=False, method="min")
+                .astype(int)
+            )
+            sensitivity["rank_change"] = (
+                sensitivity["rank_reported"] - sensitivity["rank_excluding_flagged"]
+            )
+            sensitivity = sensitivity.sort_values(
+                "accuracy_reported", ascending=False
+            ).reset_index(drop=True)
+            print(
+                "Ranking sensitivity to the flagged examples (accuracy pooled across "
+                "judges and seeds; absolute values may differ slightly from the headline "
+                "table, the before/after comparison is the point):"
+            )
+            display(sensitivity.round(4))
+
+            movers = sensitivity[sensitivity["rank_change"] != 0]
+            top_reported = sensitivity.iloc[0]
+            top_excluded = sensitivity.sort_values(
+                "accuracy_excluding_flagged", ascending=False
+            ).iloc[0]
+            if movers.empty:
+                print(
+                    "Excluding the flagged examples leaves every model/condition rank "
+                    "unchanged."
+                )
+            else:
+                print(
+                    f"{len(movers)} model/condition group(s) change rank when the flagged "
+                    "examples are excluded."
+                )
+            if (
+                top_reported["model_short"] == top_excluded["model_short"]
+                and top_reported["condition"] == top_excluded["condition"]
+            ):
+                print(
+                    f"Top system is unchanged: {top_reported['model_short']} "
+                    f"({top_reported['condition']})."
+                )
+            else:
+                print(
+                    f"Top system changes from {top_reported['model_short']} "
+                    f"({top_reported['condition']}) to {top_excluded['model_short']} "
+                    f"({top_excluded['condition']}) once flagged examples are excluded."
+                )
+    """
+
     notebook = {
         "cells": [
             _markdown_cell(f"""
@@ -883,7 +1096,7 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
 
                 Report directory: `{eval_dir.as_posix()}`
 
-                This notebook curates the evidence an AAAI reviewer expects: experimental scale, headline accuracy by model and condition, where the accuracy comes from (exact match vs LLM-judge rescue), the statistical significance of the leading system, judge reliability validated against human labels, the accuracy-latency tradeoff, and a compact reproducibility snapshot.
+                This notebook curates the evidence an AAAI reviewer expects: experimental scale, headline accuracy by model and condition, where the accuracy comes from (exact match vs LLM-judge rescue), the statistical significance of the leading system, judge reliability validated against human labels, the accuracy-latency tradeoff, a transparent accounting of the provider content-filter events that affected a few examples, and a compact reproducibility snapshot.
                 """),
             _code_cell(load_cell),
             _code_cell(transform_cell),
@@ -934,6 +1147,27 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
                 indicative rather than a like-for-like measurement.
                 """),
             _code_cell(tradeoff_cell),
+            _markdown_cell("""
+                ## Provider Content-Filter Transparency
+
+                Azure's Responsible AI content filter can reject a prompt outright,
+                even for innocuous inputs (for example, a literary quotation whose
+                wording is misread as violent content). Two failure modes are recorded
+                in the evaluated datasets and disclosed here in full:
+
+                - **Generation blocked** - the Azure-hosted models (gpt-4.1, gpt-5.4)
+                  never produced an answer for the blocked example. The row is stored
+                  with an empty prediction and counts as incorrect in the reported
+                  accuracy.
+                - **Judging blocked** - for some predictions the judge prompt itself was
+                  blocked, so that prediction could not be scored by that judge. The row
+                  is marked `decision_method == "content_filtered"` and counts as
+                  incorrect.
+
+                The tables below name the affected examples and recompute the ranking
+                with those examples excluded, so any effect on the conclusions is explicit.
+                """),
+            _code_cell(content_filter_cell),
             _markdown_cell("""
                 ## Reproducibility
 
