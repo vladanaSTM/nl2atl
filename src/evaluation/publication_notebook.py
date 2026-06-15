@@ -147,6 +147,18 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
         return MODEL_DISPLAY_NAMES.get(str(model_short), model_short)
 
 
+    # Models served through a hosted API rather than measured on local inference
+    # hardware. Their latency includes network round-trip, queueing, and
+    # server-side compute, so the latency axis is only controlled within the
+    # local open-weight group; accuracy stays comparable across all systems.
+    PROPRIETARY_API_MODELS = {"gpt-4.1", "gpt-5.4"}
+
+
+    def is_proprietary_api(model_short):
+        name = str(model_short or "")
+        return name in PROPRIETARY_API_MODELS or name.lower().startswith("gpt-")
+
+
     def metric_field(metrics, name, stat="mean"):
         value = (metrics or {}).get(name)
         if isinstance(value, dict):
@@ -768,41 +780,80 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
             print("Pareto-optimal groups (no other group is both faster and more accurate).")
             display(pareto_df.round(4))
 
-        scatter_df = efficiency_df.dropna(subset=["accuracy", "latency_mean_ms"])
-        if not scatter_df.empty:
-            plt.figure(figsize=(9, 6))
-            if "on_pareto_frontier" in scatter_df.columns:
-                others = scatter_df[~scatter_df["on_pareto_frontier"]]
-                frontier = scatter_df[scatter_df["on_pareto_frontier"]]
-            else:
-                others = scatter_df
-                frontier = scatter_df.iloc[0:0]
-            plt.scatter(others["latency_mean_ms"], others["accuracy"], alpha=0.55, label="Other")
+        scatter_source = efficiency_df.dropna(subset=["accuracy", "latency_mean_ms"]).copy()
+        if not scatter_source.empty:
+            # The efficiency report stores one row per judge, which double-plots
+            # identical systems. Collapse to the judge that defines the Pareto
+            # frontier so each system appears once and the scatter stays
+            # consistent with the frontier line.
+            frontier_judge = None
+            if not pareto_df.empty and "judge_model" in pareto_df.columns:
+                judge_values = pareto_df["judge_model"].dropna()
+                if not judge_values.empty:
+                    frontier_judge = judge_values.value_counts().idxmax()
+            if frontier_judge is not None and "judge_model" in scatter_source.columns:
+                same_judge = scatter_source[scatter_source["judge_model"] == frontier_judge]
+                if not same_judge.empty:
+                    scatter_source = same_judge
+            scatter_source = scatter_source.drop_duplicates(subset=["model_short", "condition"])
+
+            scatter_source["is_api"] = scatter_source["model_short"].map(is_proprietary_api)
+            if "on_pareto_frontier" not in scatter_source.columns:
+                scatter_source["on_pareto_frontier"] = False
+
+            fig, ax = plt.subplots(figsize=(9, 6))
+
+            # Identity comes from colour + the legend rather than on-plot text:
+            # finetuned systems cluster tightly, so per-point labels overlapped
+            # and became unreadable. Marker shape keeps the open-weight (circle)
+            # vs proprietary API (diamond) split that the latency caveat needs.
+            models_in_plot = sorted(scatter_source["model_short"].dropna().unique(), key=str)
+            cmap = plt.get_cmap("tab10")
+            model_colors = {name: cmap(i % 10) for i, name in enumerate(models_in_plot)}
+
+            for is_api_flag, marker, size in [(False, "o", 70), (True, "D", 95)]:
+                group_subset = scatter_source[scatter_source["is_api"] == is_api_flag]
+                for name, model_group in group_subset.groupby("model_short"):
+                    ax.scatter(
+                        model_group["latency_mean_ms"],
+                        model_group["accuracy"],
+                        color=model_colors.get(name),
+                        marker=marker,
+                        s=size,
+                        edgecolor="black",
+                        linewidth=0.5,
+                        alpha=0.9,
+                        zorder=3,
+                        label=f"{name} (API)" if is_api_flag else str(name),
+                    )
+
+            # Overlay the Pareto frontier; membership is independent of API vs local.
+            frontier = scatter_source[scatter_source["on_pareto_frontier"].fillna(False)]
             if not frontier.empty:
                 frontier_sorted = frontier.sort_values("latency_mean_ms")
-                plt.scatter(
-                    frontier_sorted["latency_mean_ms"],
-                    frontier_sorted["accuracy"],
-                    s=95,
-                    label="Pareto frontier",
-                )
-                plt.plot(
+                ax.plot(
                     frontier_sorted["latency_mean_ms"],
                     frontier_sorted["accuracy"],
                     linestyle="--",
-                    alpha=0.6,
+                    color="0.4",
+                    alpha=0.8,
+                    zorder=1,
+                    label="Pareto frontier",
                 )
-                for _, row in frontier_sorted.iterrows():
-                    plt.annotate(
-                        str(row.get("model_short", "")),
-                        (row["latency_mean_ms"], row["accuracy"]),
-                        fontsize=8,
-                    )
-            plt.xlabel("Mean latency per example (ms)")
-            plt.ylabel("Accuracy")
-            plt.title("Accuracy vs latency tradeoff")
-            plt.legend()
-            plt.tight_layout()
+                ax.scatter(
+                    frontier_sorted["latency_mean_ms"],
+                    frontier_sorted["accuracy"],
+                    s=190,
+                    facecolor="none",
+                    edgecolor="black",
+                    linewidth=1.4,
+                    zorder=4,
+                )
+            ax.set_xlabel("Mean latency per example (ms)")
+            ax.set_ylabel("Accuracy")
+            ax.set_title("Accuracy vs latency tradeoff (open-weight vs proprietary API)")
+            ax.legend(title="Model", bbox_to_anchor=(1.02, 1), loc="upper left", fontsize=8)
+            fig.tight_layout()
             plt.show()
     """
 
@@ -869,7 +920,18 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
             _markdown_cell("""
                 ## Accuracy-Latency Tradeoff
 
-                Pareto-optimal systems for deployment decisions.
+                Pareto-optimal systems for deployment decisions. Open-weight models
+                (circles) and proprietary API baselines such as gpt-4.1 and gpt-5.4
+                (diamonds) are drawn together so the contrast is explicit; colour and
+                the legend identify each model, which keeps clustered finetuned
+                systems legible without overlapping point labels.
+
+                Latency caveat: API models are timed end-to-end over the network
+                (round-trip, queueing, and server-side compute) and are not measured
+                on the same hardware as the local open-weight models. Accuracy is
+                directly comparable across all systems, but the latency axis is only
+                controlled within the local group, so read cross-group latency as
+                indicative rather than a like-for-like measurement.
                 """),
             _code_cell(tradeoff_cell),
             _markdown_cell("""
