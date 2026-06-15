@@ -672,16 +672,20 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
                 {
                     "judge_model": judge,
                     "accuracy_vs_human": values.get("accuracy"),
+                    "cohen_kappa_vs_human": values.get("cohen_kappa"),
+                    "interpretation": kappa_label(values.get("cohen_kappa")),
                     "shared_items": values.get("n_common"),
                 }
             )
         majority = human.get("majority_vote") or {}
-        unanimous = human.get("unanimous") or {}
+        unanimous = human.get("unanimous_vote") or {}
         if majority.get("accuracy") is not None:
             human_rows.append(
                 {
                     "judge_model": "majority_vote",
                     "accuracy_vs_human": majority.get("accuracy"),
+                    "cohen_kappa_vs_human": None,
+                    "interpretation": "n/a",
                     "shared_items": majority.get("n_items"),
                 }
             )
@@ -690,6 +694,8 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
                 {
                     "judge_model": "unanimous_judges",
                     "accuracy_vs_human": unanimous.get("accuracy"),
+                    "cohen_kappa_vs_human": None,
+                    "interpretation": "n/a",
                     "shared_items": unanimous.get("n_items"),
                 }
             )

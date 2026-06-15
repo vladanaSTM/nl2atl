@@ -7,52 +7,99 @@ import json
 import re
 import zipfile
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 from xml.etree import ElementTree as ET
 
+import numpy as np
+
 from ..infra.io import load_json, save_json
+from .judge_agreement import (
+    _interpret_kappa,
+    compute_cohen_kappa,
+    compute_fleiss_kappa,
+    compute_krippendorff_alpha,
+)
 
-KNOWN_ANNOTATORS = ("annotator_1", "annotator_2")
+# Annotator ids that represent a post-hoc adjudication/consensus pass rather
+# than an independent reviewer. Their labels become the final gold label but are
+# excluded from inter-annotator (human-human) reliability.
+ADJUDICATION_ANNOTATOR_IDS = frozenset(
+    {"adjudicated", "adjudicator", "consensus", "final"}
+)
 
-MERGED_CSV_COLUMNS = [
-    "audit_id",
-    "human_status",
-    "needs_adjudication",
-    "n_human_labels",
-    "annotator_1_correct",
-    "annotator_2_correct",
-    "human_consensus_correct",
-    "human_final_correct",
-    "human_labels",
-    "annotator_ids",
-    "n_human_yes",
-    "n_human_no",
-    "ds_v3_2_correct",
-    "gpt_5_2_correct",
-    "llm_judges_agree",
-    "human_matches_ds_v3_2",
-    "human_matches_gpt_5_2",
-    "n_human_matches_ds_v3_2",
-    "n_human_matches_gpt_5_2",
-    "human_match_rate_ds_v3_2",
-    "human_match_rate_gpt_5_2",
-    "annotator_1_matches_ds_v3_2",
-    "annotator_1_matches_gpt_5_2",
-    "annotator_2_matches_ds_v3_2",
-    "annotator_2_matches_gpt_5_2",
-    "model_short",
-    "condition",
-    "seed",
-    "primary_stratum",
-    "sampling_weight_primary",
-    "input",
-    "gold_1",
-    "gold_2",
-    "prediction",
-    "source_file",
-    "item_id",
-]
+DEFAULT_JUDGES: tuple[str, ...] = ("ds-v3.2", "gpt-5.2")
+DEFAULT_ANNOTATORS: tuple[str, ...] = ("annotator_1", "annotator_2")
+
+_PENDING_LABELS = frozenset(
+    {
+        "unannotated",
+        "single_annotation",
+        "pending_second_annotation",
+        "no_consensus",
+        "pending_adjudication",
+    }
+)
+
+
+def _judge_slug(judge_name: str) -> str:
+    """Turn a judge id like ``ds-v3.2`` into a column-safe slug ``ds_v3_2``."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(judge_name)).strip("_").lower()
+
+
+def _annotator_slug(annotator_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", str(annotator_id)).strip("_").lower()
+
+
+def build_merged_csv_columns(
+    annotator_ids: Sequence[str],
+    judge_names: Sequence[str],
+) -> List[str]:
+    """Build the merged-CSV header for an arbitrary number of annotators/judges."""
+    judge_slugs = [_judge_slug(judge) for judge in judge_names]
+    annotator_slugs = [_annotator_slug(annotator) for annotator in annotator_ids]
+
+    columns: List[str] = [
+        "audit_id",
+        "human_status",
+        "needs_adjudication",
+        "n_human_labels",
+    ]
+    columns += [f"{slug}_correct" for slug in annotator_slugs]
+    columns += [
+        "human_consensus_correct",
+        "human_final_correct",
+        "human_labels",
+        "annotator_ids",
+        "n_human_yes",
+        "n_human_no",
+    ]
+    columns += [f"{slug}_correct" for slug in judge_slugs]
+    columns += ["llm_judges_agree"]
+    columns += [f"human_matches_{slug}" for slug in judge_slugs]
+    columns += [f"n_human_matches_{slug}" for slug in judge_slugs]
+    columns += [f"human_match_rate_{slug}" for slug in judge_slugs]
+    for annotator_slug in annotator_slugs:
+        columns += [f"{annotator_slug}_matches_{slug}" for slug in judge_slugs]
+    columns += [
+        "model_short",
+        "condition",
+        "seed",
+        "primary_stratum",
+        "sampling_weight_primary",
+        "input",
+        "gold_1",
+        "gold_2",
+        "prediction",
+        "source_file",
+        "item_id",
+    ]
+    return columns
+
+
+# Backward-compatible default header (two annotators, the two project judges).
+MERGED_CSV_COLUMNS = build_merged_csv_columns(DEFAULT_ANNOTATORS, DEFAULT_JUDGES)
 
 
 def _normalize_correct(value: Any) -> str:
@@ -155,12 +202,11 @@ def load_human_annotations(
 
 
 def _human_summary(annotations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    final_annotator_ids = {"adjudicated", "adjudicator", "consensus", "final"}
     final_annotations = [
         annotation
         for annotation in annotations
         if str(annotation.get("annotator_id") or "").strip().lower()
-        in final_annotator_ids
+        in ADJUDICATION_ANNOTATOR_IDS
     ]
     independent_annotations = [
         annotation for annotation in annotations if annotation not in final_annotations
@@ -229,13 +275,7 @@ def _judge_correct(item: Mapping[str, Any], judge_name: str) -> str:
 
 
 def _label_match(human_label: str, judge_label: str) -> str:
-    if human_label in {
-        "unannotated",
-        "single_annotation",
-        "pending_second_annotation",
-        "no_consensus",
-        "pending_adjudication",
-    }:
+    if human_label in _PENDING_LABELS:
         return human_label
     if human_label not in {"yes", "no"} or judge_label not in {"yes", "no"}:
         return ""
@@ -257,64 +297,99 @@ def _gold_fields(item: Mapping[str, Any]) -> Dict[str, str]:
     return {"gold_1": gold_1, "gold_2": gold_2}
 
 
+def _all_judges_agree(judge_labels: Sequence[str]) -> str:
+    """Return yes/no when every judge produced a binary label and they match."""
+    binary = [label for label in judge_labels if label in {"yes", "no"}]
+    if len(binary) < 2 or len(binary) != len(judge_labels):
+        return ""
+    return "yes" if len(set(binary)) == 1 else "no"
+
+
 def _analysis_item(
-    item: Mapping[str, Any], human_summary: Mapping[str, Any]
+    item: Mapping[str, Any],
+    human_summary: Mapping[str, Any],
+    annotator_ids: Sequence[str],
+    judge_names: Sequence[str],
 ) -> Dict[str, Any]:
-    ds_correct = _judge_correct(item, "ds-v3.2")
-    gpt_correct = _judge_correct(item, "gpt-5.2")
     human_final = str(human_summary.get("human_final_correct") or "")
     human_labels = human_summary.get("human_labels", [])
     label_counts = human_summary.get("human_label_counts") or {}
     labels_by_annotator = human_summary.get("labels_by_annotator") or {}
-    annotator_1_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[0]) or "")
-    annotator_2_correct = str(labels_by_annotator.get(KNOWN_ANNOTATORS[1]) or "")
     n_human_labels = int(human_summary.get("n_human_labels", 0))
-    n_human_matches_ds = _match_count(human_labels, ds_correct)
-    n_human_matches_gpt = _match_count(human_labels, gpt_correct)
 
-    return {
+    judge_correct = {judge: _judge_correct(item, judge) for judge in judge_names}
+
+    record: Dict[str, Any] = {
         "audit_id": item.get("audit_id"),
         "human_status": human_summary.get("human_status"),
         "needs_adjudication": (
             "yes" if human_summary.get("needs_adjudication") else "no"
         ),
         "n_human_labels": n_human_labels,
-        "annotator_1_correct": annotator_1_correct,
-        "annotator_2_correct": annotator_2_correct,
-        "human_consensus_correct": human_summary.get("human_consensus_correct"),
-        "human_final_correct": human_final,
-        "human_labels": human_labels,
-        "annotator_ids": human_summary.get("annotator_ids", []),
-        "n_human_yes": label_counts.get("yes", 0),
-        "n_human_no": label_counts.get("no", 0),
-        "ds_v3_2_correct": ds_correct,
-        "gpt_5_2_correct": gpt_correct,
-        "llm_judges_agree": _label_match(ds_correct, gpt_correct),
-        "human_matches_ds_v3_2": _label_match(human_final, ds_correct),
-        "human_matches_gpt_5_2": _label_match(human_final, gpt_correct),
-        "n_human_matches_ds_v3_2": n_human_matches_ds,
-        "n_human_matches_gpt_5_2": n_human_matches_gpt,
-        "human_match_rate_ds_v3_2": (
-            n_human_matches_ds / n_human_labels if n_human_labels else ""
-        ),
-        "human_match_rate_gpt_5_2": (
-            n_human_matches_gpt / n_human_labels if n_human_labels else ""
-        ),
-        "annotator_1_matches_ds_v3_2": _label_match(annotator_1_correct, ds_correct),
-        "annotator_1_matches_gpt_5_2": _label_match(annotator_1_correct, gpt_correct),
-        "annotator_2_matches_ds_v3_2": _label_match(annotator_2_correct, ds_correct),
-        "annotator_2_matches_gpt_5_2": _label_match(annotator_2_correct, gpt_correct),
-        "model_short": item.get("model_short"),
-        "condition": item.get("condition"),
-        "seed": item.get("seed"),
-        "primary_stratum": item.get("primary_stratum"),
-        "sampling_weight_primary": item.get("sampling_weight_primary"),
-        "input": item.get("input"),
-        **_gold_fields(item),
-        "prediction": item.get("prediction"),
-        "source_file": item.get("source_file"),
-        "item_id": item.get("item_id"),
     }
+
+    annotator_correct = {
+        annotator: str(labels_by_annotator.get(annotator) or "")
+        for annotator in annotator_ids
+    }
+    for annotator in annotator_ids:
+        record[f"{_annotator_slug(annotator)}_correct"] = annotator_correct[annotator]
+
+    record.update(
+        {
+            "human_consensus_correct": human_summary.get("human_consensus_correct"),
+            "human_final_correct": human_final,
+            "human_labels": human_labels,
+            "annotator_ids": human_summary.get("annotator_ids", []),
+            "n_human_yes": label_counts.get("yes", 0),
+            "n_human_no": label_counts.get("no", 0),
+        }
+    )
+
+    for judge in judge_names:
+        record[f"{_judge_slug(judge)}_correct"] = judge_correct[judge]
+
+    record["llm_judges_agree"] = _all_judges_agree(
+        [judge_correct[judge] for judge in judge_names]
+    )
+
+    for judge in judge_names:
+        slug = _judge_slug(judge)
+        record[f"human_matches_{slug}"] = _label_match(human_final, judge_correct[judge])
+    for judge in judge_names:
+        slug = _judge_slug(judge)
+        record[f"n_human_matches_{slug}"] = _match_count(
+            human_labels, judge_correct[judge]
+        )
+    for judge in judge_names:
+        slug = _judge_slug(judge)
+        matches = _match_count(human_labels, judge_correct[judge])
+        record[f"human_match_rate_{slug}"] = (
+            matches / n_human_labels if n_human_labels else ""
+        )
+
+    for annotator in annotator_ids:
+        annotator_slug = _annotator_slug(annotator)
+        for judge in judge_names:
+            record[f"{annotator_slug}_matches_{_judge_slug(judge)}"] = _label_match(
+                annotator_correct[annotator], judge_correct[judge]
+            )
+
+    record.update(
+        {
+            "model_short": item.get("model_short"),
+            "condition": item.get("condition"),
+            "seed": item.get("seed"),
+            "primary_stratum": item.get("primary_stratum"),
+            "sampling_weight_primary": item.get("sampling_weight_primary"),
+            "input": item.get("input"),
+            **_gold_fields(item),
+            "prediction": item.get("prediction"),
+            "source_file": item.get("source_file"),
+            "item_id": item.get("item_id"),
+        }
+    )
+    return record
 
 
 def _judge_agreement_summary(
@@ -345,6 +420,169 @@ def _individual_judge_agreement_summary(
     }
 
 
+def _human_human_reliability(
+    aligned_humans: Mapping[str, Mapping[str, str]],
+    annotator_ids: Sequence[str],
+) -> Dict[str, Any]:
+    """Chance-corrected inter-annotator reliability over independent labels.
+
+    Cohen's kappa is reported only for the two-annotator case (where it is
+    defined); Fleiss' kappa and Krippendorff's alpha generalize to any number
+    of annotators and tolerate items that were not labeled by everyone.
+    """
+    multi = {
+        audit_id: labels
+        for audit_id, labels in aligned_humans.items()
+        if len(labels) >= 2
+    }
+    result: Dict[str, Any] = {
+        "annotators": list(annotator_ids),
+        "n_annotators": len(annotator_ids),
+        "n_items_multi_annotator": len(multi),
+        "cohen_kappa": None,
+        "cohen_kappa_interpretation": None,
+        "fleiss_kappa": None,
+        "fleiss_kappa_interpretation": None,
+        "krippendorff_alpha": None,
+        "krippendorff_alpha_interpretation": None,
+    }
+    if not multi:
+        return result
+
+    if len(annotator_ids) == 2:
+        first, second = annotator_ids
+        paired = [
+            labels
+            for labels in multi.values()
+            if first in labels and second in labels
+        ]
+        if paired:
+            labels_first = [labels[first] for labels in paired]
+            labels_second = [labels[second] for labels in paired]
+            kappa = compute_cohen_kappa(labels_first, labels_second)
+            result["cohen_kappa"] = round(kappa, 4)
+            result["cohen_kappa_interpretation"] = _interpret_kappa(kappa)
+
+    counts_matrix = np.array(
+        [
+            [
+                sum(1 for label in labels.values() if label == "yes"),
+                sum(1 for label in labels.values() if label == "no"),
+            ]
+            for labels in multi.values()
+        ],
+        dtype=float,
+    )
+    fleiss = compute_fleiss_kappa(counts_matrix)
+    result["fleiss_kappa"] = round(float(fleiss), 4)
+    result["fleiss_kappa_interpretation"] = _interpret_kappa(fleiss)
+
+    alpha = compute_krippendorff_alpha(
+        {audit_id: dict(labels) for audit_id, labels in multi.items()},
+        list(annotator_ids),
+    )
+    alpha_value = alpha.get("alpha")
+    if alpha_value is not None:
+        result["krippendorff_alpha"] = round(float(alpha_value), 4)
+        result["krippendorff_alpha_interpretation"] = _interpret_kappa(alpha_value)
+    return result
+
+
+def _llm_human_reliability(
+    merged_items: Sequence[Mapping[str, Any]],
+    judge_names: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Cohen's kappa + raw accuracy of each judge against the human gold label."""
+    result: Dict[str, Dict[str, Any]] = {}
+    for judge in judge_names:
+        slug = _judge_slug(judge)
+        pairs = [
+            (item.get("human_final_correct"), item.get(f"{slug}_correct"))
+            for item in merged_items
+            if item.get("human_final_correct") in {"yes", "no"}
+            and item.get(f"{slug}_correct") in {"yes", "no"}
+        ]
+        if not pairs:
+            result[judge] = {
+                "n": 0,
+                "accuracy": None,
+                "cohen_kappa": None,
+                "cohen_kappa_interpretation": None,
+            }
+            continue
+        human_labels = [str(human) for human, _ in pairs]
+        judge_labels = [str(judge_label) for _, judge_label in pairs]
+        matches = sum(1 for human, judge_label in pairs if human == judge_label)
+        kappa = compute_cohen_kappa(judge_labels, human_labels)
+        result[judge] = {
+            "n": len(pairs),
+            "accuracy": round(matches / len(pairs), 4),
+            "cohen_kappa": round(kappa, 4),
+            "cohen_kappa_interpretation": _interpret_kappa(kappa),
+        }
+    return result
+
+
+def _discover_judge_names(key_items: Sequence[Mapping[str, Any]]) -> List[str]:
+    judge_name_set: set[str] = set()
+    for item in key_items:
+        decisions = item.get("judge_decisions")
+        if isinstance(decisions, Mapping):
+            judge_name_set.update(str(name) for name in decisions.keys())
+    return sorted(judge_name_set) or list(DEFAULT_JUDGES)
+
+
+def _discover_annotator_ids(
+    annotations_by_id: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> List[str]:
+    annotator_set: set[str] = set()
+    for annotations in annotations_by_id.values():
+        for annotation in annotations:
+            annotator_id = str(annotation.get("annotator_id") or "").strip()
+            if not annotator_id:
+                continue
+            if annotator_id.lower() in ADJUDICATION_ANNOTATOR_IDS:
+                continue
+            annotator_set.add(annotator_id)
+    return sorted(annotator_set)
+
+
+def _write_human_verdict_adapter(
+    key_items: Sequence[Mapping[str, Any]],
+    human_summaries: Sequence[Mapping[str, Any]],
+    key_path: Path,
+    adapter_path: Path,
+) -> int:
+    """Write a per-item human-gold file consumable by the agreement pipeline.
+
+    Each record keeps the original ``source_file``/``gold`` so that the human
+    verdict aligns with the LLM judges on the exact same item key.
+    """
+    adapter_items = [
+        {
+            "audit_id": key_item.get("audit_id"),
+            "source_file": key_item.get("source_file"),
+            "input": key_item.get("input"),
+            "gold": key_item.get("gold"),
+            "prediction": key_item.get("prediction"),
+            "correct": human_summary.get("human_final_correct"),
+        }
+        for key_item, human_summary in zip(key_items, human_summaries)
+        if human_summary.get("human_final_correct") in {"yes", "no"}
+    ]
+    payload = {
+        "human_label": "human",
+        "created_at": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat(),
+        "source_key": str(key_path),
+        "n_items": len(adapter_items),
+        "items": adapter_items,
+    }
+    save_json(payload, adapter_path)
+    return len(adapter_items)
+
+
 def merge_human_annotations(
     key_path: Path,
     annotation_paths: Sequence[Path],
@@ -357,12 +595,24 @@ def merge_human_annotations(
         raise ValueError("Key file must contain an items list.")
 
     annotations_by_id = load_human_annotations(annotation_paths)
+    judge_names = _discover_judge_names(key_items)
+    annotator_ids = _discover_annotator_ids(annotations_by_id)
+    csv_columns = build_merged_csv_columns(annotator_ids, judge_names)
+
     merged_items: List[Dict[str, Any]] = []
+    human_summaries: List[Dict[str, Any]] = []
+    aligned_humans: Dict[str, Dict[str, str]] = {}
     for item in key_items:
         audit_id = str(item.get("audit_id") or "")
         annotations = annotations_by_id.get(audit_id, [])
         human_summary = _human_summary(annotations)
-        merged_items.append(_analysis_item(item, human_summary))
+        human_summaries.append(human_summary)
+        merged_items.append(
+            _analysis_item(item, human_summary, annotator_ids, judge_names)
+        )
+        labels_by_annotator = human_summary.get("labels_by_annotator") or {}
+        if labels_by_annotator:
+            aligned_humans[audit_id] = dict(labels_by_annotator)
 
     human_comparison_count = sum(
         1
@@ -375,6 +625,8 @@ def merge_human_annotations(
 
     summary = {
         "n_key_items": len(key_items),
+        "judges": judge_names,
+        "annotators": annotator_ids,
         "n_items_with_annotations": sum(
             1 for item in merged_items if item["n_human_labels"] > 0
         ),
@@ -401,18 +653,22 @@ def merge_human_annotations(
             if human_comparison_count
             else None
         ),
+        "human_human_reliability": _human_human_reliability(
+            aligned_humans, annotator_ids
+        ),
         "llm_human_agreement": {
-            "ds-v3.2": _judge_agreement_summary(merged_items, "human_matches_ds_v3_2"),
-            "gpt-5.2": _judge_agreement_summary(merged_items, "human_matches_gpt_5_2"),
+            judge: _judge_agreement_summary(
+                merged_items, f"human_matches_{_judge_slug(judge)}"
+            )
+            for judge in judge_names
         },
         "llm_individual_human_agreement": {
-            "ds-v3.2": _individual_judge_agreement_summary(
-                merged_items, "n_human_matches_ds_v3_2"
-            ),
-            "gpt-5.2": _individual_judge_agreement_summary(
-                merged_items, "n_human_matches_gpt_5_2"
-            ),
+            judge: _individual_judge_agreement_summary(
+                merged_items, f"n_human_matches_{_judge_slug(judge)}"
+            )
+            for judge in judge_names
         },
+        "llm_human_reliability": _llm_human_reliability(merged_items, judge_names),
         "annotation_files": [str(path) for path in annotation_paths],
     }
 
@@ -420,6 +676,11 @@ def merge_human_annotations(
     json_path = output_dir / f"{output_stem}.json"
     jsonl_path = output_dir / f"{output_stem}.jsonl"
     csv_path = output_dir / f"{output_stem}.csv"
+    adapter_path = output_dir / f"{output_stem}_adjudicated.json"
+
+    n_adjudicated = _write_human_verdict_adapter(
+        key_items, human_summaries, key_path, adapter_path
+    )
 
     save_json({"summary": summary, "items": merged_items}, json_path)
     with open(jsonl_path, "w", encoding="utf-8") as jsonl_file:
@@ -427,57 +688,16 @@ def merge_human_annotations(
             jsonl_file.write(json.dumps(item, ensure_ascii=False) + "\n")
 
     with open(csv_path, "w", encoding="utf-8", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=MERGED_CSV_COLUMNS)
+        writer = csv.DictWriter(csv_file, fieldnames=csv_columns)
         writer.writeheader()
         for item in merged_items:
-            writer.writerow(
-                {
-                    "audit_id": item.get("audit_id"),
-                    "human_status": item.get("human_status"),
-                    "needs_adjudication": item.get("needs_adjudication"),
-                    "n_human_labels": item.get("n_human_labels"),
-                    "annotator_1_correct": item.get("annotator_1_correct"),
-                    "annotator_2_correct": item.get("annotator_2_correct"),
-                    "human_consensus_correct": item.get("human_consensus_correct"),
-                    "human_final_correct": item.get("human_final_correct"),
-                    "human_labels": json.dumps(item.get("human_labels", [])),
-                    "annotator_ids": json.dumps(item.get("annotator_ids", [])),
-                    "n_human_yes": item.get("n_human_yes"),
-                    "n_human_no": item.get("n_human_no"),
-                    "ds_v3_2_correct": item.get("ds_v3_2_correct"),
-                    "gpt_5_2_correct": item.get("gpt_5_2_correct"),
-                    "llm_judges_agree": item.get("llm_judges_agree"),
-                    "human_matches_ds_v3_2": item.get("human_matches_ds_v3_2"),
-                    "human_matches_gpt_5_2": item.get("human_matches_gpt_5_2"),
-                    "n_human_matches_ds_v3_2": item.get("n_human_matches_ds_v3_2"),
-                    "n_human_matches_gpt_5_2": item.get("n_human_matches_gpt_5_2"),
-                    "human_match_rate_ds_v3_2": item.get("human_match_rate_ds_v3_2"),
-                    "human_match_rate_gpt_5_2": item.get("human_match_rate_gpt_5_2"),
-                    "annotator_1_matches_ds_v3_2": item.get(
-                        "annotator_1_matches_ds_v3_2"
-                    ),
-                    "annotator_1_matches_gpt_5_2": item.get(
-                        "annotator_1_matches_gpt_5_2"
-                    ),
-                    "annotator_2_matches_ds_v3_2": item.get(
-                        "annotator_2_matches_ds_v3_2"
-                    ),
-                    "annotator_2_matches_gpt_5_2": item.get(
-                        "annotator_2_matches_gpt_5_2"
-                    ),
-                    "model_short": item.get("model_short"),
-                    "condition": item.get("condition"),
-                    "seed": item.get("seed"),
-                    "primary_stratum": item.get("primary_stratum"),
-                    "sampling_weight_primary": item.get("sampling_weight_primary"),
-                    "input": item.get("input"),
-                    "gold_1": item.get("gold_1"),
-                    "gold_2": item.get("gold_2"),
-                    "prediction": item.get("prediction"),
-                    "source_file": item.get("source_file"),
-                    "item_id": item.get("item_id"),
-                }
-            )
+            row = {}
+            for column in csv_columns:
+                value = item.get(column)
+                if column in {"human_labels", "annotator_ids"}:
+                    value = json.dumps(value or [])
+                row[column] = value
+            writer.writerow(row)
 
     return {
         "summary": summary,
@@ -485,5 +705,7 @@ def merge_human_annotations(
             "json": str(json_path),
             "jsonl": str(jsonl_path),
             "csv": str(csv_path),
+            "adjudicated_human_gold": str(adapter_path),
         },
+        "n_adjudicated_human_labels": n_adjudicated,
     }

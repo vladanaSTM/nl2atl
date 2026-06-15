@@ -21,6 +21,7 @@ from .summarize_judge_evaluations import summarize_judge_evaluations
 from .aggregate_seeds import aggregate_predictions, _build_notebook
 from ..evaluation.judge_agreement import (
     generate_agreement_report,
+    generate_agreement_report_with_human,
     print_agreement_summary,
     build_agreement_notebook,
 )
@@ -145,6 +146,16 @@ def main() -> None:
         help="Skip inter-rater agreement analysis.",
     )
     parser.add_argument(
+        "--human_eval",
+        default=None,
+        help=(
+            "Path to the adjudicated human-gold file from human-eval-merge. "
+            "When present, LLM judges are validated against the human labels. "
+            "Defaults to <eval_dir>/human_evaluation/merged/"
+            "aaai_human_eval_merged_adjudicated.json when it exists."
+        ),
+    )
+    parser.add_argument(
         "--skip_seed_aggregation",
         action="store_true",
         help="Skip seed metric aggregation.",
@@ -216,10 +227,34 @@ def main() -> None:
             print("=" * 70)
             try:
                 if evaluated_datasets_dir.exists():
-                    agreement_report = generate_agreement_report(
-                        eval_dir=evaluated_datasets_dir,
-                        output_path=eval_dir / "agreement_report.json",
-                    )
+                    if args.human_eval:
+                        human_gold_path = Path(args.human_eval)
+                    else:
+                        human_gold_path = (
+                            eval_dir
+                            / "human_evaluation"
+                            / "merged"
+                            / "aaai_human_eval_merged_adjudicated.json"
+                        )
+                    if human_gold_path.exists():
+                        human_judges = args.judges
+                        if human_judges and "human" not in human_judges:
+                            human_judges = [*human_judges, "human"]
+                        agreement_report = generate_agreement_report_with_human(
+                            eval_dir=evaluated_datasets_dir,
+                            human_annotations_path=human_gold_path,
+                            output_path=eval_dir / "agreement_report.json",
+                            judges=human_judges,
+                        )
+                        print(
+                            f"✓ Included human validation from {human_gold_path}"
+                        )
+                    else:
+                        agreement_report = generate_agreement_report(
+                            eval_dir=evaluated_datasets_dir,
+                            output_path=eval_dir / "agreement_report.json",
+                            judges=args.judges,
+                        )
                     print_agreement_summary(agreement_report)
                     if not args.no_notebook and args.individual_notebooks:
                         try:

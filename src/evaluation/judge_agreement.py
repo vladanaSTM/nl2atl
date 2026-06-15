@@ -108,8 +108,15 @@ def load_human_annotations(path: Path) -> Tuple[Dict[str, Any], List[dict]]:
 def normalize_human_annotations(
     items: List[dict], source_file: str
 ) -> Dict[str, Dict[str, List[dict]]]:
-    """Normalize human annotations into judge_results structure."""
-    normalized: List[dict] = []
+    """Normalize human annotations into judge_results structure.
+
+    When an item carries its own ``source_file`` (as in the adjudicated
+    human-gold adapter emitted by the merge step), it is grouped under that
+    per-item source so the human verdict aligns with the LLM judges on the
+    exact same item across many generator runs. Items without a ``source_file``
+    fall back to the single ``source_file`` argument for backward compatibility.
+    """
+    grouped: Dict[str, List[dict]] = defaultdict(list)
 
     def normalize_correct(value: Any) -> str:
         if isinstance(value, bool):
@@ -122,7 +129,8 @@ def normalize_human_annotations(
     for item in items:
         if not isinstance(item, dict):
             continue
-        normalized.append(
+        item_source = str(item.get("source_file") or source_file)
+        grouped[item_source].append(
             {
                 "input": item.get("input") or item.get("nl") or "",
                 "gold": item.get("gold")
@@ -136,11 +144,11 @@ def normalize_human_annotations(
                 or "",
                 "correct": normalize_correct(item.get("correct")),
                 "decision_method": "human",
-                "source_file": source_file,
+                "source_file": item_source,
             }
         )
 
-    return {"human": {source_file: normalized}}
+    return {"human": dict(grouped)}
 
 
 def merge_judge_results(
@@ -750,14 +758,24 @@ def compute_human_comparison(
             if human_label in ratings and judge in ratings
         ]
         if not common:
-            per_judge[judge] = {"n_common": 0, "accuracy": None}
+            per_judge[judge] = {
+                "n_common": 0,
+                "accuracy": None,
+                "cohen_kappa": None,
+                "cohen_kappa_interpretation": None,
+            }
             continue
+        judge_labels = [aligned[key][judge] for key in common]
+        human_labels = [aligned[key][human_label] for key in common]
         correct = sum(
-            1 for key in common if aligned[key][judge] == aligned[key][human_label]
+            1 for judged, human in zip(judge_labels, human_labels) if judged == human
         )
+        kappa = compute_cohen_kappa(judge_labels, human_labels)
         per_judge[judge] = {
             "n_common": len(common),
             "accuracy": round(correct / len(common), 4),
+            "cohen_kappa": round(kappa, 4),
+            "cohen_kappa_interpretation": _interpret_kappa(kappa),
         }
 
     # Majority vote among LLM judges (ties excluded)

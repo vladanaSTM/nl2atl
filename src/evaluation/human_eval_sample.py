@@ -38,19 +38,6 @@ ANNOTATION_COLUMNS = [
     "annotator_id",
 ]
 
-ERROR_CATEGORIES = [
-    "equivalent",
-    "syntax_error",
-    "wrong_agent_or_coalition",
-    "wrong_temporal_operator",
-    "wrong_temporal_scope",
-    "wrong_polarity",
-    "wrong_atomic_proposition",
-    "missing_condition",
-    "extra_condition",
-    "other",
-]
-
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -703,7 +690,7 @@ This package is a blind, stratified audit set for calibrating the LLM judges use
 - Use the annotator-specific XLSX workbooks under `annotations/` for annotation.
 - The `correct` column is restricted to a yes/no dropdown, and `annotator_id` is restricted to {"/".join(metadata.get("annotator_choices", []))}.
 - Do not expose `aaai_human_eval_sample_key.json` to annotators until annotations are locked.
-- Use two ATL-literate project annotators. They should annotate independently first, then resolve disagreements through a documented adjudication/discussion pass.
+- Use at least two ATL-literate project annotators (this package ships one workbook per id in `annotator_id`). They annotate independently first, then resolve flagged disagreements through a documented deliberation pass until they reach consensus.
 - Annotate all {metadata["sample_size"]} core sample items before analyzing judge agreement.
 - If annotation budget allows, rerun with `--write_disagreement_pool` as a stricter follow-up that adjudicates every LLM-judge disagreement.
 - Exact matches are excluded from the default human workload because they are accepted by deterministic normalization before LLM judging.
@@ -728,13 +715,13 @@ For each row, decide whether `prediction` is a correct formalization of the natu
 
 Mark `correct` as `yes` only when the prediction preserves the coalition/agent, temporal operator, temporal scope, polarity, logical structure, and atomic proposition meaning. Ignore whitespace and harmless parentheses. Do not mark a prediction correct when it changes an agent, changes temporal scope, flips polarity, drops or adds a condition, uses an unsupported alias, or introduces malformed ATL syntax.
 
-Only the `correct` field is required. Use `yes` when the prediction is correct and `no` when it is incorrect. Add free-text notes only in a separate adjudication document if the two annotators disagree or a case needs discussion.
+Only the `correct` field is required. Use `yes` when the prediction is correct and `no` when it is incorrect. The label is deliberately binary so it can be compared to the binary LLM-judge verdicts with chance-corrected agreement. For a genuinely uncertain case, record your best independent yes/no judgment rather than abstaining; if annotators then disagree, the item is flagged for adjudication, the annotators deliberate until they reach a consensus label, and the case is reported as one that was hard to resolve even for humans. Keep any deliberation notes in a separate adjudication document.
 
 ## What To Report In The Paper
 
-- Human-human agreement before adjudication.
-- The number of human-human disagreements before adjudication.
-- Agreement of each LLM judge with the adjudicated human label.
+- Human-human agreement before adjudication, both raw and chance-corrected (Cohen's kappa for two annotators; Fleiss' kappa or Krippendorff's alpha for more), with a Landis-Koch interpretation label.
+- The number of human-human disagreements before adjudication (the cases that needed deliberation).
+- Agreement of each LLM judge with the adjudicated human label, reported as both accuracy and Cohen's kappa.
 - Accuracy of the LLM-judge consensus and each disagreement direction.
 - A note that exact matches were accepted automatically by deterministic normalization and excluded from human annotation.
 - Whether the main model ranking changes after replacing sampled LLM-judge labels with human adjudication.
