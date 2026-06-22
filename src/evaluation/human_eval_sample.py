@@ -6,27 +6,26 @@ import csv
 import hashlib
 import json
 import re
-import zipfile
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
-from xml.sax.saxutils import escape
 
 from ..infra.io import load_json, save_json
+from ..infra.xlsx import XlsxDropdown, write_xlsx_sheet
 from .judge_agreement import create_item_key
 
 DEFAULT_JUDGES: Tuple[str, str] = ("ds-v3.2", "gpt-5.2")
 DEFAULT_ANNOTATORS: Tuple[str, str] = ("annotator_1", "annotator_2")
 
-DEFAULT_AAAI_QUOTAS: Dict[str, int] = {
+DEFAULT_HUMAN_EVAL_QUOTAS: Dict[str, int] = {
     "disagree_ds_no_gpt_yes": 33,
     "disagree_ds_yes_gpt_no": 327,
     "llm_agree_yes": 120,
     "llm_agree_no": 120,
 }
 
-PRIMARY_STRATA = tuple(DEFAULT_AAAI_QUOTAS.keys())
+PRIMARY_STRATA = tuple(DEFAULT_HUMAN_EVAL_QUOTAS.keys())
 
 ANNOTATION_COLUMNS = [
     "audit_id",
@@ -36,6 +35,7 @@ ANNOTATION_COLUMNS = [
     "prediction",
     "correct",
     "annotator_id",
+    "notes",
 ]
 
 
@@ -482,6 +482,7 @@ def _blind_item(record: Mapping[str, Any], annotator_id: str = "") -> Dict[str, 
         "prediction": record["prediction"],
         "correct": "",
         "annotator_id": annotator_id,
+        "notes": "",
     }
 
 
@@ -548,6 +549,7 @@ def _write_json_annotations(
             "metadata": metadata,
             "annotation_fields": {
                 "correct": "Use yes/no. This is the only required annotation field.",
+                "notes": "Optional free-text reasoning for this decision.",
             },
             "annotations": [_blind_item(record) for record in records],
         },
@@ -581,101 +583,38 @@ def _write_jsonl_annotations(
             )
 
 
-def _excel_column(index: int) -> str:
-    column = ""
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        column = chr(65 + remainder) + column
-    return column
-
-
-def _xlsx_cell(row_index: int, column_index: int, value: Any) -> str:
-    cell_ref = f"{_excel_column(column_index)}{row_index}"
-    text = "" if value is None else str(value)
-    return (
-        f'<c r="{cell_ref}" t="inlineStr"><is><t xml:space="preserve">'
-        f"{escape(text)}"
-        "</t></is></c>"
-    )
-
-
 def _write_xlsx_annotations(
     path: Path,
     records: Sequence[Dict[str, Any]],
     annotator_id: str = "",
     annotator_choices: Sequence[str] = DEFAULT_ANNOTATORS,
 ) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    rows: List[List[str]] = [ANNOTATION_COLUMNS]
+    rows: List[List[str]] = []
     for record in records:
         item = _blind_item(record, annotator_id=annotator_id)
         rows.append([str(item.get(column, "")) for column in ANNOTATION_COLUMNS])
 
-    correct_column = _excel_column(ANNOTATION_COLUMNS.index("correct") + 1)
-    annotator_column = _excel_column(ANNOTATION_COLUMNS.index("annotator_id") + 1)
-    annotator_list = ",".join(annotator_choices)
-    max_row = max(2, len(rows))
-    dimension = f"A1:{_excel_column(len(ANNOTATION_COLUMNS))}{max_row}"
-    sheet_rows = []
-    for row_index, row in enumerate(rows, start=1):
-        cells = "".join(
-            _xlsx_cell(row_index, column_index, value)
-            for column_index, value in enumerate(row, start=1)
-        )
-        sheet_rows.append(f'<row r="{row_index}">{cells}</row>')
-
-    sheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <dimension ref="{dimension}"/>
-  <sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
-  <sheetFormatPr defaultRowHeight="15"/>
-  <cols>
-    <col min="1" max="1" width="14" customWidth="1"/>
-    <col min="2" max="5" width="55" customWidth="1"/>
-    <col min="6" max="7" width="16" customWidth="1"/>
-  </cols>
-    <sheetData>{''.join(sheet_rows)}</sheetData>
-    <dataValidations count="2"><dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="{correct_column}2:{correct_column}{max_row}"><formula1>"yes,no"</formula1></dataValidation><dataValidation type="list" allowBlank="0" showErrorMessage="1" sqref="{annotator_column}2:{annotator_column}{max_row}"><formula1>"{escape(annotator_list)}"</formula1></dataValidation></dataValidations>
-</worksheet>"""
-
-    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets><sheet name="annotations" sheetId="1" r:id="rId1"/></sheets>
-</workbook>"""
-    workbook_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>"""
-    package_rels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-</Relationships>"""
-    content_types = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-</Types>"""
-    styles_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
-  <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
-  <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-  <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
-  <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-</styleSheet>"""
-
-    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("[Content_Types].xml", content_types)
-        archive.writestr("_rels/.rels", package_rels)
-        archive.writestr("xl/workbook.xml", workbook_xml)
-        archive.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
-        archive.writestr("xl/worksheets/sheet1.xml", sheet_xml)
-        archive.writestr("xl/styles.xml", styles_xml)
+    column_widths = {
+        "audit_id": 14,
+        "input": 55,
+        "gold_1": 55,
+        "gold_2": 55,
+        "prediction": 55,
+        "correct": 16,
+        "annotator_id": 16,
+        "notes": 55,
+    }
+    write_xlsx_sheet(
+        path,
+        ANNOTATION_COLUMNS,
+        rows,
+        dropdowns=[
+            XlsxDropdown("correct", ("yes", "no"), allow_blank=True),
+            XlsxDropdown("annotator_id", tuple(annotator_choices), allow_blank=False),
+        ],
+        column_widths=column_widths,
+        sheet_name="annotations",
+    )
 
 
 def _write_protocol(path: Path, metadata: Mapping[str, Any]) -> None:
@@ -688,8 +627,8 @@ This package is a blind, stratified audit set for calibrating the LLM judges use
 ## Recommended Use
 
 - Use the annotator-specific XLSX workbooks under `annotations/` for annotation.
-- The `correct` column is restricted to a yes/no dropdown, and `annotator_id` is restricted to {"/".join(metadata.get("annotator_choices", []))}.
-- Do not expose `aaai_human_eval_sample_key.json` to annotators until annotations are locked.
+- The `correct` column is restricted to a yes/no dropdown, `annotator_id` is restricted to {"/".join(metadata.get("annotator_choices", []))}, and the optional `notes` column accepts free-text reasoning.
+- Do not expose `human_eval_sample_key.json` to annotators until annotations are locked.
 - Use at least two ATL-literate project annotators (this package ships one workbook per id in `annotator_id`). They annotate independently first, then resolve flagged disagreements through a documented deliberation pass until they reach consensus.
 - Annotate all {metadata["sample_size"]} core sample items before analyzing judge agreement.
 - If annotation budget allows, rerun with `--write_disagreement_pool` as a stricter follow-up that adjudicates every LLM-judge disagreement.
@@ -715,7 +654,7 @@ For each row, decide whether `prediction` is a correct formalization of the natu
 
 Mark `correct` as `yes` only when the prediction preserves the coalition/agent, temporal operator, temporal scope, polarity, logical structure, and atomic proposition meaning. Ignore whitespace and harmless parentheses. Do not mark a prediction correct when it changes an agent, changes temporal scope, flips polarity, drops or adds a condition, uses an unsupported alias, or introduces malformed ATL syntax.
 
-Only the `correct` field is required. Use `yes` when the prediction is correct and `no` when it is incorrect. The label is deliberately binary so it can be compared to the binary LLM-judge verdicts with chance-corrected agreement. For a genuinely uncertain case, record your best independent yes/no judgment rather than abstaining; if annotators then disagree, the item is flagged for adjudication, the annotators deliberate until they reach a consensus label, and the case is reported as one that was hard to resolve even for humans. Keep any deliberation notes in a separate adjudication document.
+Only the `correct` field is required; the optional `notes` column captures free-text reasoning for a decision. Use `yes` when the prediction is correct and `no` when it is incorrect. The label is deliberately binary so it can be compared to the binary LLM-judge verdicts with chance-corrected agreement. For a genuinely uncertain case, record your best independent yes/no judgment rather than abstaining. If annotators disagree, the item is flagged for adjudication: the merge step writes a single deliberation workbook (`..._adjudication.xlsx`) listing only the disputed items with both annotators' verdicts and notes, the annotators fill its `correct` and `notes` columns together, and `nl2atl human-eval-adjudicate` applies the agreed label as the final human gold while preserving the rationale in `adjudication_notes`.
 
 ## What To Report In The Paper
 
@@ -725,7 +664,7 @@ Only the `correct` field is required. Use `yes` when the prediction is correct a
 - Accuracy of the LLM-judge consensus and each disagreement direction.
 - A note that exact matches were accepted automatically by deterministic normalization and excluded from human annotation.
 - Whether the main model ranking changes after replacing sampled LLM-judge labels with human adjudication.
-- The sampling seed, quotas, and stratum counts from `aaai_human_eval_sample_metadata.json`.
+- The sampling seed, quotas, and stratum counts from `human_eval_sample_metadata.json`.
 
 ## Sampling Summary
 
@@ -816,7 +755,7 @@ def _write_annotator_workbooks(
 
 def regenerate_annotator_workbooks_from_key(
     key_path: Path = Path(
-        "outputs/LLM-evaluation/human_evaluation/aaai_human_eval_sample_key.json"
+        "outputs/LLM-evaluation/human_evaluation/human_eval_sample_key.json"
     ),
     output_dir: Path | None = None,
     annotator_choices: Sequence[str] = DEFAULT_ANNOTATORS,
@@ -845,7 +784,7 @@ def build_human_eval_sample(
     eval_dir: Path = Path("outputs/LLM-evaluation/evaluated_datasets"),
     output_dir: Path = Path("outputs/LLM-evaluation/human_evaluation"),
     judges: Sequence[str] = DEFAULT_JUDGES,
-    quotas: Mapping[str, int] = DEFAULT_AAAI_QUOTAS,
+    quotas: Mapping[str, int] = DEFAULT_HUMAN_EVAL_QUOTAS,
     sampling_seed: int = 20260604,
     write_disagreement_pool: bool = False,
     write_legacy_formats: bool = False,
@@ -863,7 +802,7 @@ def build_human_eval_sample(
 
     sample_metadata: Dict[str, Any] = {
         "created_at": _utc_now(),
-        "purpose": "AAAI-ready human audit sample for calibrating LLM-as-judge evaluation.",
+        "purpose": "Human audit sample for calibrating LLM-as-judge evaluation.",
         "eval_dir": str(eval_dir),
         "judges": list(judges),
         "sampling_seed": sampling_seed,
@@ -906,7 +845,7 @@ def build_human_eval_sample(
         sampled_records,
         population,
         output_dir,
-        "aaai_human_eval_sample",
+        "human_eval_sample",
         sample_metadata,
         write_legacy_formats=write_legacy_formats,
         annotator_choices=annotator_choices,
@@ -947,7 +886,7 @@ def build_human_eval_sample(
             disagreement_records,
             population,
             output_dir,
-            "aaai_disagreement_pool",
+            "disagreement_pool",
             disagreement_metadata,
             write_legacy_formats=write_legacy_formats,
             annotator_choices=annotator_choices,
@@ -960,10 +899,10 @@ def build_human_eval_sample(
             "annotator_workbooks": annotator_files,
             "disagreement_pool": disagreement_files,
             "protocol": str(output_dir / "human_evaluation_protocol.md"),
-            "metadata": str(output_dir / "aaai_human_eval_sample_metadata.json"),
+            "metadata": str(output_dir / "human_eval_sample_metadata.json"),
         },
     }
-    save_json(metadata, output_dir / "aaai_human_eval_sample_metadata.json")
+    save_json(metadata, output_dir / "human_eval_sample_metadata.json")
     _write_protocol(output_dir / "human_evaluation_protocol.md", metadata)
 
     return metadata

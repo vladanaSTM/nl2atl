@@ -15,6 +15,7 @@ from xml.etree import ElementTree as ET
 import numpy as np
 
 from ..infra.io import load_json, save_json
+from ..infra.xlsx import XlsxDropdown, write_xlsx_sheet
 from .judge_agreement import (
     _interpret_kappa,
     compute_cohen_kappa,
@@ -23,7 +24,7 @@ from .judge_agreement import (
 )
 
 # Annotator ids that represent a post-hoc adjudication/consensus pass rather
-# than an independent reviewer. Their labels become the final gold label but are
+# than an independent annotator. Their labels become the final gold label but are
 # excluded from inter-annotator (human-human) reliability.
 ADJUDICATION_ANNOTATOR_IDS = frozenset(
     {"adjudicated", "adjudicator", "consensus", "final"}
@@ -67,9 +68,11 @@ def build_merged_csv_columns(
         "n_human_labels",
     ]
     columns += [f"{slug}_correct" for slug in annotator_slugs]
+    columns += [f"{slug}_notes" for slug in annotator_slugs]
     columns += [
         "human_consensus_correct",
         "human_final_correct",
+        "adjudication_notes",
         "human_labels",
         "annotator_ids",
         "n_human_yes",
@@ -110,6 +113,25 @@ def _normalize_correct(value: Any) -> str:
         return "yes"
     if value_str in {"no", "n", "false", "0", "incorrect"}:
         return "no"
+    return ""
+
+
+_NOTES_FIELD_CANDIDATES = frozenset(
+    {"notes", "note", "comment", "comments", "reasoning", "rationale", "deliberation"}
+)
+
+
+def _extract_notes(row: Mapping[str, Any]) -> str:
+    """Return free-text notes from any notes-like column (case-insensitive).
+
+    Annotators may hand-add the column under a few common headers; we accept
+    any of them so existing workbooks do not need to be regenerated.
+    """
+    for key, value in row.items():
+        if str(key).strip().lower() in _NOTES_FIELD_CANDIDATES:
+            text = str(value or "").strip()
+            if text:
+                return text
     return ""
 
 
@@ -196,6 +218,7 @@ def load_human_annotations(
             normalized_row = {
                 "annotator_id": annotator_id,
                 "correct": _normalize_correct(row.get("correct")),
+                "notes": _extract_notes(row),
             }
             annotations_by_id.setdefault(audit_id, []).append(normalized_row)
     return annotations_by_id
@@ -223,6 +246,18 @@ def _human_summary(annotations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         str(annotation.get("annotator_id") or ""): annotation.get("correct", "")
         for annotation in labeled_annotations
     }
+    notes_by_annotator = {
+        str(annotation.get("annotator_id") or ""): str(
+            annotation.get("notes") or ""
+        ).strip()
+        for annotation in independent_annotations
+        if str(annotation.get("notes") or "").strip()
+    }
+    adjudication_notes = " | ".join(
+        str(annotation.get("notes") or "").strip()
+        for annotation in final_annotations
+        if str(annotation.get("notes") or "").strip()
+    )
     final_labels = [
         annotation.get("correct", "")
         for annotation in final_annotations
@@ -261,6 +296,8 @@ def _human_summary(annotations: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
         "human_label_counts": dict(label_counts),
         "human_labels": labels,
         "labels_by_annotator": labels_by_annotator,
+        "notes_by_annotator": notes_by_annotator,
+        "adjudication_notes": adjudication_notes,
         "annotator_ids": [
             annotation.get("annotator_id") for annotation in labeled_annotations
         ],
@@ -332,13 +369,19 @@ def _analysis_item(
         annotator: str(labels_by_annotator.get(annotator) or "")
         for annotator in annotator_ids
     }
+    notes_by_annotator = human_summary.get("notes_by_annotator") or {}
     for annotator in annotator_ids:
         record[f"{_annotator_slug(annotator)}_correct"] = annotator_correct[annotator]
+    for annotator in annotator_ids:
+        record[f"{_annotator_slug(annotator)}_notes"] = str(
+            notes_by_annotator.get(annotator) or ""
+        )
 
     record.update(
         {
             "human_consensus_correct": human_summary.get("human_consensus_correct"),
             "human_final_correct": human_final,
+            "adjudication_notes": str(human_summary.get("adjudication_notes") or ""),
             "human_labels": human_labels,
             "annotator_ids": human_summary.get("annotator_ids", []),
             "n_human_yes": label_counts.get("yes", 0),
@@ -558,8 +601,11 @@ def _write_human_verdict_adapter(
     Each record keeps the original ``source_file``/``gold`` so that the human
     verdict aligns with the LLM judges on the exact same item key.
     """
-    adapter_items = [
-        {
+    adapter_items = []
+    for key_item, human_summary in zip(key_items, human_summaries):
+        if human_summary.get("human_final_correct") not in {"yes", "no"}:
+            continue
+        adapter_item = {
             "audit_id": key_item.get("audit_id"),
             "source_file": key_item.get("source_file"),
             "input": key_item.get("input"),
@@ -567,9 +613,10 @@ def _write_human_verdict_adapter(
             "prediction": key_item.get("prediction"),
             "correct": human_summary.get("human_final_correct"),
         }
-        for key_item, human_summary in zip(key_items, human_summaries)
-        if human_summary.get("human_final_correct") in {"yes", "no"}
-    ]
+        adjudication_notes = str(human_summary.get("adjudication_notes") or "").strip()
+        if adjudication_notes:
+            adapter_item["adjudication_notes"] = adjudication_notes
+        adapter_items.append(adapter_item)
     payload = {
         "human_label": "human",
         "created_at": datetime.now(timezone.utc)
@@ -583,11 +630,81 @@ def _write_human_verdict_adapter(
     return len(adapter_items)
 
 
+ADJUDICATION_WORKBOOK_FILL_COLUMNS: tuple[str, ...] = ("correct", "notes")
+
+
+def _adjudication_columns(annotator_ids: Sequence[str]) -> List[str]:
+    """Columns for the adjudication workbook: context first, then fill fields."""
+    columns = ["audit_id", "input", "gold_1", "gold_2", "prediction"]
+    columns += [f"{_annotator_slug(annotator)}_correct" for annotator in annotator_ids]
+    columns += [f"{_annotator_slug(annotator)}_notes" for annotator in annotator_ids]
+    columns += ["correct", "annotator_id", "notes"]
+    return columns
+
+
+def write_adjudication_workbook(
+    merged_items: Sequence[Mapping[str, Any]],
+    output_path: Path,
+    annotator_ids: Sequence[str],
+    adjudicator_id: str = "adjudicated",
+) -> int:
+    """Write an XLSX of the items the annotators disagree on, for deliberation.
+
+    Each row shows the shared context plus every annotator's verdict and note so
+    the annotators can deliberate. They fill the blank ``correct`` (yes/no) and
+    ``notes`` columns; ``annotator_id`` is pre-set to ``adjudicator_id`` so that
+    re-running the merge with this file applies the agreed label as the final
+    human gold (and keeps the rationale in ``adjudication_notes``).
+    """
+    columns = _adjudication_columns(annotator_ids)
+    rows: List[List[str]] = []
+    for item in merged_items:
+        if item.get("needs_adjudication") != "yes":
+            continue
+        row: List[str] = []
+        for column in columns:
+            if column == "annotator_id":
+                row.append(adjudicator_id)
+            elif column in ADJUDICATION_WORKBOOK_FILL_COLUMNS:
+                row.append("")
+            else:
+                row.append(str(item.get(column, "") or ""))
+        rows.append(row)
+
+    column_widths: Dict[str, float] = {
+        "audit_id": 14,
+        "input": 55,
+        "gold_1": 45,
+        "gold_2": 45,
+        "prediction": 45,
+        "correct": 12,
+        "annotator_id": 14,
+        "notes": 50,
+    }
+    for annotator in annotator_ids:
+        column_widths[f"{_annotator_slug(annotator)}_correct"] = 16
+        column_widths[f"{_annotator_slug(annotator)}_notes"] = 40
+
+    write_xlsx_sheet(
+        output_path,
+        columns,
+        rows,
+        dropdowns=[
+            XlsxDropdown("correct", ("yes", "no"), allow_blank=True),
+            XlsxDropdown("annotator_id", (adjudicator_id,), allow_blank=False),
+        ],
+        column_widths=column_widths,
+        sheet_name="adjudication",
+    )
+    return len(rows)
+
+
 def merge_human_annotations(
     key_path: Path,
     annotation_paths: Sequence[Path],
     output_dir: Path,
-    output_stem: str = "aaai_human_eval_merged",
+    output_stem: str = "human_eval_merged",
+    refresh_adjudication: bool = False,
 ) -> Dict[str, Any]:
     key_payload = load_json(key_path)
     key_items = key_payload.get("items") if isinstance(key_payload, dict) else None
@@ -699,13 +816,25 @@ def merge_human_annotations(
                 row[column] = value
             writer.writerow(row)
 
+    # Auto-emit the disagreement workbook so the annotators can deliberate.
+    # It is (re)written only while disagreements remain, and never overwrites an
+    # in-progress fill of the same file unless refresh_adjudication is set.
+    adjudication_path = output_dir / f"{output_stem}_adjudication.xlsx"
+    n_needing = summary["n_items_needing_adjudication"]
+    if n_needing > 0 and (refresh_adjudication or not adjudication_path.exists()):
+        write_adjudication_workbook(merged_items, adjudication_path, annotator_ids)
+
+    files = {
+        "json": str(json_path),
+        "jsonl": str(jsonl_path),
+        "csv": str(csv_path),
+        "adjudicated_human_gold": str(adapter_path),
+    }
+    if adjudication_path.exists():
+        files["adjudication_workbook"] = str(adjudication_path)
+
     return {
         "summary": summary,
-        "files": {
-            "json": str(json_path),
-            "jsonl": str(jsonl_path),
-            "csv": str(csv_path),
-            "adjudicated_human_gold": str(adapter_path),
-        },
+        "files": files,
         "n_adjudicated_human_labels": n_adjudicated,
     }

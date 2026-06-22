@@ -35,9 +35,9 @@ def _code_cell(text: str) -> dict[str, Any]:
 
 
 def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
-    """Write one focused notebook for AAAI-oriented result analysis.
+    """Write one focused notebook for evaluation result analysis.
 
-    The notebook is intentionally curated to the evidence reviewers expect:
+    The notebook is intentionally curated to the core evaluation evidence:
     experimental scale, headline accuracy by model and condition, the
     exact-match vs LLM-judge decomposition, statistical significance of the
     leading system, judge reliability validated against humans, the
@@ -754,6 +754,285 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
         display(disagreement_df.head(5))
     """
 
+    human_override_cell = """
+    # Ranking with human labels overriding the LLM judges. Where a human audited an
+    # item, the human verdict replaces the judges' verdict for that item: a human
+    # "yes" counts as correct even if both judges said "no", and a human "no" counts
+    # as incorrect even if both judges said "yes". Items without a human label keep
+    # the combined judge verdict. Both accuracy columns are computed over the SAME
+    # items (pooled across judges and seeds), so the delta is exactly the effect of
+    # the human overrides.
+    #
+    # Caveat: the human audit sample was stratified to OVER-REPRESENT judge
+    # disagreements (it was drawn to validate the judge, not as a uniform re-score)
+    # and coverage is uneven across systems, so the override accuracy on audited
+    # items overstates how much a uniform human re-scoring would move the headline;
+    # read it as "where humans corrected the judges", not as an unbiased accuracy.
+    def human_override_key(input_text, gold_text, prediction_text):
+        payload = {
+            "input": input_text or "",
+            "gold": gold_text or "",
+            "prediction": prediction_text or "",
+        }
+        text = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+    def load_human_override_labels(eval_dir):
+        search_roots = [
+            eval_dir / "human_evaluation" / "merged",
+            eval_dir / "human_evaluation",
+            eval_dir,
+        ]
+        patterns = ["*adjudicated*.json", "*merged*.json", "*human*eval*.json"]
+        human_path = None
+        for root in search_roots:
+            if not root.exists():
+                continue
+            for pattern in patterns:
+                matches = sorted(root.glob(pattern))
+                if matches:
+                    human_path = matches[0]
+                    break
+            if human_path is not None:
+                break
+        if human_path is None:
+            return {}, None
+        payload = json.loads(human_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            items = (
+                payload.get("items")
+                or payload.get("annotations")
+                or payload.get("data")
+                or payload.get("predictions")
+                or []
+            )
+        elif isinstance(payload, list):
+            items = payload
+        else:
+            items = []
+        labels = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            source_file = item.get("source_file")
+            if not source_file:
+                continue
+            key = human_override_key(
+                item.get("input"), item.get("gold"), item.get("prediction")
+            )
+            labels[(source_file, key)] = int(normalized_yes(item.get("correct")))
+        return labels, human_path
+
+
+    human_labels, human_labels_path = load_human_override_labels(EVAL_DIR)
+
+    if not human_labels:
+        print("No human annotation file was found; skipping the human-override ranking.")
+    else:
+        # One combined judge verdict per (model, condition, seed, item), with the
+        # human override attached where the item was audited.
+        override_votes = {}
+        override_meta = {}
+        matched_human_keys = set()
+        for judge_model, payload in iter_evaluated_payloads(EVAL_DIR):
+            source_file = payload.get("source_file")
+            model_short = display_model_name(
+                payload.get("model_short") or payload.get("model") or "unknown"
+            )
+            condition = payload.get("condition") or "unknown"
+            seed = payload.get("seed")
+            for item in payload.get("detailed_results") or []:
+                if not isinstance(item, dict):
+                    continue
+                key = human_override_key(
+                    item.get("input"), item.get("gold"), item.get("prediction")
+                )
+                unit = (model_short, condition, seed, key)
+                override_votes.setdefault(unit, []).append(
+                    int(normalized_yes(item.get("correct")))
+                )
+                if unit not in override_meta:
+                    human_value = human_labels.get((source_file, key))
+                    if human_value is not None:
+                        matched_human_keys.add((source_file, key))
+                    override_meta[unit] = {
+                        "model_short": model_short,
+                        "condition": condition,
+                        "human": human_value,
+                    }
+
+        override_rows = []
+        for unit, votes in override_votes.items():
+            meta = override_meta[unit]
+            combined_judge = sum(votes) / len(votes)
+            human_value = meta["human"]
+            override_rows.append(
+                {
+                    "model_short": meta["model_short"],
+                    "condition": meta["condition"],
+                    "judge_score": combined_judge,
+                    "has_human": human_value is not None,
+                    "human_score": human_value,
+                    "final_score": human_value
+                    if human_value is not None
+                    else combined_judge,
+                }
+            )
+        override_items_df = pd.DataFrame(override_rows)
+
+        n_matched = len(matched_human_keys)
+        print(
+            f"Loaded {len(human_labels)} human annotations from "
+            f"{human_labels_path.name}; matched {n_matched} to evaluated items."
+        )
+        n_unmatched = len(human_labels) - n_matched
+        if n_unmatched:
+            print(
+                f"{n_unmatched} human annotation(s) did not line up with an evaluated "
+                "item (e.g. a prediction file outside this report) and are ignored."
+            )
+
+        scoreboard_rows = []
+        for (model_short, condition), group in override_items_df.groupby(
+            ["model_short", "condition"], dropna=False
+        ):
+            human_group = group[group["has_human"]]
+            n_rescued = int(
+                (
+                    (human_group["human_score"] == 1) & (human_group["judge_score"] < 1)
+                ).sum()
+            )
+            n_overruled = int(
+                (
+                    (human_group["human_score"] == 0) & (human_group["judge_score"] > 0)
+                ).sum()
+            )
+            scoreboard_rows.append(
+                {
+                    "model_short": model_short,
+                    "condition": condition,
+                    "n_items": len(group),
+                    "n_human": int(group["has_human"].sum()),
+                    "human_coverage": group["has_human"].mean(),
+                    "accuracy_judges": group["judge_score"].mean(),
+                    "accuracy_human_override": group["final_score"].mean(),
+                    "n_rescued_by_human": n_rescued,
+                    "n_overruled_by_human": n_overruled,
+                }
+            )
+        scoreboard = pd.DataFrame(scoreboard_rows)
+        scoreboard["delta"] = (
+            scoreboard["accuracy_human_override"] - scoreboard["accuracy_judges"]
+        )
+        scoreboard["rank_judges"] = (
+            scoreboard["accuracy_judges"].rank(ascending=False, method="min").astype(int)
+        )
+        scoreboard["rank_human_override"] = (
+            scoreboard["accuracy_human_override"]
+            .rank(ascending=False, method="min")
+            .astype(int)
+        )
+        scoreboard["rank_change"] = (
+            scoreboard["rank_judges"] - scoreboard["rank_human_override"]
+        )
+
+        def rank_move_arrow(change):
+            # Positive change == the override lifts the group to a better (smaller)
+            # rank, so it moves up the board.
+            if change > 0:
+                return f"⬆ {int(change)}"
+            if change < 0:
+                return f"⬇ {int(abs(change))}"
+            return "—"
+
+        scoreboard["rank_move"] = scoreboard["rank_change"].map(rank_move_arrow)
+        scoreboard = scoreboard.sort_values(
+            "accuracy_human_override", ascending=False
+        ).reset_index(drop=True)
+
+        scoreboard_columns = [
+            "rank_human_override",
+            "rank_move",
+            "model_short",
+            "condition",
+            "n_items",
+            "n_human",
+            "human_coverage",
+            "accuracy_judges",
+            "accuracy_human_override",
+            "delta",
+            "n_rescued_by_human",
+            "n_overruled_by_human",
+        ]
+        print(
+            "Ranking with human labels overriding the judges where available (the two "
+            "accuracy columns use identical items, so the delta is purely the overrides)."
+        )
+        display(scoreboard[scoreboard_columns].round(4))
+
+        top_judges = scoreboard.sort_values("accuracy_judges", ascending=False).iloc[0]
+        top_override = scoreboard.iloc[0]
+        if (
+            top_judges["model_short"] == top_override["model_short"]
+            and top_judges["condition"] == top_override["condition"]
+        ):
+            print(
+                f"Top system is unchanged: {top_override['model_short']} "
+                f"({top_override['condition']})."
+            )
+        else:
+            print(
+                f"Top system changes from {top_judges['model_short']} "
+                f"({top_judges['condition']}) to {top_override['model_short']} "
+                f"({top_override['condition']}) when human labels override the judges."
+            )
+        movers = scoreboard[scoreboard["rank_change"] != 0]
+        if movers.empty:
+            print("No model/condition changes rank under the human override.")
+        else:
+            print(
+                f"{len(movers)} model/condition group(s) change rank under the human "
+                "override; uneven, disagreement-weighted coverage means audited groups "
+                "move most."
+            )
+
+        covered = scoreboard[scoreboard["n_human"] > 0].copy()
+        if not covered.empty:
+            covered = covered.sort_values("accuracy_human_override")
+            tick_labels = [
+                f"{model} | {condition} (n={int(count)})"
+                for model, condition, count in zip(
+                    covered["model_short"], covered["condition"], covered["n_human"]
+                )
+            ]
+            y_positions = list(range(len(covered)))
+            bar_height = 0.4
+            fig, ax = plt.subplots(figsize=(9, max(3, len(covered) * 0.55)))
+            ax.barh(
+                [y + bar_height / 2 for y in y_positions],
+                covered["accuracy_judges"],
+                height=bar_height,
+                label="LLM judges only",
+                color="#4C72B0",
+            )
+            ax.barh(
+                [y - bar_height / 2 for y in y_positions],
+                covered["accuracy_human_override"],
+                height=bar_height,
+                label="Human override",
+                color="#DD8452",
+            )
+            ax.set_yticks(y_positions)
+            ax.set_yticklabels(tick_labels)
+            ax.set_xlabel("Accuracy")
+            ax.set_xlim(0, 1)
+            ax.set_title("Human-overridden vs judge-only accuracy (audited groups)")
+            ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
+            fig.tight_layout()
+            plt.show()
+    """
+
     tradeoff_cell = """
     TRADEOFF_COLUMNS = [
         "model_short",
@@ -1096,7 +1375,7 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
 
                 Report directory: `{eval_dir.as_posix()}`
 
-                This notebook curates the evidence an AAAI reviewer expects: experimental scale, headline accuracy by model and condition, where the accuracy comes from (exact match vs LLM-judge rescue), the statistical significance of the leading system, judge reliability validated against human labels, the accuracy-latency tradeoff, a transparent accounting of the provider content-filter events that affected a few examples, and a compact reproducibility snapshot.
+                This notebook curates the core evidence for the evaluation: experimental scale, headline accuracy by model and condition, where the accuracy comes from (exact match vs LLM-judge rescue), the statistical significance of the leading system, judge reliability validated against human labels, a ranking that lets the audited human labels override the judges where available, the accuracy-latency tradeoff, a transparent accounting of the provider content-filter events that affected a few examples, and a compact reproducibility snapshot.
                 """),
             _code_cell(load_cell),
             _code_cell(transform_cell),
@@ -1130,6 +1409,30 @@ def build_publication_notebook(eval_dir: Path, output_path: Path) -> None:
                 Inter-rater agreement (with interpretation) and, when available, how closely the LLM judges track human annotations.
                 """),
             _code_cell(reliability_cell),
+            _markdown_cell("""
+                ## Ranking with Human Labels Overriding the Judges
+
+                The audited human labels, where available, supersede the LLM judges:
+                a human "yes" makes an item correct even if both judges said "no", and
+                a human "no" makes it incorrect even if both judges said "yes". Items
+                without a human label keep the combined judge verdict, and the two
+                accuracy columns are computed over identical items so the delta is
+                exactly the effect of the overrides.
+
+                Human coverage is partial and was deliberately stratified toward judge
+                disagreements (the audit was designed to validate the judge, not to
+                re-score uniformly), so treat the override accuracy as "where humans
+                corrected the judges" rather than an unbiased re-estimate. The chart
+                shows only the groups that actually have human labels.
+                """),
+            _code_cell(human_override_cell),
+            _markdown_cell("""
+                ### Findings
+
+                - **Top system is unchanged**: phi3 finetuned_few_shot leads under both judges-only and human-override.
+                - **6 of 20 groups swap rank**, all among close neighbors (ranks 3↔4, 11↔12, 16↔17).
+                - Humans almost always **rescue** (mark correct what judges rejected) — except **mistral-7b baselines**, the only groups where humans **overrule** more than they rescue (baseline_few_shot drops −0.044, 16 overruled vs 5 rescued), i.e. the judges were over-crediting mistral's baseline outputs.
+                """),
             _markdown_cell("""
                 ## Accuracy-Latency Tradeoff
 

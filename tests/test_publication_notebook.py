@@ -118,11 +118,13 @@ def test_publication_notebook_cells_have_language_metadata_and_focused_content(
     assert "Accuracy Decomposition" in joined_source
     assert "Statistical Significance" in joined_source
     assert "Judge Reliability and Human Validation" in joined_source
+    assert "Ranking with Human Labels Overriding the Judges" in joined_source
     assert "Accuracy-Latency Tradeoff" in joined_source
     assert "Provider Content-Filter Transparency" in joined_source
     assert "Reproducibility" in joined_source
     assert "randomization_p_value" in joined_source
     assert "accuracy_boost_from_llm" in joined_source
+    assert "accuracy_human_override" in joined_source
     assert "accuracy_excluding_flagged" in joined_source
     assert "content_filtered" in joined_source
     assert "human_comparison" in joined_source

@@ -4,10 +4,13 @@ from pathlib import Path
 
 from src.evaluation.human_eval_merge import (
     MERGED_CSV_COLUMNS,
+    _xlsx_rows,
     build_merged_csv_columns,
     merge_human_annotations,
+    write_adjudication_workbook,
 )
 from src.evaluation.judge_agreement import generate_agreement_report_with_human
+from src.infra.xlsx import write_xlsx_sheet
 
 
 def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
@@ -74,7 +77,7 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
     )
 
     merged = json.loads(
-        (tmp_path / "merged" / "aaai_human_eval_merged.json").read_text(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
             encoding="utf-8"
         )
     )
@@ -95,7 +98,7 @@ def test_merge_human_annotations_deanonymizes_by_audit_id(tmp_path):
     assert "human_annotations" not in merged["items"][0]
 
     with open(
-        tmp_path / "merged" / "aaai_human_eval_merged.csv",
+        tmp_path / "merged" / "human_eval_merged.csv",
         "r",
         encoding="utf-8",
         newline="",
@@ -156,7 +159,7 @@ def test_merge_ignores_blank_template_rows(tmp_path):
     )
 
     merged = json.loads(
-        (tmp_path / "merged" / "aaai_human_eval_merged.json").read_text(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
             encoding="utf-8"
         )
     )
@@ -233,7 +236,7 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
     )
 
     merged = json.loads(
-        (tmp_path / "merged" / "aaai_human_eval_merged.json").read_text(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
             encoding="utf-8"
         )
     )
@@ -263,7 +266,7 @@ def test_merge_marks_human_disagreements_for_adjudication(tmp_path):
     assert item["human_match_rate_gpt_5_2"] == 0.5
 
     with open(
-        tmp_path / "merged" / "aaai_human_eval_merged.csv",
+        tmp_path / "merged" / "human_eval_merged.csv",
         "r",
         encoding="utf-8",
         newline="",
@@ -407,7 +410,7 @@ def test_merge_supports_three_annotators(tmp_path):
     assert result["summary"]["human_human_reliability"]["fleiss_kappa"] == 1.0
 
     merged = json.loads(
-        (tmp_path / "merged" / "aaai_human_eval_merged.json").read_text(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
             encoding="utf-8"
         )
     )
@@ -416,7 +419,7 @@ def test_merge_supports_three_annotators(tmp_path):
     assert "annotator_3_matches_ds_v3_2" in item
 
     with open(
-        tmp_path / "merged" / "aaai_human_eval_merged.csv",
+        tmp_path / "merged" / "human_eval_merged.csv",
         "r",
         encoding="utf-8",
         newline="",
@@ -457,6 +460,127 @@ def test_merge_writes_adjudicated_human_gold_adapter(tmp_path):
     assert first["gold"] == "<<A>>F p"
     assert first["correct"] in {"yes", "no"}
     assert "input" in first and "prediction" in first
+
+
+def test_merge_preserves_per_annotator_notes(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(key_path, [_key_item("HEVAL-0001", "<<A>>F p", "yes", "yes")])
+
+    annotation_a = tmp_path / "annotator_1.csv"
+    with open(annotation_a, "w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(
+            csv_file, fieldnames=["audit_id", "correct", "annotator_id", "notes"]
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "audit_id": "HEVAL-0001",
+                "correct": "yes",
+                "annotator_id": "annotator_1",
+                "notes": "Operator coalition preserved.",
+            }
+        )
+
+    annotation_b = tmp_path / "annotator_2.csv"
+    with open(annotation_b, "w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(
+            csv_file, fieldnames=["audit_id", "correct", "annotator_id", "notes"]
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "audit_id": "HEVAL-0001",
+                "correct": "yes",
+                "annotator_id": "annotator_2",
+                "notes": "",
+            }
+        )
+
+    merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=tmp_path / "merged",
+    )
+
+    assert "annotator_1_notes" in MERGED_CSV_COLUMNS
+    assert "annotator_2_notes" in MERGED_CSV_COLUMNS
+    assert "adjudication_notes" in MERGED_CSV_COLUMNS
+
+    merged = json.loads(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    item = merged["items"][0]
+    assert item["annotator_1_notes"] == "Operator coalition preserved."
+    assert item["annotator_2_notes"] == ""
+    assert item["adjudication_notes"] == ""
+
+    with open(
+        tmp_path / "merged" / "human_eval_merged.csv",
+        "r",
+        encoding="utf-8",
+        newline="",
+    ) as csv_file:
+        row = next(csv.DictReader(csv_file))
+    assert row["annotator_1_notes"] == "Operator coalition preserved."
+    assert row["annotator_2_notes"] == ""
+
+
+def test_merge_records_adjudication_reasoning(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(key_path, [_key_item("HEVAL-0001", "<<A>>F p", "yes", "no")])
+
+    annotation_a = tmp_path / "annotator_1.csv"
+    _write_annotator_csv(annotation_a, [("HEVAL-0001", "yes")], "annotator_1")
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(annotation_b, [("HEVAL-0001", "no")], "annotator_2")
+
+    adjudication = tmp_path / "adjudication.csv"
+    with open(adjudication, "w", encoding="utf-8", newline="") as csv_file:
+        writer = csv.DictWriter(
+            csv_file, fieldnames=["audit_id", "correct", "annotator_id", "notes"]
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "audit_id": "HEVAL-0001",
+                "correct": "yes",
+                "annotator_id": "adjudicated",
+                "notes": "Agreed yes: scope matches after deliberation.",
+            }
+        )
+
+    result = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b, adjudication],
+        output_dir=tmp_path / "merged",
+    )
+
+    merged = json.loads(
+        (tmp_path / "merged" / "human_eval_merged.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    item = merged["items"][0]
+    # Independent disagreement is still recorded (kappa stays pre-adjudication),
+    # while the final label and rationale come from the adjudication pass.
+    assert item["human_status"] == "disagreement"
+    assert item["needs_adjudication"] == "no"
+    assert item["human_final_correct"] == "yes"
+    assert item["adjudication_notes"] == (
+        "Agreed yes: scope matches after deliberation."
+    )
+    # The adjudicator is not treated as an independent annotator column.
+    assert item["annotator_1_correct"] == "yes"
+    assert item["annotator_2_correct"] == "no"
+    assert result["summary"]["annotators"] == ["annotator_1", "annotator_2"]
+
+    adapter_path = result["files"]["adjudicated_human_gold"]
+    payload = json.loads(open(adapter_path, encoding="utf-8").read())
+    assert payload["items"][0]["adjudication_notes"] == (
+        "Agreed yes: scope matches after deliberation."
+    )
 
 
 def _write_llm_judge_file(path, source_file, items):
@@ -560,4 +684,263 @@ def test_adjudicated_adapter_feeds_human_comparison(tmp_path):
     assert per_judge["ds-v3.2"]["cohen_kappa"] == 1.0
     assert per_judge["gpt-5.2"]["accuracy"] == 0.5
     assert "cohen_kappa_interpretation" in per_judge["ds-v3.2"]
+
+
+def test_merge_writes_adjudication_workbook_for_disagreements(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(
+        key_path,
+        [
+            _key_item(
+                "HEVAL-0001", "<<A>>F p1", "yes", "no", input_text="Disagree me"
+            ),
+            _key_item("HEVAL-0002", "<<A>>F p2", "yes", "yes", input_text="Agree me"),
+        ],
+    )
+    annotation_a = tmp_path / "annotator_1.csv"
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(
+        annotation_a, [("HEVAL-0001", "yes"), ("HEVAL-0002", "yes")], "annotator_1"
+    )
+    _write_annotator_csv(
+        annotation_b, [("HEVAL-0001", "no"), ("HEVAL-0002", "yes")], "annotator_2"
+    )
+
+    result = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=tmp_path / "merged",
+    )
+
+    workbook = Path(result["files"]["adjudication_workbook"])
+    assert workbook.exists()
+    assert workbook.name == "human_eval_merged_adjudication.xlsx"
+
+    rows = _xlsx_rows(workbook)
+    # Only the disagreement is included, with both verdicts/notes as context.
+    assert [row["audit_id"] for row in rows] == ["HEVAL-0001"]
+    row = rows[0]
+    assert row["input"] == "Disagree me"
+    assert row["annotator_1_correct"] == "yes"
+    assert row["annotator_2_correct"] == "no"
+    # Annotators fill these; annotator_id is pre-set for the merge-back.
+    assert row["correct"] == ""
+    assert row["notes"] == ""
+    assert row["annotator_id"] == "adjudicated"
+
+
+def test_merge_omits_adjudication_workbook_when_annotators_agree(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(key_path, [_key_item("HEVAL-0001", "<<A>>F p", "yes", "yes")])
+    annotation_a = tmp_path / "annotator_1.csv"
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(annotation_a, [("HEVAL-0001", "yes")], "annotator_1")
+    _write_annotator_csv(annotation_b, [("HEVAL-0001", "yes")], "annotator_2")
+
+    result = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=tmp_path / "merged",
+    )
+    assert "adjudication_workbook" not in result["files"]
+    assert not (
+        tmp_path / "merged" / "human_eval_merged_adjudication.xlsx"
+    ).exists()
+
+
+def test_merge_does_not_clobber_in_progress_adjudication_workbook(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(key_path, [_key_item("HEVAL-0001", "<<A>>F p", "yes", "no")])
+    annotation_a = tmp_path / "annotator_1.csv"
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(annotation_a, [("HEVAL-0001", "yes")], "annotator_1")
+    _write_annotator_csv(annotation_b, [("HEVAL-0001", "no")], "annotator_2")
+
+    merged_dir = tmp_path / "merged"
+    merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=merged_dir,
+    )
+    workbook = merged_dir / "human_eval_merged_adjudication.xlsx"
+    # Simulate annotators partially filling the workbook in place.
+    rows = _xlsx_rows(workbook)
+    header = list(rows[0].keys())
+    record = dict(rows[0])
+    record["notes"] = "work in progress"
+    write_xlsx_sheet(
+        workbook, header, [[record[column] for column in header]], sheet_name="adj"
+    )
+
+    # A plain re-merge (no adjudication file) must NOT overwrite their fill.
+    merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=merged_dir,
+    )
+    assert _xlsx_rows(workbook)[0]["notes"] == "work in progress"
+
+    # ...unless explicitly refreshed.
+    merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=merged_dir,
+        refresh_adjudication=True,
+    )
+    assert _xlsx_rows(workbook)[0]["notes"] == ""
+
+
+def test_adjudication_workbook_round_trips(tmp_path):
+    key_path = tmp_path / "key.json"
+    _write_key(
+        key_path,
+        [
+            _key_item("HEVAL-0001", "<<A>>F p1", "yes", "no"),
+            _key_item("HEVAL-0002", "<<A>>F p2", "yes", "yes"),
+        ],
+    )
+    annotation_a = tmp_path / "annotator_1.csv"
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(
+        annotation_a, [("HEVAL-0001", "yes"), ("HEVAL-0002", "yes")], "annotator_1"
+    )
+    _write_annotator_csv(
+        annotation_b, [("HEVAL-0001", "no"), ("HEVAL-0002", "yes")], "annotator_2"
+    )
+
+    merged_dir = tmp_path / "merged"
+    result = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=merged_dir,
+    )
+    workbook = Path(result["files"]["adjudication_workbook"])
+    rows = _xlsx_rows(workbook)
+    header = list(rows[0].keys())
+
+    # Annotators deliberate and fill the single shared workbook in place.
+    filled = []
+    for row in rows:
+        record = dict(row)
+        record["correct"] = "yes"
+        record["notes"] = "Resolved yes after deliberation."
+        filled.append([record[column] for column in header])
+    write_xlsx_sheet(workbook, header, filled, sheet_name="adjudication")
+
+    applied = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b, workbook],
+        output_dir=merged_dir,
+    )
+    assert applied["summary"]["n_items_needing_adjudication"] == 0
+
+    merged = json.loads(
+        (merged_dir / "human_eval_merged.json").read_text(encoding="utf-8")
+    )
+    item = next(i for i in merged["items"] if i["audit_id"] == "HEVAL-0001")
+    assert item["human_final_correct"] == "yes"
+    assert item["needs_adjudication"] == "no"
+    assert item["adjudication_notes"] == "Resolved yes after deliberation."
+
+    adapter = json.loads(
+        (merged_dir / "human_eval_merged_adjudicated.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    resolved = next(i for i in adapter["items"] if i["audit_id"] == "HEVAL-0001")
+    assert resolved["correct"] == "yes"
+    assert resolved["adjudication_notes"] == "Resolved yes after deliberation."
+
+
+def test_write_adjudication_workbook_skips_resolved_items(tmp_path):
+    merged_items = [
+        {
+            "audit_id": "HEVAL-0001",
+            "needs_adjudication": "yes",
+            "input": "I1",
+            "gold_1": "<<A>>F p",
+            "gold_2": "",
+            "prediction": "<<A>>F p",
+            "annotator_1_correct": "yes",
+            "annotator_2_correct": "no",
+            "annotator_1_notes": "scope ok",
+            "annotator_2_notes": "wrong agent",
+        },
+        {
+            "audit_id": "HEVAL-0002",
+            "needs_adjudication": "no",
+            "input": "I2",
+            "gold_1": "<<A>>F q",
+            "gold_2": "",
+            "prediction": "<<A>>F q",
+            "annotator_1_correct": "yes",
+            "annotator_2_correct": "yes",
+            "annotator_1_notes": "",
+            "annotator_2_notes": "",
+        },
+    ]
+    path = tmp_path / "adj.xlsx"
+    n = write_adjudication_workbook(
+        merged_items, path, ["annotator_1", "annotator_2"]
+    )
+    assert n == 1
+    rows = _xlsx_rows(path)
+    assert [row["audit_id"] for row in rows] == ["HEVAL-0001"]
+    assert rows[0]["annotator_2_notes"] == "wrong agent"
+
+
+def test_apply_human_adjudication_cli(tmp_path, monkeypatch):
+    import sys
+
+    from src.cli import apply_human_adjudication
+
+    key_path = tmp_path / "key.json"
+    _write_key(key_path, [_key_item("HEVAL-0001", "<<A>>F p", "yes", "no")])
+    annotation_a = tmp_path / "annotator_1.csv"
+    annotation_b = tmp_path / "annotator_2.csv"
+    _write_annotator_csv(annotation_a, [("HEVAL-0001", "yes")], "annotator_1")
+    _write_annotator_csv(annotation_b, [("HEVAL-0001", "no")], "annotator_2")
+
+    merged_dir = tmp_path / "merged"
+    result = merge_human_annotations(
+        key_path=key_path,
+        annotation_paths=[annotation_a, annotation_b],
+        output_dir=merged_dir,
+    )
+
+    # Annotators fill the auto-generated workbook in place.
+    workbook = Path(result["files"]["adjudication_workbook"])
+    rows = _xlsx_rows(workbook)
+    header = list(rows[0].keys())
+    filled = []
+    for row in rows:
+        record = dict(row)
+        record["correct"] = "no"
+        record["notes"] = "Agreed no."
+        filled.append([record[column] for column in header])
+    write_xlsx_sheet(workbook, header, filled, sheet_name="adjudication")
+
+    # The apply CLI recovers the original annotator files from the prior merge.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "human-eval-adjudicate",
+            str(workbook),
+            "--merged_dir",
+            str(merged_dir),
+            "--key",
+            str(key_path),
+        ],
+    )
+    apply_human_adjudication.main()
+
+    merged = json.loads(
+        (merged_dir / "human_eval_merged.json").read_text(encoding="utf-8")
+    )
+    item = merged["items"][0]
+    assert item["human_final_correct"] == "no"
+    assert item["needs_adjudication"] == "no"
+    assert item["adjudication_notes"] == "Agreed no."
+
 

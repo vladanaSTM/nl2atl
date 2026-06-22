@@ -21,7 +21,7 @@ configs + dataset
 | `src/experiment/` | Experiment orchestration and result writing |
 | `src/models/` | Prompt formatting, model loading, generation utilities |
 | `src/evaluation/` | Exact match, LLM judge, judge agreement, accuracy-latency tools |
-| `src/infra/` | JSON/YAML/env helpers and Azure client wrapper |
+| `src/infra/` | JSON/YAML/env helpers, XLSX writer, and Azure client wrapper |
 | `src/api_server.py` | FastAPI generation service |
 
 ## CLI Boundary
@@ -36,6 +36,9 @@ The consolidated `nl2atl` command dispatches to focused modules:
 | `nl2atl aggregate-seeds` | `src/cli/aggregate_seeds.py` |
 | `nl2atl model-efficiency` | `src/cli/run_model_efficiency.py` |
 | `nl2atl generate-eval-reports` | `src/cli/generate_eval_reports.py` |
+| `nl2atl human-eval-sample` | `src/cli/create_human_eval_sample.py` |
+| `nl2atl human-eval-merge` | `src/cli/merge_human_eval_annotations.py` |
+| `nl2atl human-eval-adjudicate` | `src/cli/apply_human_adjudication.py` |
 | `nl2atl genvitamin` | `src/cli/genvitamin.py` |
 
 ## Dataset Boundary

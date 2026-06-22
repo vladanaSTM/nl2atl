@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..evaluation.human_eval_sample import (
     DEFAULT_ANNOTATORS,
-    DEFAULT_AAAI_QUOTAS,
+    DEFAULT_HUMAN_EVAL_QUOTAS,
     DEFAULT_JUDGES,
     build_human_eval_sample,
     regenerate_annotator_workbooks_from_key,
@@ -14,7 +14,7 @@ from ..evaluation.human_eval_sample import (
 
 
 def _parse_quota_override(values: list[str]) -> dict[str, int]:
-    quotas = dict(DEFAULT_AAAI_QUOTAS)
+    quotas = dict(DEFAULT_HUMAN_EVAL_QUOTAS)
     for value in values:
         if "=" not in value:
             raise ValueError(f"Quota override must be STRATUM=COUNT, got: {value}")
@@ -82,12 +82,12 @@ def main():
         "--key",
         type=Path,
         default=None,
-        help="Private key file to use with --regenerate_annotator_workbooks. Defaults to OUTPUT_DIR/aaai_human_eval_sample_key.json.",
+        help="Private key file to use with --regenerate_annotator_workbooks. Defaults to OUTPUT_DIR/human_eval_sample_key.json.",
     )
     args = parser.parse_args()
 
     if args.regenerate_annotator_workbooks:
-        key_path = args.key or args.output_dir / "aaai_human_eval_sample_key.json"
+        key_path = args.key or args.output_dir / "human_eval_sample_key.json"
         files = regenerate_annotator_workbooks_from_key(
             key_path=key_path,
             output_dir=args.output_dir,

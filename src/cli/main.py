@@ -14,6 +14,7 @@ _COMMANDS: Dict[str, Tuple[str, str]] = {
     "judge-agreement": ("src.cli.run_judge_agreement", "main"),
     "human-eval-sample": ("src.cli.create_human_eval_sample", "main"),
     "human-eval-merge": ("src.cli.merge_human_eval_annotations", "main"),
+    "human-eval-adjudicate": ("src.cli.apply_human_adjudication", "main"),
     "model-efficiency": ("src.cli.run_model_efficiency", "main"),
     "generate-eval-reports": ("src.cli.generate_eval_reports", "main"),
 }

@@ -77,24 +77,24 @@ def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
     )
 
     key_payload = json.loads(
-        (output_dir / "aaai_human_eval_sample_key.json").read_text(encoding="utf-8")
+        (output_dir / "human_eval_sample_key.json").read_text(encoding="utf-8")
     )
 
     assert metadata["sample_size"] == 3
     assert len(key_payload["items"]) == 3
     assert "judge_decisions" in key_payload["items"][0]
-    assert (output_dir / "aaai_human_eval_sample_blind.xlsx").exists()
+    assert (output_dir / "human_eval_sample_blind.xlsx").exists()
     assert (output_dir / "annotations" / "annotator_1_blind.xlsx").exists()
     assert (output_dir / "annotations" / "annotator_2_blind.xlsx").exists()
-    assert not (output_dir / "aaai_human_eval_sample_blind.csv").exists()
-    assert not (output_dir / "aaai_disagreement_pool_blind.xlsx").exists()
+    assert not (output_dir / "human_eval_sample_blind.csv").exists()
+    assert not (output_dir / "disagreement_pool_blind.xlsx").exists()
 
-    with zipfile.ZipFile(output_dir / "aaai_human_eval_sample_blind.xlsx") as archive:
+    with zipfile.ZipFile(output_dir / "human_eval_sample_blind.xlsx") as archive:
         sheet_xml = archive.read("xl/worksheets/sheet1.xml").decode("utf-8")
     assert '"yes,no"' in sheet_xml
     assert '"annotator_1,annotator_2"' in sheet_xml
 
-    rows = _xlsx_rows(output_dir / "aaai_human_eval_sample_blind.xlsx")
+    rows = _xlsx_rows(output_dir / "human_eval_sample_blind.xlsx")
     assert rows[0] == [
         "audit_id",
         "input",
@@ -103,6 +103,7 @@ def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
         "prediction",
         "correct",
         "annotator_id",
+        "notes",
     ]
     assert "gold_options" not in rows[0]
     assert rows[1][2]
@@ -133,14 +134,14 @@ def test_build_human_eval_sample_can_write_legacy_formats_and_pool(tmp_path):
     )
 
     blind_payload = json.loads(
-        (output_dir / "aaai_human_eval_sample_blind.json").read_text(encoding="utf-8")
+        (output_dir / "human_eval_sample_blind.json").read_text(encoding="utf-8")
     )
     assert len(blind_payload["annotations"]) == 2
     assert "judge_decisions" not in blind_payload["annotations"][0]
     assert "gold_1" in blind_payload["annotations"][0]
     assert "gold_options" not in blind_payload["annotations"][0]
-    assert (output_dir / "aaai_disagreement_pool_blind.xlsx").exists()
-    assert (output_dir / "aaai_disagreement_pool_blind.csv").exists()
+    assert (output_dir / "disagreement_pool_blind.xlsx").exists()
+    assert (output_dir / "disagreement_pool_blind.csv").exists()
 
 
 def test_build_human_eval_sample_xlsx_can_be_read_by_merge(tmp_path):
@@ -165,9 +166,7 @@ def test_build_human_eval_sample_xlsx_can_be_read_by_merge(tmp_path):
         write_disagreement_pool=False,
     )
 
-    annotations = load_human_annotations(
-        [output_dir / "aaai_human_eval_sample_blind.xlsx"]
-    )
+    annotations = load_human_annotations([output_dir / "human_eval_sample_blind.xlsx"])
     assert set(annotations) == {"HEVAL-0001", "HEVAL-0002"}
 
 
@@ -193,7 +192,7 @@ def test_regenerate_annotator_workbooks_from_key(tmp_path):
     )
 
     files = regenerate_annotator_workbooks_from_key(
-        key_path=output_dir / "aaai_human_eval_sample_key.json",
+        key_path=output_dir / "human_eval_sample_key.json",
         output_dir=output_dir,
         annotator_choices=("annotator_1", "annotator_2"),
         backup_existing=True,

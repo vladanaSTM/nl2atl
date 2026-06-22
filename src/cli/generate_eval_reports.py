@@ -152,7 +152,7 @@ def main() -> None:
             "Path to the adjudicated human-gold file from human-eval-merge. "
             "When present, LLM judges are validated against the human labels. "
             "Defaults to <eval_dir>/human_evaluation/merged/"
-            "aaai_human_eval_merged_adjudicated.json when it exists."
+            "human_eval_merged_adjudicated.json when it exists."
         ),
     )
     parser.add_argument(
@@ -234,7 +234,7 @@ def main() -> None:
                             eval_dir
                             / "human_evaluation"
                             / "merged"
-                            / "aaai_human_eval_merged_adjudicated.json"
+                            / "human_eval_merged_adjudicated.json"
                         )
                     if human_gold_path.exists():
                         human_judges = args.judges
