@@ -41,13 +41,15 @@ uv run nl2atl llm-judge --datasets all
 
 By default, judge runs use GPT-5.2 and DeepSeek V3.2. GPT-4.1 and GPT-5.4 are reserved for generation baselines, so the strongest generator is not also the only evaluator in the main comparison.
 
+Judges may also be self-hosted open-weight models (`provider: huggingface`), selected explicitly, e.g. `--judge_models llama-3.3-70b gemma-2-27b`. These load locally on GPU (intended for SLURM runs); the default judge set stays Azure-only so a local model is never spun up unintentionally.
+
 Useful options:
 
 | Option | Purpose |
 |---|---|
 | `--datasets all` | Evaluate all prediction JSON files under `outputs/model_predictions/` |
 | `--datasets file.json` | Evaluate one prediction file by path, name, or name without `.json` |
-| `--models gpt-5.2` | Select one or more Azure judge models; aliases include `--model`, `--judge_model`, and `--judge_models` |
+| `--models gpt-5.2` | Select one or more judge models, Azure or local (`provider: huggingface`); aliases include `--model`, `--judge_model`, and `--judge_models` |
 | `--no_llm` | Write judged artifacts using exact-match decisions only, without API calls |
 | `--overwrite` | Re-evaluate existing judged files |
 | `--predictions_dir` / `--output_dir` | Override input and output directories |

@@ -174,15 +174,25 @@ def _load_hf_model(
         if model_config.revision:
             model_kwargs["revision"] = model_config.revision
 
-        # Special handling for very large models
+        # Special handling for very large models (>=60B). On a single GPU, pin
+        # the whole model to it; with multiple GPUs (e.g. 2x A100 40GB for a 70B
+        # judge) shard across all of them via accelerate so the model fits.
         if torch.cuda.is_available() and is_large_model(
             model_config.name, cutoff_billion=60
         ):
-            max_gpu_mem_gb = int(
-                torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
-            )
-            model_kwargs["device_map"] = {"": "cuda:0"}
-            model_kwargs["max_memory"] = {"cuda:0": f"{max_gpu_mem_gb}GiB"}
+            n_gpus = torch.cuda.device_count()
+            if n_gpus > 1:
+                model_kwargs["device_map"] = "auto"
+                model_kwargs["max_memory"] = {
+                    i: f"{int(torch.cuda.get_device_properties(i).total_memory / (1024**3) - 2)}GiB"
+                    for i in range(n_gpus)
+                }
+            else:
+                max_gpu_mem_gb = int(
+                    torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
+                )
+                model_kwargs["device_map"] = {"": "cuda:0"}
+                model_kwargs["max_memory"] = {"cuda:0": f"{max_gpu_mem_gb}GiB"}
 
         if use_4bit:
             model_kwargs["quantization_config"] = bnb_config

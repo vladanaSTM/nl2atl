@@ -167,16 +167,42 @@ def test_resolve_judge_models_keeps_generation_baselines_out_of_defaults(tmp_pat
     assert [model.short_name for _, model in judges] == ["gpt-5.2", "ds-v3.2"]
 
 
-def test_resolve_judge_models_rejects_non_azure_models(tmp_path):
+def test_resolve_judge_models_accepts_huggingface_models(tmp_path):
     models_path = tmp_path / "models.yaml"
     models_path.write_text(
         json.dumps(
             {
                 "models": {
-                    "qwen-3b": {
-                        "name": "Qwen/Qwen2.5-3B-Instruct",
-                        "short_name": "qwen-3b",
+                    "gemma-2-27b": {
+                        "name": "google/gemma-2-27b-it",
+                        "short_name": "gemma-2-27b",
                         "provider": "huggingface",
+                        "generation_enabled": False,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    judges = resolve_judge_models(
+        models_path, judge_models=["gemma-2-27b"], judge_model=None
+    )
+
+    assert [key for key, _ in judges] == ["gemma-2-27b"]
+    assert judges[0][1].provider == "huggingface"
+
+
+def test_resolve_judge_models_rejects_unknown_provider(tmp_path):
+    models_path = tmp_path / "models.yaml"
+    models_path.write_text(
+        json.dumps(
+            {
+                "models": {
+                    "weird": {
+                        "name": "some/model",
+                        "short_name": "weird",
+                        "provider": "openai",
                     }
                 }
             }
@@ -185,11 +211,91 @@ def test_resolve_judge_models_rejects_non_azure_models(tmp_path):
     )
 
     try:
-        resolve_judge_models(models_path, judge_models=["qwen-3b"], judge_model=None)
+        resolve_judge_models(models_path, judge_models=["weird"], judge_model=None)
     except ValueError as exc:
-        assert "provider='azure'" in str(exc)
+        assert "azure" in str(exc) and "huggingface" in str(exc)
     else:
-        raise AssertionError("Expected non-Azure judge model to be rejected")
+        raise AssertionError("Expected unknown-provider judge model to be rejected")
+
+
+def test_llm_judge_dispatches_to_local_hf_client(monkeypatch):
+    """A huggingface judge uses the local HF client, not Azure."""
+    import src.evaluation.llm_judge.pipeline as pipeline_mod
+    from src.config import ModelConfig
+
+    captured = {}
+
+    class StubHFClient:
+        def __init__(self, model_config):
+            captured["model_config"] = model_config
+
+        def complete(self, prompt, max_new_tokens=256):
+            return '{"correct": "yes", "reasoning": "ok"}'
+
+        def complete_batch(self, prompts, max_new_tokens=256):
+            return [self.complete(p) for p in prompts]
+
+    monkeypatch.setattr(pipeline_mod, "HFJudgeClient", StubHFClient)
+
+    mc = ModelConfig(
+        name="google/gemma-2-27b-it",
+        short_name="gemma-2-27b",
+        provider="huggingface",
+    )
+    judge = LLMJudge(
+        judge_model="gemma-2-27b",
+        provider="huggingface",
+        model_config=mc,
+    )
+
+    assert isinstance(judge.client, StubHFClient)
+    assert captured["model_config"] is mc
+    decision = judge.judge("input", ["gold"], "pred")
+    assert decision.correct == "yes"
+
+
+def test_llm_judge_local_hf_requires_model_config():
+    try:
+        LLMJudge(judge_model="gemma-2-27b", provider="huggingface", model_config=None)
+    except ValueError as exc:
+        assert "model_config" in str(exc)
+    else:
+        raise AssertionError("Expected huggingface judge without model_config to fail")
+
+
+def test_hf_judge_client_applies_chat_template():
+    from src.evaluation.llm_judge.client import HFJudgeClient
+
+    class FakeTokenizer:
+        chat_template = "dummy"
+
+        def apply_chat_template(
+            self, messages, tokenize=False, add_generation_prompt=False
+        ):
+            assert tokenize is False
+            assert add_generation_prompt is True
+            content = messages[0]["content"]
+            return f"<user>{content}</user><assistant>"
+
+    client = HFJudgeClient.__new__(HFJudgeClient)  # bypass real model loading
+    client.tokenizer = FakeTokenizer()
+
+    assert client._apply_chat_template("PROMPT") == "<user>PROMPT</user><assistant>"
+
+
+def test_hf_judge_client_falls_back_without_chat_template():
+    from src.evaluation.llm_judge.client import HFJudgeClient
+
+    class BaseTokenizer:
+        chat_template = None
+
+        def apply_chat_template(self, *args, **kwargs):
+            raise AssertionError("should not be called when no template is set")
+
+    client = HFJudgeClient.__new__(HFJudgeClient)  # bypass real model loading
+    client.tokenizer = BaseTokenizer()
+
+    assert client._apply_chat_template("PROMPT") == "PROMPT"
 
 
 def test_evaluate_prediction_file_no_llm(tmp_path):
@@ -396,9 +502,7 @@ def test_evaluate_prediction_file_dedups_identical_predictions(tmp_path):
     judge.no_llm = False
     judge.client = _CountingClient()
 
-    rows, stats = evaluate_prediction_file(
-        Path(prediction_path), judge, no_llm=False
-    )
+    rows, stats = evaluate_prediction_file(Path(prediction_path), judge, no_llm=False)
 
     assert stats["llm_calls"] == 2
     assert stats["cached"] == 1
@@ -406,4 +510,3 @@ def test_evaluate_prediction_file_dedups_identical_predictions(tmp_path):
     assert rows[0]["from_cache"] is False
     assert rows[1]["from_cache"] is True
     assert rows[0]["correct"] == rows[1]["correct"] == "yes"
-

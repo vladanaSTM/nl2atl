@@ -77,9 +77,11 @@ def resolve_judge_models(
     judge_models: Optional[list],
     judge_model: Optional[str],
 ) -> list:
-    """Resolve Azure judge models from config or fall back to allowed defaults.
+    """Resolve judge models from config or fall back to allowed defaults.
 
-    Allowed default judges: `gpt-5.2`, `DeepSeek-V3.2`.
+    Default judges: `gpt-5.2`, `DeepSeek-V3.2` (Azure). Explicitly selected
+    judges may also use provider="huggingface" for self-hosted local judges
+    (e.g. Llama/Gemma run via SLURM); other providers are rejected.
     If a models config exists and contains matching keys those entries are used;
     otherwise a simple `ModelConfig` with provider="azure" is returned for
     the requested names.
@@ -152,10 +154,11 @@ def resolve_judge_models(
         if not isinstance(data, dict):
             continue
         model_config = ModelConfig(**data)
-        if model_config.provider.lower() != "azure":
+        provider = model_config.provider.lower()
+        if provider not in ("azure", "huggingface"):
             raise ValueError(
                 f"Judge model '{key}' uses provider '{model_config.provider}'. "
-                "LLM judge models must use provider='azure'."
+                "Judge models must use provider 'azure' or 'huggingface'."
             )
         resolved.append((key, model_config))
 
