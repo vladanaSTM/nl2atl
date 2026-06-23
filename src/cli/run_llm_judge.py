@@ -5,6 +5,9 @@ Run the ATL LLM-as-a-judge evaluator over prediction files.
 
 import argparse
 import hashlib
+import shlex
+import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -19,6 +22,8 @@ from ..evaluation.llm_judge import (
     evaluate_prediction_file,
 )
 from ..models.utils import resolve_model_key
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _sha256_file(path: Path) -> Optional[str]:
@@ -215,6 +220,124 @@ def extract_evaluated_rows(evaluated_data: object) -> list:
     return []
 
 
+def _render_judge_sbatch(args, repo_root, judge_key, model_config, gres):
+    """Render an sbatch script that judges all prediction files with one local judge."""
+    logs_dir = args.logs_dir
+    job_name = f"{args.job_name}-{model_config.short_name}"
+    output_path = args.output or f"{logs_dir}/%x_%j.out"
+    error_path = args.error or f"{logs_dir}/%x_%j.err"
+
+    inner = [
+        "-m",
+        "src.cli.run_llm_judge",
+        "--judge_models",
+        judge_key,
+        "--datasets",
+        *args.datasets,
+        "--models_config",
+        args.models_config,
+        "--predictions_dir",
+        args.predictions_dir,
+        "--output_dir",
+        args.output_dir,
+    ]
+    if args.overwrite:
+        inner.append("--overwrite")
+    if args.no_llm:
+        inner.append("--no_llm")
+    command = '"$PYTHON_BIN" ' + " ".join(shlex.quote(str(a)) for a in inner)
+
+    lines = [
+        "#!/usr/bin/env bash",
+        f"#SBATCH --job-name={job_name}",
+        f"#SBATCH --partition={args.partition}",
+        "#SBATCH --nodes=1",
+        f"#SBATCH --gres={gres}",
+        f"#SBATCH --cpus-per-task={args.cpus_per_task}",
+        f"#SBATCH --mem={args.mem}",
+        f"#SBATCH --time={args.time_limit}",
+        f"#SBATCH --output={output_path}",
+        f"#SBATCH --error={error_path}",
+    ]
+    for extra in args.sbatch_arg:
+        extra = extra.strip()
+        if not extra:
+            continue
+        lines.append(extra if extra.startswith("#SBATCH") else f"#SBATCH {extra}")
+
+    lines.extend(
+        [
+            "",
+            "set -euo pipefail",
+            f"mkdir -p {shlex.quote(logs_dir)}",
+            f"PYTHON_BIN=${{PYTHON_BIN:-{shlex.quote(args.python_bin)}}}",
+            f"REPO_ROOT=${{REPO_ROOT:-{shlex.quote(str(repo_root))}}}",
+            'export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"',
+            "export PYTHONUNBUFFERED=1",
+            'cd "$REPO_ROOT"',
+        ]
+    )
+    lines.extend(args.env_setup)
+    lines.extend(["", command, ""])
+    return "\n".join(lines)
+
+
+def _submit_judge_slurm(args, judge_entries):
+    """Generate and submit one GPU SLURM job per local (huggingface) judge.
+
+    Each job loads its model once and judges every prediction file, so the work
+    runs unattended. The >=60B judges default to two GPUs (e.g. a 70B sharded
+    across 2x A100 40GB); smaller judges default to one. Azure judges need no
+    GPU and are skipped.
+    """
+    repo_root = Path(args.repo_root).resolve()
+    local = [(k, mc) for k, mc in judge_entries if mc.provider.lower() == "huggingface"]
+    azure = [mc.short_name for _, mc in judge_entries if mc.provider.lower() == "azure"]
+    if azure:
+        print(
+            f"Note: Azure judges ({', '.join(azure)}) need no GPU; run them "
+            "directly without --slurm. Skipping them from SLURM submission."
+        )
+    if not local:
+        raise ValueError("No local (huggingface) judges to submit as SLURM jobs.")
+
+    script_dir = Path(args.script_dir)
+    script_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    for judge_key, model_config in local:
+        gres = args.gres or ("gpu:2" if (model_config.params_b or 0) >= 60 else "gpu:1")
+        script = _render_judge_sbatch(args, repo_root, judge_key, model_config, gres)
+
+        if args.dry_run:
+            print(script)
+            print("# ---")
+            continue
+
+        script_path = script_dir / f"judge_{model_config.short_name}_{stamp}.sbatch"
+        script_path.write_text(script, encoding="utf-8")
+
+        if args.no_submit:
+            print(
+                f"Wrote SLURM script for judge '{model_config.short_name}' "
+                f"to {script_path} (gres={gres})"
+            )
+            continue
+
+        try:
+            result = subprocess.run(
+                ["sbatch", str(script_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise SystemExit("sbatch not found. Are you on a SLURM cluster?") from exc
+
+        print(result.stdout.strip() or f"Submitted judge '{model_config.short_name}'.")
+        print(f"  script: {script_path} (gres={gres})")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -264,16 +387,43 @@ def main():
         action="store_true",
         help="Also write the legacy agreement_report.ipynb notebook.",
     )
+
+    # SLURM submission (mirrors `nl2atl run --slurm`): generate and submit one
+    # GPU job per local judge so judging runs unattended on the cluster.
+    parser.add_argument(
+        "--slurm",
+        action="store_true",
+        help="Generate and submit one SLURM GPU job per local judge (unattended).",
+    )
+    parser.add_argument("--partition", default="A100")
+    parser.add_argument(
+        "--gres",
+        default=None,
+        help="Override --gres for all judge jobs (default: gpu:2 for >=60B judges, else gpu:1).",
+    )
+    parser.add_argument("--cpus-per-task", "--cpus_per_task", type=int, default=8)
+    parser.add_argument("--mem", default="64G")
+    parser.add_argument("--time", dest="time_limit", default="04:00:00")
+    parser.add_argument("--job-name", "--job_name", default="nl2atl-judge")
+    parser.add_argument("--logs-dir", "--logs_dir", default="logs")
+    parser.add_argument("--output", default=None)
+    parser.add_argument("--error", default=None)
+    parser.add_argument("--python-bin", "--python_bin", default=sys.executable)
+    parser.add_argument("--repo-root", "--repo_root", default=str(REPO_ROOT))
+    parser.add_argument("--script-dir", "--script_dir", default="outputs/manifests")
+    parser.add_argument("--sbatch-arg", "--sbatch_arg", action="append", default=[])
+    parser.add_argument(
+        "--env-setup",
+        "--env_setup",
+        action="append",
+        default=[],
+        help="Shell line inserted into the SLURM script before execution.",
+    )
+    parser.add_argument("--dry-run", "--dry_run", action="store_true")
+    parser.add_argument("--no-submit", "--no_submit", action="store_true")
     args = parser.parse_args()
 
     # Note: --models / --judge_model / --judge_models now map to `args.judge_models`.
-
-    predictions_dir = Path(args.predictions_dir)
-    output_dir = Path(args.output_dir)
-
-    prediction_files = resolve_prediction_files(predictions_dir, args.datasets)
-    if not prediction_files:
-        raise ValueError("No prediction files found to evaluate.")
 
     judge_entries = resolve_judge_models(
         Path(args.models_config),
@@ -282,6 +432,17 @@ def main():
     )
     if not judge_entries:
         raise ValueError("No judge models resolved from config.")
+
+    if args.slurm:
+        _submit_judge_slurm(args, judge_entries)
+        return
+
+    predictions_dir = Path(args.predictions_dir)
+    output_dir = Path(args.output_dir)
+
+    prediction_files = resolve_prediction_files(predictions_dir, args.datasets)
+    if not prediction_files:
+        raise ValueError("No prediction files found to evaluate.")
 
     for _, model_config in judge_entries:
         judge_name = model_config.short_name

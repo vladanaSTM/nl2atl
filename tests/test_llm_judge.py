@@ -298,6 +298,73 @@ def test_hf_judge_client_falls_back_without_chat_template():
     assert client._apply_chat_template("PROMPT") == "PROMPT"
 
 
+def test_judge_slurm_renders_per_judge_gpu_scripts(tmp_path):
+    """`--slurm` writes one sbatch per local judge, 2 GPUs for >=60B, 1 otherwise."""
+    import argparse
+
+    from src.cli.run_llm_judge import _submit_judge_slurm
+    from src.config import ModelConfig
+
+    args = argparse.Namespace(
+        datasets=["all"],
+        models_config="configs/models.yaml",
+        predictions_dir="outputs/model_predictions",
+        output_dir="outputs/LLM-evaluation",
+        overwrite=False,
+        no_llm=False,
+        partition="A100",
+        gres=None,
+        cpus_per_task=8,
+        mem="64G",
+        time_limit="04:00:00",
+        job_name="nl2atl-judge",
+        logs_dir="logs",
+        output=None,
+        error=None,
+        python_bin="/usr/bin/python3",
+        repo_root=str(tmp_path),
+        script_dir=str(tmp_path / "scripts"),
+        sbatch_arg=[],
+        env_setup=["module load cuda"],
+        dry_run=False,
+        no_submit=True,
+    )
+    judges = [
+        (
+            "llama-3.3-70b",
+            ModelConfig(
+                name="meta-llama/Llama-3.3-70B-Instruct",
+                short_name="llama-3.3-70b",
+                provider="huggingface",
+                params_b=70,
+            ),
+        ),
+        (
+            "gemma-2-27b",
+            ModelConfig(
+                name="google/gemma-2-27b-it",
+                short_name="gemma-2-27b",
+                provider="huggingface",
+                params_b=27,
+            ),
+        ),
+    ]
+
+    _submit_judge_slurm(args, judges)
+
+    scripts = sorted((tmp_path / "scripts").glob("*.sbatch"))
+    assert len(scripts) == 2
+    llama = next(p for p in scripts if "llama" in p.name).read_text()
+    gemma = next(p for p in scripts if "gemma" in p.name).read_text()
+
+    assert "#SBATCH --gres=gpu:2" in llama  # 70B shards across two GPUs
+    assert "#SBATCH --gres=gpu:1" in gemma  # 27B fits one GPU
+    assert "-m src.cli.run_llm_judge" in llama
+    assert "--judge_models llama-3.3-70b" in llama
+    assert "module load cuda" in llama
+    assert "--slurm" not in llama  # the inner job must not recurse
+
+
 def test_evaluate_prediction_file_no_llm(tmp_path):
     prediction_path = tmp_path / "pred.json"
     payload = {

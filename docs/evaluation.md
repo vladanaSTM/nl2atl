@@ -53,6 +53,18 @@ Useful options:
 | `--no_llm` | Write judged artifacts using exact-match decisions only, without API calls |
 | `--overwrite` | Re-evaluate existing judged files |
 | `--predictions_dir` / `--output_dir` | Override input and output directories |
+| `--slurm` | Generate and submit one unattended GPU job per local judge (see below) |
+
+### Running local judges on SLURM
+
+Local judges need a GPU, so on a cluster submit them as batch jobs rather than running them in your (CPU) session. `--slurm` mirrors `nl2atl run --slurm`: it writes one sbatch script per local judge under `outputs/manifests/` and submits it, so judging runs while you are away.
+
+```bash
+# From the login node; generates + submits one GPU job per judge.
+nl2atl llm-judge --slurm --judge_models llama-3.3-70b gemma-2-27b --datasets all
+```
+
+Each job loads its model once and judges every prediction file. Judges of 60B+ parameters default to two GPUs (e.g. a 70B sharded across 2× A100 40GB); smaller judges default to one. Override placement with `--gres`, `--partition`, `--mem`, `--time`, and inject environment setup (module loads, venv activation) with repeated `--env-setup` lines. Use `--no-submit` to write the scripts without submitting, or `--dry-run` to print them. Azure judges are skipped from SLURM (they need no GPU). Running a local judge without a visible GPU fails fast with a clear message.
 
 The judge sees the natural-language input, the model prediction, and all accepted gold formulas. It returns:
 

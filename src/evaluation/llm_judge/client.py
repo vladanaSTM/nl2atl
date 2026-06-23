@@ -47,6 +47,14 @@ class HFJudgeClient:
 
     def __init__(self, model_config: "ModelConfig"):
         from ...models.registry import load_model  # deferred heavy import
+        import torch
+
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"Local judge '{model_config.short_name}' needs a CUDA GPU, but none "
+                "is visible. Request one on the cluster (e.g. --gres=gpu:1, or use "
+                "`nl2atl llm-judge --slurm`); 4-bit judges cannot run on CPU."
+            )
 
         self.model_config = model_config
         self.model, self.tokenizer = load_model(model_config)
