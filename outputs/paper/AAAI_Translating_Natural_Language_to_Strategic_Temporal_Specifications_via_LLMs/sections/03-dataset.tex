@@ -1,0 +1,116 @@
+\section{Dataset}
+\label{sec:dataset}
+The dataset contains a balanced distribution of 1100 elements comprehensing simple sentences, namely those most syntactically aligned with well-formed formulas in ATL/ATL$^\ast$, and sentences exhibiting the four targeted ambiguity types, which we briefly summarize here. Right/Left Dislocation occurs when a constituent (argument or adjunct) appears outside its clause boundaries, either preceding or following it. Verb Phrase (VP) Ellipsis is a phenomenon in which a verb phrase is omitted when its meaning is recoverable from context, typically because the elided material mirrors a verb phrase introduced earlier in the discourse. Right Node Raising (RNR) is a coordination construction in which a shared argument appears at the right periphery. Quantifier Scope Ambiguity (QSA) arises when a sentence contains multiple quantifiers whose relative scope is not uniquely determined by the surface syntax, yielding two or more distinct readings that differ in the logical relationships between the quantified expressions. The dataset constitutes a gold standard resource, that is, a manually annotated benchmark validated by human experts and intended as a reference for evaluating automated systems. It has been reviewed and validated by three annotators with expertise in formal verification and formal logic for strategic reasoning in multi-agent systems. The complete annotation process and inter-annotator discussion for each dataset entry are documented in the supplementary materials. Reviewers highlighted potential issues and abstained from commenting on elements they deemed unproblematic; such abstentions were interpreted as implicit acceptance rather than missing judgments. Validation decisions were aggregated via majority vote, and relative rationales were explicitly recorded. 
+
+\paragraph{Dataset construction, balancing, and ground truth.}
+Our 1100-element dataset was hand-written by two experts in formal verification and the temporal logics for strategic reasoning in multi-agent systems, who manually authored each natural-language specification together with its corresponding ATL or ATL$^\ast$ formalization. All formulae in the dataset are well-formed ATL$^\ast$~ formulae. Since ATL is a syntactic fragment of ATL$^\ast$~, formulae that happen to be expressible in ATL are included as special cases without separate classification. The instances cover a broad range of multi-agent system scenarios, including settings in which goals are achieved by a single strategic agent, by explicitly defined coalitions, or by coordinated behaviour among multiple agents. The dataset was designed to be approximately balanced with respect to the temporal operators appearing in the original definition of ATL and ATL$^\ast$~\cite{alur2002alternating}. In particular, the final distribution of operator occurrences is: $X$: 590, $G$: 590, $F$: 598, $U$: 586. Moreover, we deliberately varied the natural-language realizations of each temporal operator in order to reduce surface-level template bias. For instance, the next operator $X$ was expressed through formulations such as ``at the next step'' and ``in the immediately following state''; eventuality $F$ through expressions such as ``sooner or later'' and ``in due course''; until $U$ through expressions such as ``up to the moment when'' and ``before''; and globally $G$ through expressions such as ``at all times'' and ``in every state''. In addition to temporal balancing, the dataset explicitly targets the aforementioned five linguistic ambiguities. These ambiguity types were introduced according to an approximately uniform distribution within the ambiguous subset, with each type accounting for about 20\% of the targeted ambiguous examples. Right and left dislocation were used to test whether the model can correctly recover the syntactic and semantic role of displaced constituents. VP ellipsis was used to test whether omitted predicates can be reconstructed from the preceding clause. RNR was introduced to test whether the model can recover a shared right-peripheral argument in a coordinate structure, as in cases where two agents differ in their strategic ability but share the same formal objective. QSA was used to test whether the model can distinguish distributive readings from collective coalition-based readings. For this latter class, whenever two interpretations are genuinely admissible, the ground truth includes two formal outputs, corresponding to the distributive and collective readings. The dataset is provided in \textit{JSON} format, following common practice in recent NLP and AI dataset releases, where JSON or JSONL is used to serialize structured instances and associated metadata in a portable and easily processable form~\cite{wang2025verifiable}. Each dataset element is represented as a JSON object containing the natural-language \textit{input} and an \textit{outputs} field. The latter contains the correct\textit{formula} translation of the natural language sentence, encoding the intended strategic and temporal meaning, and a \textit{formula\_tree}, encoding its corresponding hierarchical structure. In particular, for QSA, the same field contains multiple formula tree pairs, one for each admissible interpretation. All formulae were manually curated and checked to serve as the ground truth for evaluating natural-language-to-ATL/ATL$^\ast$ translation. After describing the structure of the dataset, we report two illustrative ambiguous instances. Dataset element~\ref{ds:vp_ellipsis_example} shows a case of VP ellipsis in a robotic system specification. Here, the phrase ``the rover can too'' does not explicitly repeat the predicate introduced in the first clause. A correct translation therefore requires reconstructing the omitted strategic-temporal content and assigning it to the second agent as well. Dataset element~\ref{ds:qsa_example} shows a case of quantifier scope ambiguity (QSA), the most challenging family: the universally quantified subject ``every plane'' licenses two distinct admissible readings---a \emph{distributive} one, in which each agent individually enforces the objective, and a \emph{collective} one, in which the agents enforce it jointly as a coalition. Both readings are stored as gold, so a correct translation must emit both, since neither alone captures the intended meaning.
+
+\begin{dataset}[t]
+\caption{VP ellipsis ambiguity example}
+\label{ds:vp_ellipsis_example}
+\begin{algorithmic}[1]
+\STATE \textbf{ID:} \texttt{ex331}
+\STATE \textbf{Input (Natural Language):}
+\STATE \quad \textit{``The drone can guarantee that it will return to base sooner or later, and the rover can too.''}
+
+\STATE \textbf{Outputs:}
+\STATE \quad
+\begin{minipage}[t]{0.92\linewidth}
+\textbf{Formula:}
+\[
+\langle\!\langle \text{Drone} \rangle\!\rangle
+F\,\text{at\_base}
+\ \wedge\
+\langle\!\langle \text{Rover} \rangle\!\rangle
+F\,\text{at\_base}
+\]
+\end{minipage}
+
+\STATE \quad
+\begin{minipage}[t]{0.92\linewidth}
+\textbf{Formula tree:}
+\[
+\begin{array}{l}
+\wedge
+\\
+\quad \langle\!\langle \text{Drone} \rangle\!\rangle
+\\
+\quad\quad F
+\\
+\quad\quad\quad \text{at\_base}
+\\[1mm]
+\quad \langle\!\langle \text{Rover} \rangle\!\rangle
+\\
+\quad\quad F
+\\
+\quad\quad\quad \text{at\_base}
+\end{array}
+\]
+\end{minipage}
+\end{algorithmic}
+\end{dataset}
+
+\begin{dataset}[t]
+\caption{Quantifier scope ambiguity (QSA) example with two jointly required readings}
+\label{ds:qsa_example}
+\begin{algorithmic}[1]
+\STATE \textbf{ID:} \texttt{ex336}
+\STATE \textbf{Input (Natural Language):}
+\STATE \quad \textit{``Every plane can prevent a collision.''}
+
+\STATE \textbf{Outputs} (both readings are jointly required):
+\STATE \quad
+\begin{minipage}[t]{0.92\linewidth}
+\textbf{Distributive reading} (each agent individually):
+\[
+\begin{array}{l}
+\langle\!\langle \text{Plane}_1 \rangle\!\rangle G\,\neg\text{collision} \ \wedge\\
+\langle\!\langle \text{Plane}_2 \rangle\!\rangle G\,\neg\text{collision} \ \wedge\\
+\langle\!\langle \text{Plane}_3 \rangle\!\rangle G\,\neg\text{collision}
+\end{array}
+\]
+\end{minipage}
+
+\STATE \quad
+\begin{minipage}[t]{0.92\linewidth}
+\textbf{Collective reading} (the agents as a coalition):
+\[
+\langle\!\langle \text{Plane}_1,\text{Plane}_2,\text{Plane}_3 \rangle\!\rangle G\,\neg\text{collision}
+\]
+\end{minipage}
+\end{algorithmic}
+\end{dataset}
+
+
+\paragraph{Formula-tree annotations.}
+In addition to the natural-language input and the target ATL/ATL* specification, each dataset item is enriched with a formula-tree annotation. Here, the formula is decomposed into a hierarchical structure in which leaves correspond to atomic propositions, while internal nodes correspond to Boolean or strategic-temporal operators. The root of the tree identifies the outermost operator, and each subtree represents a proper subformula together with its local syntactic scope. This representation is important as it makes the structure of the specification explicit, disambiguating the scope of logical connectives and temporal modalities. An example of this hierarchical organization is given in the dataset element~\ref{ds:vp_ellipsis_example}.
+
+\begin{comment}
+    \begin{figure}[t]
+\centering
+\begin{forest}
+for tree={
+    draw=none,
+    edge={-},
+    parent anchor=south,
+    child anchor=north,
+    align=center,
+    base=bottom,
+    inner sep=1pt,
+    l sep=1mm,
+    s sep=1mm,
+    font=\small
+}
+[$\langle\!\langle \text{Machine} \rangle\!\rangle$
+    [$G$
+        [$\rightarrow$
+            [$paid$]
+            [$ticket\_printed$]
+        ]
+    ]
+]
+\end{forest}
+\caption{Formula tree for the ATL specification $\langle\!\langle \text{Machine} \rangle\!\rangle G(paid \rightarrow ticket\_printed)$.}
+\label{fig:atl_formula_tree}
+\end{figure}
+\end{comment}
