@@ -174,25 +174,24 @@ def _load_hf_model(
         if model_config.revision:
             model_kwargs["revision"] = model_config.revision
 
-        # Special handling for very large models (>=60B). On a single GPU, pin
-        # the whole model to it; with multiple GPUs (e.g. 2x A100 40GB for a 70B
-        # judge) shard across all of them via accelerate so the model fits.
+        # Very large models (>=60B) must shard across several GPUs. Keep the
+        # plain device_map="auto" set above: accelerate then BALANCES the layers
+        # across every visible GPU, which keeps the transformers parallel weight
+        # loader's transient bf16 materialization bounded per GPU and lets 4-bit
+        # quantization apply. Do NOT set a near-full per-GPU max_memory here: a
+        # high cap lets accelerate place the whole 4-bit model on GPU 0, whose
+        # bf16 load transients then OOM mid-load (observed on 2x A100 40GB for
+        # Llama-3.3-70B, and on 1x A100 40GB for Gemma-2-27B).
         if torch.cuda.is_available() and is_large_model(
             model_config.name, cutoff_billion=60
         ):
             n_gpus = torch.cuda.device_count()
-            if n_gpus > 1:
-                model_kwargs["device_map"] = "auto"
-                model_kwargs["max_memory"] = {
-                    i: f"{int(torch.cuda.get_device_properties(i).total_memory / (1024**3) - 2)}GiB"
-                    for i in range(n_gpus)
-                }
-            else:
-                max_gpu_mem_gb = int(
-                    torch.cuda.get_device_properties(0).total_memory / (1024**3) - 2
+            if n_gpus <= 1:
+                raise RuntimeError(
+                    f"Model '{model_config.name}' has >=60B parameters and cannot "
+                    f"load on a single GPU ({n_gpus} visible). Request multiple "
+                    "GPUs (e.g. --gres=gpu:3) so it can shard across them."
                 )
-                model_kwargs["device_map"] = {"": "cuda:0"}
-                model_kwargs["max_memory"] = {"cuda:0": f"{max_gpu_mem_gb}GiB"}
 
         if use_4bit:
             model_kwargs["quantization_config"] = bnb_config

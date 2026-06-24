@@ -299,7 +299,7 @@ def test_hf_judge_client_falls_back_without_chat_template():
 
 
 def test_judge_slurm_renders_per_judge_gpu_scripts(tmp_path):
-    """`--slurm` writes one sbatch per local judge, 2 GPUs for >=60B, 1 otherwise."""
+    """`--slurm` writes one sbatch per local judge: 3 GPUs for >=60B, 2 for >=20B."""
     import argparse
 
     from src.cli.run_llm_judge import _submit_judge_slurm
@@ -357,8 +357,10 @@ def test_judge_slurm_renders_per_judge_gpu_scripts(tmp_path):
     llama = next(p for p in scripts if "llama" in p.name).read_text()
     gemma = next(p for p in scripts if "gemma" in p.name).read_text()
 
-    assert "#SBATCH --gres=gpu:2" in llama  # 70B shards across two GPUs
-    assert "#SBATCH --gres=gpu:1" in gemma  # 27B fits one GPU
+    assert "#SBATCH --gres=gpu:3" in llama  # 70B 4-bit shards across three clean GPUs
+    assert "#SBATCH --gres=gpu:2" in gemma  # 27B OOMs on one GPU mid-load; needs two
+    assert "export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True" in llama
+    assert "export HF_DEACTIVATE_ASYNC_LOAD=1" in llama  # sequential low-peak load
     assert "-m src.cli.run_llm_judge" in llama
     assert "--judge_models llama-3.3-70b" in llama
     assert "module load cuda" in llama

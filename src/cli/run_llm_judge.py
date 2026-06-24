@@ -274,6 +274,15 @@ def _render_judge_sbatch(args, repo_root, judge_key, model_config, gres):
             f"REPO_ROOT=${{REPO_ROOT:-{shlex.quote(str(repo_root))}}}",
             'export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"',
             "export PYTHONUNBUFFERED=1",
+            # Reduce CUDA allocator fragmentation when sharding large judges
+            # across multiple GPUs during the transformers parallel weight load.
+            "export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True",
+            # Load weights sequentially instead of prefetching every shard with a
+            # thread pool. The async loader materializes a GPU's whole shard in
+            # bf16 before compacting to 4-bit (~2*params_b/N GiB peak) and OOMs a
+            # 70B mid-load; sequential load quantizes one param at a time so the
+            # peak stays near the 4-bit footprint (~params_b/2/N GiB).
+            "export HF_DEACTIVATE_ASYNC_LOAD=1",
             'cd "$REPO_ROOT"',
         ]
     )
@@ -282,13 +291,36 @@ def _render_judge_sbatch(args, repo_root, judge_key, model_config, gres):
     return "\n".join(lines)
 
 
+def _judge_gpu_count(params_b: Optional[float]) -> int:
+    """Number of GPUs a local judge needs to load in 4-bit on A100 40GB cards.
+
+    The sbatch template exports ``HF_DEACTIVATE_ASYNC_LOAD=1`` so the transformers
+    loader quantizes one parameter at a time instead of prefetching a GPU's whole
+    shard in bf16. The transient peak per GPU is then close to the final 4-bit
+    footprint (~``params_b / 2 / num_gpus`` GiB) rather than the bf16 shard, so a
+    judge needs only enough GPUs to hold its 4-bit weights plus inference slack:
+
+      * 27B -> ~13.5 GiB / 2 = ~7 GiB/GPU  (verified: loads, judges fine)
+      * 70B -> ~35 GiB / 3 = ~12 GiB/GPU   (fits a clean 3-GPU standard node)
+
+    Three GPUs keeps the 70B on the cleanly-isolated standard A100 nodes; the
+    shared 8-GPU node oversubscribes cards and its co-tenants steal headroom.
+    """
+    p = params_b or 0
+    if p >= 60:
+        return 3
+    if p >= 20:
+        return 2
+    return 1
+
+
 def _submit_judge_slurm(args, judge_entries):
     """Generate and submit one GPU SLURM job per local (huggingface) judge.
 
     Each job loads its model once and judges every prediction file, so the work
-    runs unattended. The >=60B judges default to two GPUs (e.g. a 70B sharded
-    across 2x A100 40GB); smaller judges default to one. Azure judges need no
-    GPU and are skipped.
+    runs unattended. GPU count scales with judge size so the model can shard and
+    load in 4-bit without OOMing mid-load: 70B-class uses three GPUs, 27B-class
+    two, smaller judges one. Azure judges need no GPU and are skipped.
     """
     repo_root = Path(args.repo_root).resolve()
     local = [(k, mc) for k, mc in judge_entries if mc.provider.lower() == "huggingface"]
@@ -306,7 +338,7 @@ def _submit_judge_slurm(args, judge_entries):
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
     for judge_key, model_config in local:
-        gres = args.gres or ("gpu:2" if (model_config.params_b or 0) >= 60 else "gpu:1")
+        gres = args.gres or f"gpu:{_judge_gpu_count(model_config.params_b)}"
         script = _render_judge_sbatch(args, repo_root, judge_key, model_config, gres)
 
         if args.dry_run:
@@ -399,7 +431,10 @@ def main():
     parser.add_argument(
         "--gres",
         default=None,
-        help="Override --gres for all judge jobs (default: gpu:2 for >=60B judges, else gpu:1).",
+        help=(
+            "Override --gres for all judge jobs (default scales with size: "
+            "gpu:3 for >=60B, gpu:2 for >=20B, else gpu:1)."
+        ),
     )
     parser.add_argument("--cpus-per-task", "--cpus_per_task", type=int, default=8)
     parser.add_argument("--mem", default="64G")
