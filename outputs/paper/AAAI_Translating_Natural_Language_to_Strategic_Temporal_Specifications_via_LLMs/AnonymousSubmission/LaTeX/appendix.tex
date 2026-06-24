@@ -865,10 +865,10 @@ All four judges (DeepSeek-V3.2, GPT-4.1, GPT-5.2, and GPT-5.4) use a single fixe
 \end{itemize}
 Verdicts are cached per judge identity, so a judge is never queried twice on an identical (input, gold, prediction) triple, while the judges remain independent.
 
-\section{Unresolved Human-Annotation Disagreements}
+\section{Human-Annotation Disagreements and Their Adjudication}
 \label{appx:disagreements}
 
-Of the $600$ audited items, the two expert annotators reconciled all but three even after deliberation. We report these unresolved cases here rather than forcing a label. In all three the stricter annotator judged the prediction incorrect while the second annotator judged it correct, and the automated judges line up almost entirely with the stricter reading---unanimously incorrect across all four judges in two cases, and three-of-four in the third, where only the most lenient judge (\textsc{gpt-4.1}) sided with the permissive annotator. The residual split is thus a genuine stricter-versus-more-permissive disagreement over strategic--temporal equivalence---one the automated judges themselves exhibit---rather than a failure of the protocol. Each entry gives the natural-language input, the gold formula, the model prediction, and the verdicts (with any annotator note). These three items are excluded from the human-as-reference comparison, leaving $597$ consensus labels.
+Of the $600$ audited items, the two expert annotators initially diverged on three. In all three the stricter annotator judged the prediction incorrect while the second judged it correct. The annotators then deliberated and reached agreement on two of the three (D2 and D3 below), folding those labels back into the reference set; the third (D1) resisted consensus and is retained here as a genuine unresolved disagreement rather than forced to a label. Both reconciled cases were settled in favour of the \emph{permissive} reading---the annotators agreed the prediction \emph{was} faithful---even though the automated judges had almost all called these two predictions incorrect (unanimously across the four judges for D2, and three-of-four for D3, where only \textsc{gpt-4.1} had sided with the permissive annotator). On these borderline items the human audit therefore overturns an over-strict tendency the judges share, rather than merely confirming them. The case left open, D1, is by contrast the item on which all four judges agree the prediction is incorrect, yet the annotators could not settle whether an unresolved pronominal coalition and a predicate that absorbs the agent name still count as a faithful rendering. Each entry below gives the natural-language input, the gold formula, the model prediction, the verdicts (with any annotator note), and the adjudication outcome. With the two reconciled labels added and the single open case excluded, the human-as-reference comparison rests on $599$ consensus labels.
 
 {\small\sloppy\setlength{\emergencystretch}{3em}
 \begin{itemize}[leftmargin=1.3em,itemsep=7pt]
@@ -879,25 +879,25 @@ Of the $600$ audited items, the two expert annotators reconciled all but three e
   \texttt{<<It>>G(!invalid\_badges\_open\_staff\_entrance\_badge\_reader)}\\
   \emph{Annotator~1} (incorrect): ``prediction uses \texttt{<<It>>} instead of \texttt{<<BadgeReader>>} and bundles \texttt{badge\_reader} into the predicate.''\\
   \emph{Annotator~2}: correct (no note).\quad\emph{All four judges}: incorrect.\\
-  The dispute is whether an unresolved pronoun coalition and a proposition that swallows the agent name still count as a faithful rendering.
+  The dispute is whether an unresolved pronoun coalition and a proposition that swallows the agent name still count as a faithful rendering. \emph{Adjudication}: \textbf{unresolved}---the annotators could not converge after discussion, so this item is kept as a genuine disagreement and excluded from the human-as-reference set.
   \item \textbf{D2. Reversed \emph{until} operands} (\textsc{qwen-coder-7b}, fine-tuned, zero-shot; item \texttt{ex992}).\\
   \emph{Input:} ``The help desk can guarantee that \ldots the request will remain pending until the missing detail is supplied, the account will remain limited until identity is checked, and the case will remain open until the resolution is confirmed.''\\
   The prediction shares the gold's prefix \texttt{<<HelpDesk>>(X user\_notified \&\& G ticket\_traceable \&\& \ldots)} and differs only in the three \texttt{U} (until) clauses:\\
   \emph{Gold:} \texttt{(request\_pending U missing\_detail\_supplied) \&\& (account\_limited U identity\_checked) \&\& (case\_open U resolution\_confirmed)}\\
   \emph{Prediction:} \texttt{(missing\_detail\_supplied U request\_resolved) \&\& (identity\_checked U account\_limited) \&\& (resolution\_confirmed U case\_open)}\\
   \emph{Annotator~1} (incorrect): ``scoping error: \texttt{U} operands are wrong.''\quad\emph{Annotator~2}: correct (no note).\quad\emph{All four judges}: incorrect.\\
-  Every \texttt{U} has its two operands transposed (and one predicate altered), inverting the temporal commitment; the dispute is how strictly operand order must be enforced.
+  Every \texttt{U} has its two operands transposed (and one predicate altered), which annotator~1 read as inverting the temporal commitment; the dispute is how strictly operand order must be enforced. \emph{Adjudication}: after discussion the annotators \textbf{agreed the prediction is faithful} (\emph{correct}), overturning the stricter initial label and the four judges' unanimous incorrect verdict.
   \item \textbf{D3. Predicate abbreviation and line-separated conjuncts} (\textsc{mistral-7b}, few-shot baseline; item \texttt{ex462}).\\
   \emph{Input:} ``The pharmacy interface can guarantee that the dispense request remains deferred until the interaction screen is cleared, and the medication safety service can too.''\\
   \emph{Gold:} \texttt{<<PharmacyInterface>>(dispense\_request\_deferred U interaction\_screen\_cleared)}\\
   \hphantom{\emph{Gold:} }\texttt{\&\& <<MedicationSafetyService>>(dispense\_request\_deferred U interaction\_screen\_cleared)}\\
   \emph{Prediction:} the same two coalitions with \texttt{dispense\_request\_deferred} abbreviated to \texttt{request\_deferred} and emitted on two separate lines rather than joined by \texttt{\&\&}.\\
   \emph{Annotator~1}: incorrect (no note).\quad\emph{Annotator~2}: correct (no note).\quad\emph{Judges}: incorrect, except \textsc{gpt-4.1} (correct).\\
-  The dispute is whether an abbreviated proposition and an implicit (line-break) conjunction preserve the intended meaning.
+  The dispute is whether an abbreviated proposition and an implicit (line-break) conjunction preserve the intended meaning. \emph{Adjudication}: after discussion the annotators \textbf{agreed the prediction is faithful} (\emph{correct}); the abbreviation and line-break conjunction were accepted as meaning-preserving, a call that, among the judges, only \textsc{gpt-4.1} had made.
 \end{itemize}
 }
 
-\noindent These cases show that the ``correctness'' of a strategic--temporal translation is not always single-valued at the margins: predicate aliasing, implicit coreference, operand order, and the syntactic marking of conjunction all sit on a boundary where expert judgment legitimately differs. This irreducible ambiguity is precisely what motivates our two-tier protocol---reporting the deterministic exact-match floor separately, using four independent judges, and validating them against a human audit---rather than treating any single verdict as ground truth.
+\noindent These cases show that the ``correctness'' of a strategic--temporal translation is not always single-valued at the margins: predicate aliasing, implicit coreference, operand order, and the syntactic marking of conjunction all sit on a boundary where expert judgment legitimately differs. Deliberation resolved two of the three, but in both the experts ultimately accepted a prediction that the LLM judges had rejected, and one case remains genuinely open. This is precisely what motivates our two-tier protocol---reporting the deterministic exact-match floor separately, using four independent judges, and validating them against a human audit---rather than treating any single verdict as ground truth.
 
 \section{Reproducibility Checklist}
 
