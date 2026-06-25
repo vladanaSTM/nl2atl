@@ -13,7 +13,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 from ..infra.io import load_json, save_json
 from ..infra.xlsx import XlsxDropdown, write_xlsx_sheet
-from .judge_agreement import create_item_key
+from .judge_agreement import NON_LLM_DECISION_METHODS, create_item_key
 
 DEFAULT_JUDGES: Tuple[str, str] = ("ds-v3.2", "gpt-5.2")
 DEFAULT_ANNOTATORS: Tuple[str, str] = ("annotator_1", "annotator_2")
@@ -217,10 +217,16 @@ def decision_stratum(
     """Return the primary audit stratum for one aligned item."""
     judge_decisions = record["judge_decisions"]
     decision_methods = {
-        judge_decisions[judge_name].get("decision_method") for judge_name in judges
+        (judge_decisions[judge_name].get("decision_method") or "").lower()
+        for judge_name in judges
     }
-    if "exact" in decision_methods:
-        return "exact_match"
+    # Verdicts assigned without an LLM judge call---exact matches, empty or
+    # unmatched predictions, and no_llm fallbacks---carry no judge opinion to
+    # audit and are excluded from inter-judge agreement
+    # (judge_agreement.NON_LLM_DECISION_METHODS), so they are routed to a
+    # non-primary stratum rather than sampled for human review.
+    if decision_methods & NON_LLM_DECISION_METHODS:
+        return "non_llm"
 
     first_judge, second_judge = judges[0], judges[1]
     first_decision = judge_decisions[first_judge]["correct"]
@@ -271,7 +277,7 @@ def _normalize_requested_quotas(
         "disagree_ds_yes_gpt_no",
         "llm_agree_yes",
         "llm_agree_no",
-        "exact_match",
+        "non_llm",
         "disagree_ds_no_gpt_yes",
     ]
     for stratum in fill_order:
@@ -426,7 +432,7 @@ def stratified_sample(
             "disagree_ds_yes_gpt_no": 0,
             "llm_agree_yes": 1,
             "llm_agree_no": 2,
-            "exact_match": 3,
+            "non_llm": 3,
             "disagree_ds_no_gpt_yes": 4,
         }
         fill_candidates = [

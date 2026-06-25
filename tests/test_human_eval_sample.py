@@ -5,6 +5,7 @@ from xml.etree import ElementTree as ET
 from src.evaluation.human_eval_merge import load_human_annotations
 from src.evaluation.human_eval_sample import (
     build_human_eval_sample,
+    decision_stratum,
     regenerate_annotator_workbooks_from_key,
 )
 
@@ -51,6 +52,30 @@ def _write_judge_file(path, judge_name, decisions):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_decision_stratum_excludes_non_llm_verdicts_from_audit():
+    """Deterministic verdicts (exact, unmatched/blank, no_llm) carry no judge
+    opinion, so they go to the non-sampled ``non_llm`` stratum rather than into
+    a sampled agree/disagree bucket---keeping the audit aligned with the
+    LLM-only agreement filter."""
+
+    def record(method_a, method_b, correct_a, correct_b):
+        return {
+            "judge_decisions": {
+                "ds-v3.2": {"correct": correct_a, "decision_method": method_a},
+                "gpt-5.2": {"correct": correct_b, "decision_method": method_b},
+            }
+        }
+
+    # An empty/unmatched prediction is a deterministic "no"; it must NOT land in
+    # the sampled llm_agree_no bucket (the bug this guards against).
+    assert decision_stratum(record("unmatched", "unmatched", "no", "no")) == "non_llm"
+    assert decision_stratum(record("no_llm", "no_llm", "no", "no")) == "non_llm"
+    assert decision_stratum(record("exact", "exact", "yes", "yes")) == "non_llm"
+    # Genuine LLM verdicts are still stratified for sampling.
+    assert decision_stratum(record("llm", "llm", "no", "no")) == "llm_agree_no"
+    assert decision_stratum(record("llm", "llm", "yes", "yes")) == "llm_agree_yes"
+
+
 def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
     eval_dir = tmp_path / "evaluated_datasets"
     _write_judge_file(
@@ -69,7 +94,7 @@ def test_build_human_eval_sample_writes_blind_and_keyed_files(tmp_path):
         eval_dir=eval_dir,
         output_dir=output_dir,
         quotas={
-            "exact_match": 1,
+            "non_llm": 1,
             "disagree_ds_yes_gpt_no": 1,
             "llm_agree_no": 1,
         },
