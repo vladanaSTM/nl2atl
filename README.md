@@ -53,6 +53,14 @@ uv run uvicorn src.api_server:app --host 0.0.0.0 --port 8081
 ## Dataset
 
 The default dataset is [data/dataset_gold.json](data/dataset_gold.json). Each row needs `input` and an `outputs` list with at least one gold formula.
+The reviewer-discussion PDF exported from Drive is stored as [docs/dataset_NL2ATL_review.pdf](docs/dataset_NL2ATL_review.pdf) and is kept as an audit trail; the JSON file is the canonical machine-readable gold source. Validate the dataset and PDF alignment with:
+
+```bash
+python validate_dataset.py data/dataset_gold.json --review-pdf docs/dataset_NL2ATL_review.pdf
+```
+
+The current canonical dataset has 1100 items, 1258 gold formulas, 158 multi-reading items, and SHA-256 `04bf2e99aa5c4d526a22db6d3c93b0bf4a982357a75f935f4401bcdd9929e573`.
+
 
 Rows can have more than one correct formula. `load_data` normalizes the `outputs` entries into a deduplicated list of formula strings. When a row has several formulas they are jointly required, not alternatives: training joins them into a single target (one formula per line) so the model learns to emit every reading, exact match requires all of them (order-insensitive), and the LLM judge, used only for non-exact predictions, also requires all of them.
 
