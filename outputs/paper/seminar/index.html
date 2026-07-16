@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!--
+    ============================================================================
+    NL -> ATL/ATL* with LLMs  —  seminar deck (self-contained, works offline)
+    ============================================================================
+    HOW TO PRESENT
+      • Open this file (index.html) in any modern browser. Keep the vendor/ folder
+        and the three .png files in the SAME folder as this file.
+      • SPEAKER NOTES + timer + next-slide preview:  press  S  (opens a second
+        window). If pressing S does nothing (some browsers block it on file://),
+        serve the folder first:  run  `python -m http.server`  in this folder,
+        then open  http://localhost:8000  and press S.
+      • Navigate: Arrow keys / Space. Overview of all slides: press  O  or  Esc.
+      • The talk runs to the "Thank you" slide; the slides after it are backup
+        material for questions.
+    EXPORT TO PDF
+      • Open  index.html?print-pdf  in Chrome/Edge, then Print → Save as PDF
+        (Layout: Landscape, Margins: None, Background graphics: ON).
+    ============================================================================
+  -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NL &rarr; ATL/ATL* with LLMs</title>
+
+  <!-- reveal.js core + base theme (vendored locally — works offline) -->
+  <link rel="stylesheet" href="vendor/reveal/dist/reveal.css">
+  <link rel="stylesheet" href="vendor/reveal/dist/theme/white.css" id="theme">
+  <link rel="stylesheet" href="vendor/reveal/plugin/highlight/monokai.css">
+
+  <style>
+    /* ============================================================
+       Custom theme  —  clean, modern, high-contrast for projectors
+       ============================================================ */
+    :root{
+      --ink:#1e2430; --ink-soft:#54607a; --bg:#ffffff;
+      --accent:#4f46e5; --coal:#4f46e5; --temp:#0d9488; --prop:#b45309;
+      --open:#15803d; --prop-api:#c2410c; --judge:#2563eb;
+      --rule:#e6e8ef; --panel:#f6f7fb;
+    }
+    .reveal{ font-family:'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; color:var(--ink); font-size:30px; }
+    .reveal h1,.reveal h2,.reveal h3{ font-family:'Segoe UI Semibold','Segoe UI', system-ui, sans-serif; color:var(--ink); font-weight:700; text-transform:none; letter-spacing:-0.01em; line-height:1.12; }
+    .reveal h1{ font-size:1.8em; }
+    .reveal h2{ font-size:1.35em; margin-bottom:.45em;}
+    .reveal h3{ font-size:1.05em; color:var(--accent); }
+    .reveal section{ text-align:left; }
+    .reveal p,.reveal li{ line-height:1.35; }
+    .reveal ul{ margin-left:.9em; }
+    .reveal li{ margin:.32em 0; }
+    .reveal strong{ color:var(--accent); }
+    .reveal em{ font-style:italic; }
+    .reveal a{ color:var(--judge); }
+
+    .kicker{ display:inline-block; font-size:.5em; letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:700; border-bottom:2px solid var(--accent); padding-bottom:.15em; margin-bottom:.7em; }
+
+    .deck-footer{ position:fixed; bottom:10px; left:16px; z-index:30; font-size:13px; color:var(--ink-soft); opacity:.7; }
+    .reveal .slide-number{ background:transparent; color:var(--ink-soft); font-size:13px; right:14px; bottom:8px;}
+
+    .section-divider{ text-align:left; }
+    .section-divider .num{ font-size:5em; font-weight:800; line-height:.9; background:linear-gradient(120deg,var(--accent),#8b5cf6); -webkit-background-clip:text; background-clip:text; color:transparent; }
+    .section-divider h2{ font-size:1.7em; margin-top:.1em; }
+    .section-divider .lead{ color:var(--ink-soft); font-size:.85em; max-width:22em;}
+
+    /* one-line takeaway strip (used sparingly) */
+    .take{ margin-top:.7em; padding:.5em .8em; border-left:5px solid var(--accent); background:#eef0fe; border-radius:8px; font-size:.9em; }
+    .take.open{ border-color:var(--open); background:#effaf1; }
+    .take.api{ border-color:var(--prop-api); background:#fff3ec; }
+    .take.judge{ border-color:var(--judge); background:#eef4ff; }
+
+    .cols{ display:flex; gap:1.2em; align-items:flex-start; }
+    .cols.mid{ align-items:center; }
+    .col{ flex:1; } .col.narrow{ flex:.7; } .col.wide{ flex:1.5; }
+
+    .chip{ display:inline-block; padding:.05em .5em; border-radius:999px; font-size:.72em; font-weight:700; white-space:nowrap; border:1.5px solid; }
+    .chip.open{ color:var(--open); border-color:var(--open); background:#effaf1;}
+    .chip.api{ color:var(--prop-api); border-color:var(--prop-api); background:#fff3ec;}
+    .chip.judge{ color:var(--judge); border-color:var(--judge); background:#eef4ff;}
+
+    .formula{ font-family:'Cascadia Code','Consolas',monospace; background:#0f172a; color:#e2e8f0; border-radius:10px; padding:.55em .85em; font-size:.9em; line-height:1.5; display:inline-block; box-shadow:0 3px 14px rgba(15,23,42,.18); }
+    .formula.block{ display:block; }
+    .formula .coal{ color:#a5b4fc; font-weight:700; }
+    .formula .temp{ color:#5eead4; font-weight:700; }
+    .formula .prop{ color:#fcd34d; }
+    .formula .op{ color:#f8fafc; }
+    .formula .cm{ color:#94a3b8; font-style:italic; }
+    .t-coal{ color:var(--coal); font-weight:700; font-family:'Cascadia Code',monospace;}
+    .t-temp{ color:var(--temp); font-weight:700; font-family:'Cascadia Code',monospace;}
+    .t-prop{ color:var(--prop); font-family:'Cascadia Code',monospace;}
+
+    .nl{ font-style:italic; background:#fffbeb; border-left:4px solid var(--prop); padding:.4em .7em; border-radius:6px; display:inline-block;}
+
+    .stat{ text-align:center; padding:.1em .4em;}
+    .stat .big{ font-size:2.3em; font-weight:800; color:var(--accent); line-height:1;}
+    .stat .big.open{ color:var(--open);} .stat .big.api{ color:var(--prop-api);}
+    .stat .cap{ font-size:.62em; color:var(--ink-soft); }
+
+    .reveal table{ font-size:.66em; border-collapse:collapse; margin:.2em 0;}
+    .reveal table th{ background:var(--panel); border-bottom:2px solid var(--rule); padding:.35em .6em; text-align:center; font-weight:700;}
+    .reveal table td{ border-bottom:1px solid var(--rule); padding:.32em .6em; text-align:center;}
+    .reveal table td.l,.reveal table th.l{ text-align:left; }
+    .reveal table tr.grp td{ background:#fafbff; font-style:italic; color:var(--ink-soft); text-align:left;}
+    .hi{ background:#eef0fe !important; font-weight:800; color:var(--accent);}
+    .hi-open{ background:#effaf1 !important; font-weight:800; color:var(--open);}
+
+    .roadmap{ list-style:none; margin-left:0; }
+    .roadmap li{ padding:.2em .5em; color:var(--ink-soft); font-size:.92em;}
+    .roadmap li .n{ display:inline-block; width:1.5em; font-weight:800; color:var(--accent);}
+
+    .muted{ color:var(--ink-soft); } .small{ font-size:.82em; } .xsmall{ font-size:.7em; } .center{ text-align:center; }
+    .reveal img.fig{ border-radius:10px; box-shadow:0 4px 18px rgba(15,23,42,.14); background:#fff;}
+    .credit{ font-size:.6em; color:var(--ink-soft); margin-top:.3em;}
+
+    /* small clean horizontal flow (2-4 nodes only) */
+    .flow{ display:flex; align-items:center; gap:.5em; font-size:.82em; flex-wrap:nowrap;}
+    .flow .node{ background:var(--panel); border:1px solid var(--rule); border-radius:8px; padding:.35em .6em; text-align:center;}
+    .flow .node.y{ background:#effaf1; border-color:var(--open);}
+    .flow .node.n{ background:#fff3ec; border-color:var(--prop-api);}
+    .flow .a{ color:var(--accent); font-weight:800;}
+  </style>
+</head>
+<body>
+  <div class="deck-footer">Natural Language &rarr; ATL/ATL* with LLMs</div>
+  <div class="reveal">
+    <div class="slides">
+
+      <!-- ==================== 1 · TITLE ==================== -->
+      <section data-background-gradient="linear-gradient(135deg,#eef0fe 0%,#ffffff 55%,#effaf1 100%)">
+        <h1>Translating natural language into<br>strategic temporal logic with LLMs</h1>
+        <p class="muted" style="font-size:.82em; margin-top:.5em">Natural-language requirements &rarr; well-formed <strong>ATL / ATL*</strong> formulas.</p>
+        <div class="formula block" style="margin-top:1em; font-size:.8em">
+          <span class="nl" style="background:none; border:none; padding:0; color:#cbd5e1">"...the system and the manager together can guarantee<br>that sooner or later the goal is reached."</span><br>
+          <span class="op">&rarr;&nbsp;</span><span class="coal">&lt;&lt;System,Manager&gt;&gt;</span> <span class="temp">F</span> <span class="prop">goal_reached</span>
+        </div>
+        <p class="muted" style="font-size:.62em; margin-top:1.1em">Aruta &middot; Improta &middot; Malvone &middot; Murano &middot; <strong style="color:var(--ink)">Perli&cacute;</strong> &nbsp;&middot;&nbsp; Naples Federico II &amp; T&eacute;l&eacute;com Paris</p>
+        <aside class="notes">
+          <p>Welcome, everyone. We've got two hours together, so please don't save your questions for the end. Jump in the moment something catches you.</p>
+          <p>Here's the whole talk in one sentence. We take a requirement written in plain English, about what a group of agents can force to happen, and we turn it into a formal ATL formula that a model checker can actually run. Hold on to the example on the screen. It comes back at the very end, live, inside the checker.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== 2 · SPLIT OF WORK ==================== -->
+      <section>
+        <div class="kicker">A joint project</div>
+        <h2>How we split the work</h2>
+        <div class="cols" style="margin-top:.4em">
+          <div class="col">
+            <h3 style="color:var(--prop-api)">Co-authors (formal verification)</h3>
+            <ul class="small">
+              <li>The dataset</li>
+              <li>The logic &amp; the linguistics</li>
+            </ul>
+          </div>
+          <div class="col">
+            <h3 style="color:var(--open)">My part</h3>
+            <ul class="small">
+              <li>Framework &amp; fine-tuning</li>
+              <li>Evaluation &amp; judge</li>
+              <li>Model-checker integration</li>
+            </ul>
+          </div>
+        </div>
+        <div class="take">Today I'll keep the logic short and spend the time on the modelling and evaluation.</div>
+        <aside class="notes">
+          <p>Let me draw one line up front so I don't have to keep repeating it. The dataset and the logic come from my co-authors. The software, the fine-tuning, the evaluation, the tool — that side is mine.</p>
+          <p>What that means for today is simple. I'll move quickly through the formal-verification parts, because honestly you know them better than I do, and I'll slow right down where I actually did the work.</p>
+          <p>And one bit of housekeeping that pays off on every later slide. Orange means a proprietary API model. Green means an open-weight model running locally. That's the whole code.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== 3 · TWO RESULTS UP FRONT ==================== -->
+      <section>
+        <div class="kicker">Two results, up front</div>
+        <h2>What the talk builds to</h2>
+        <div class="cols mid" style="margin-top:.5em">
+          <div class="col center">
+            <div class="stat"><span class="big open">0.84</span> <span class="muted" style="font-size:1.2em">vs</span> <span class="big api">0.86</span></div>
+            <p class="small" style="margin-top:.4em">A fine-tuned <strong style="color:var(--open)">3&ndash;7B open model</strong> matches a frontier API — on your own hardware.</p>
+          </div>
+          <div class="col center">
+            <div class="stat"><span class="big judge">Llama&#8209;70B</span></div>
+            <p class="small" style="margin-top:.4em">The <strong>best judge</strong> of these translations was the open-weight model, not the strongest API.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>I want to tell you where this is going, so you know what to listen for. There are two results.</p>
+          <p>The first is about building the translator. A small open model, fine-tuned on your own hardware, lands at the same accuracy as a frontier API you pay for by the call. 0.84 against 0.86. That is a tie, and I'll prove it with a significance test later. The headline: you never have to hand your requirements to someone else's cloud.</p>
+          <p>The second is the one that makes people sit up. To grade all these translations, we used LLMs as judges. The judge that agreed with our human experts the most was the open-weight Llama model. The strongest, newest, most expensive proprietary models? They were the worst judges in the room. I'll show you exactly why that happens.</p>
+          <p>I won't linger here. I just want those two flags in the ground.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 1 · PROBLEM ==================== -->
+      <section class="section-divider" data-background-color="#0f172a" data-background-gradient="linear-gradient(135deg,#111827,#1e1b4b)">
+        <div class="num" style="color:#c7d2fe">1</div>
+        <h2 style="color:#fff">The problem</h2>
+        <aside class="notes"><p>This part is short. Two questions really: why does this problem matter, and why had nobody solved it yet?</p></aside>
+      </section>
+
+      <!-- 1.1 motivation -->
+      <section>
+        <div class="kicker">Motivation</div>
+        <h2>Writing the specification is the bottleneck</h2>
+        <ul>
+          <li>Model checking is only as good as the <strong>formula</strong> you give it.</li>
+          <li>Writing correct strategic specs needs a rare expert.</li>
+          <li>Requirements start as <strong>ambiguous</strong> natural language; verification needs the opposite.</li>
+        </ul>
+        <aside class="notes">
+          <p>You all live this every day. A model checker that runs flawlessly on the wrong formula just hands you a confident, wrong answer. The hard part was never the checking. It's writing a specification that's actually correct.</p>
+          <p>And for multi-agent systems it gets harder still, because the spec has to pin down three things at once: which coalition, can force what, and by when.</p>
+          <p>Now, where do requirements come from in the first place? People. Written in English, which is ambiguous by its very nature. Ambiguous in context, ambiguous in grammar. And verification needs the exact opposite of that. So really, our job is to recover the formula the engineer had in mind.</p>
+        </aside>
+      </section>
+
+      <!-- 1.2 running example -->
+      <section>
+        <div class="kicker">The task, concretely</div>
+        <h2>One sentence &rarr; one formula</h2>
+        <div class="center" style="margin:.3em 0 .6em"><span class="nl">"The system and the manager together can guarantee that sooner or later the goal is reached."</span></div>
+        <div class="center"><span class="formula" style="font-size:1.05em"><span class="coal">&lt;&lt;System,Manager&gt;&gt;</span> <span class="temp">F</span> <span class="prop">goal_reached</span></span></div>
+        <div class="cols" style="margin-top:.8em; font-size:.78em">
+          <div class="col center"><span class="t-coal">&lt;&lt;&hellip;&gt;&gt;</span><br><span class="muted">the coalition &amp; its strategy</span></div>
+          <div class="col center"><span class="t-temp">F</span><br><span class="muted">temporal goal: "eventually"</span></div>
+          <div class="col center"><span class="t-prop">goal_reached</span><br><span class="muted">atomic proposition</span></div>
+        </div>
+        <aside class="notes">
+          <p>Read the formula in three pieces. The double angle brackets are the coalition operator: this group has a strategy to force the outcome, no matter what everyone else does. The F is the temporal part: eventually, sooner or later. And the last piece is just the proposition, the thing we're claiming happens.</p>
+          <p>Notice how neatly that lines up with who, force what, and when from the slide before. That's the entire task right there. English goes in, a formula like this comes out. And keep an eye on that one little detail: "sooner or later" turned into F. English has a dozen ways to say each operator, and that is going to matter enormously later on.</p>
+          <p>ATL* is the same idea with more freedom in where the temporal operators can sit. I'll leave the precise semantics to the paper. Again, that's your home turf, not mine.</p>
+        </aside>
+      </section>
+
+      <!-- 1.3 the gap -->
+      <section>
+        <div class="kicker">Why it's new</div>
+        <h2>Temporal logics: done. Strategic logics: not.</h2>
+        <table style="font-size:.72em">
+          <tr><th class="l">Target logic</th><th>NL &rarr; logic?</th><th>Dataset?</th></tr>
+          <tr><td class="l">LTL / STL / CTL</td><td>yes</td><td>yes</td></tr>
+          <tr class="hi"><td class="l"><strong>ATL / ATL* (strategic)</strong></td><td><strong>none</strong></td><td><strong>none</strong></td></tr>
+        </table>
+        <div class="take">No model, no dataset, no tool for the strategic, multi-agent case.</div>
+        <aside class="notes">
+          <p>So what's already out there? If you want to translate English into temporal logic, there's a decent body of work. Mostly LTL, a little STL and CTL. But all of it is single-agent, or purely temporal.</p>
+          <p>The moment you add the strategic dimension, coalitions, what a group can force against an adversary, the shelf is bare. No trained model, no public dataset, no tool. Nothing at all. That's the gap we set out to fill.</p>
+          <p>And one deliberate choice worth flagging. Those existing LTL datasets tend to keep the English hugging the formula, almost word for word. We pushed hard the other way, on purpose: more paraphrase, more ambiguity. Let me show you what I mean.</p>
+        </aside>
+      </section>
+
+      <!-- 1.4 ambiguity / QSA -->
+      <section>
+        <div class="kicker">What makes it hard</div>
+        <h2>Ambiguity: one sentence, two required readings</h2>
+        <div class="center" style="margin:.2em 0 .5em"><span class="nl">"Every rover can guarantee it never enters a hazardous area."</span></div>
+        <div class="cols" style="font-size:.8em">
+          <div class="col">
+            <p class="xsmall muted" style="margin:0 0 .2em">distributive — each rover, its own area</p>
+            <div class="formula block xsmall"><span class="coal">&lt;&lt;Rover1&gt;&gt;</span><span class="temp">G</span><span class="op">!</span><span class="prop">hazard_1</span> <span class="op">&amp;&amp;</span> &hellip; <span class="op">&amp;&amp;</span> <span class="coal">&lt;&lt;Rover3&gt;&gt;</span><span class="temp">G</span><span class="op">!</span><span class="prop">hazard_3</span></div>
+          </div>
+          <div class="col">
+            <p class="xsmall muted" style="margin:0 0 .2em">collective — the coalition, one area</p>
+            <div class="formula block xsmall"><span class="coal">&lt;&lt;Rover1,Rover2,Rover3&gt;&gt;</span><span class="temp">G</span><span class="op">!</span><span class="prop">hazard</span></div>
+          </div>
+        </div>
+        <div class="take">Both readings are gold — the model must produce <em>both</em>.</div>
+        <aside class="notes">
+          <p>Read the sentence: "Every rover can guarantee it never enters a hazardous area." Sounds perfectly clear, doesn't it? It isn't. "Every rover," "a hazardous area" — does each rover avoid its own area, or do they all steer clear of one shared area? Those are two genuinely different formulas. On the left, the distributive reading. On the right, collective.</p>
+          <p>And here's our stance. Because the sentence really is ambiguous, we don't make the model choose. Both readings are the correct answer, and the model has to produce both of them. That little idea, that the answer can be a whole set of formulas, comes back to bite us in the evaluation. So file it away.</p>
+          <p>There are five of these phenomena in the dataset: dislocation, ellipsis, right-node-raising, quantifier scope. I'm only showing you one. And this one, quantifier scope, stays the single hardest thing even after we fine-tune.</p>
+          <p>If somebody drills me on the exact linguistics, that's my co-authors' design, and I'll happily connect you. My job starts one step later: the model has to notice the ambiguity and hand back more than one reading.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 2 · DATASET ==================== -->
+      <section class="section-divider" data-background-color="#7c2d12" data-background-gradient="linear-gradient(135deg,#7c2d12,#9a3412)">
+        <div class="num" style="color:#fed7aa">2</div>
+        <h2 style="color:#fff">The dataset</h2>
+        <p class="lead" style="color:#fed7aa">The foundation everything else rests on.</p>
+        <aside class="notes"><p>I'll keep this one short, since it's my co-authors' work. But nothing I do later is possible without it.</p></aside>
+      </section>
+
+      <!-- 2.1 dataset -->
+      <section>
+        <div class="kicker">The resource</div>
+        <h2>1100 expert-written NL &harr; ATL/ATL* pairs</h2>
+        <div class="cols mid">
+          <div class="col">
+            <ul class="small">
+              <li>Hand-written by two experts, validated by three.</li>
+              <li>First dataset for NL &rarr; strategic logic.</li>
+              <li>Balanced operators; five ambiguity families.</li>
+            </ul>
+          </div>
+          <div class="col center">
+            <div class="stat"><span class="big">1100</span><div class="cap">instances</div></div>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Eleven hundred pairs. Every single one hand-written by two domain experts, then checked by three more, with their reasoning written down. Nothing scraped off the web, nothing spat out by a template. That's the reason we can actually trust the gold labels.</p>
+          <p>It's balanced across the temporal operators, and each operator shows up phrased lots of different ways, so a model can't sneak through by matching keywords. Five families of ambiguity, split fairly evenly.</p>
+          <p>Why does this matter to me? Simple. No dataset, no fine-tuning. This is the thing that makes "take a small local model and specialise it" possible in the first place. And yes, eleven hundred sounds small. Stay with me — I'll show you why it's enough.</p>
+        </aside>
+      </section>
+
+      <!-- 2.2 gold = set -->
+      <section>
+        <div class="kicker">One design choice that matters later</div>
+        <h2>The gold answer can be a <em>set</em> of formulas</h2>
+        <ul class="small">
+          <li>Ambiguous inputs have <strong>several jointly-required</strong> formulas.</li>
+          <li>"Correct" = produced <strong>all</strong> of them.</li>
+          <li>This shapes the training target, the exact-match check, and the judge.</li>
+        </ul>
+        <aside class="notes">
+          <p>Tiny slide, but it echoes through the whole rest of the talk. For an ambiguous item, the gold answer is the full set of readings, and you need all of them.</p>
+          <p>That single decision quietly turns up everywhere downstream. Training stitches all the readings into one target. Exact match demands every one of them. The judge demands every one of them. Same rule, three places: produce the whole set, not just a slice of it. Tuck that away for the evaluation section.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 3 · FRAMEWORK ==================== -->
+      <section class="section-divider" data-background-color="#064e3b" data-background-gradient="linear-gradient(135deg,#064e3b,#065f46)">
+        <div class="num" style="color:#a7f3d0">3</div>
+        <h2 style="color:#fff">The framework</h2>
+        <aside class="notes"><p>Now the system that actually does the translating. This is the biggest chunk of the talk, and the heart of my engineering work. I'll unpack the machine-learning pieces as they come up, so don't worry if a term is new to you.</p></aside>
+      </section>
+
+      <!-- 3.1 architecture (image) -->
+      <section>
+        <div class="kicker">Architecture</div>
+        <h2>One pipeline, local and cloud behind one interface</h2>
+        <div class="center">
+          <img class="fig" src="architecture.png" alt="Tool architecture: inputs (CLI/REST, VITAMIN) to the Experiment Orchestrator with Dataset Manager and Model Abstraction; Inference Engine (open-weight LoRA / proprietary API); Raw Predictions; Evaluation Harness (Exact-Match, LLM-as-a-Judge); Aggregated Metrics" style="max-height:545px; width:auto; padding:6px">
+        </div>
+        <aside class="notes">
+          <p>Let's read it top to bottom. A request arrives, from the command line, a REST call, or the model checker itself. The orchestrator picks which data split and which model to use.</p>
+          <p>Two things here I really want you to notice, because they're what make the whole comparison fair. First, a local open-weight model and a cloud API sit behind the exact same interface. A 3-billion-parameter model on my GPU and GPT-5.4 over the network look completely identical to the rest of the pipeline. Second, every single generation gets saved raw, with all its metadata, before anything is allowed to score it. So scoring can never quietly leak back into generation. And months later I can re-grade everything without paying to re-run a single model.</p>
+          <p>Below that: two evaluators, exact match and an LLM judge, and then aggregation. Everything under "raw predictions" is really the next section — evaluation.</p>
+        </aside>
+      </section>
+
+      <!-- 3.2 privacy -->
+      <section>
+        <div class="kicker">Why open-weight</div>
+        <h2>Local first — requirements are confidential</h2>
+        <ul>
+          <li>Open-weight models fine-tuned and run <strong>on-premises</strong>.</li>
+          <li>Cloud API through the <strong>same interface</strong>, when data sensitivity allows.</li>
+        </ul>
+        <div class="take">Industrial requirements are IP — often they can't leave the building at all.</div>
+        <aside class="notes">
+          <p>Here's the practical reason any of this open-weight work matters. A company's requirements spell out exactly what their system is meant to do. That is sensitive intellectual property, and often it's regulated on top of that. So "just send your safety requirements off to a US cloud API" — for a lot of organisations, that's simply a non-starter.</p>
+          <p>That's why we build local-first, with the cloud as an optional path behind the same interface. And it turns the whole thing into a real research question: can a small model on your own machine genuinely keep up with the giants? That's what the results section is going to answer.</p>
+        </aside>
+      </section>
+
+      <!-- 3.3 four conditions -->
+      <section>
+        <div class="kicker">The experiment grid</div>
+        <h2>Two knobs, four conditions</h2>
+        <div class="cols mid">
+          <div class="col">
+            <table style="font-size:.8em">
+              <tr><th></th><th>zero-shot</th><th>few-shot</th></tr>
+              <tr><td class="l">baseline (frozen)</td><td>ZS</td><td>FS</td></tr>
+              <tr><td class="l">fine-tuned</td><td class="hi-open">ZS</td><td class="hi-open">FS</td></tr>
+            </table>
+          </div>
+          <div class="col small">
+            <p><strong>Few-shot</strong>: examples in the prompt, weights frozen.<br><strong>Fine-tuning</strong>: actually change the weights.</p>
+            <p class="xsmall muted">Proprietary models: baseline row only (can't fine-tune them).</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Two knobs, turned independently. Knob one is the prompt: zero-shot, meaning just instructions, or few-shot, meaning a handful of worked examples dropped into the prompt. Knob two is the weights: leave the model as it shipped, or fine-tune it on our training data. Two by two, four conditions.</p>
+          <p>One distinction to hold on to while you read the results. Few-shot is learning in-context, the weights never move. Fine-tuning actually rewrites the model. And the proprietary models only get the top row, the baselines, because their weights are locked away and our data is far too small to fine-tune something that size anyway. So the fight that really matters is this: fine-tune a small open model, versus few-shot a big closed one.</p>
+        </aside>
+      </section>
+
+      <!-- 3.4 LoRA -->
+      <section>
+        <div class="kicker">The AI part worth explaining</div>
+        <h2>Cheap fine-tuning: LoRA / QLoRA</h2>
+        <div class="cols mid">
+          <div class="col">
+            <div class="center" style="margin:.2em 0"><span class="formula">W&prime; = W<sub>frozen</sub> + <span class="temp">B&middot;A</span></span></div>
+            <p class="xsmall center muted">train only the small <span class="t-temp">B, A</span> (low rank)</p>
+          </div>
+          <div class="col small">
+            <ul>
+              <li>Freeze the model; learn a tiny low-rank patch.</li>
+              <li><strong>QLoRA</strong>: 4-bit base &rarr; a 7B model on <strong>one GPU</strong>.</li>
+              <li>Fits a narrow domain with modest data.</li>
+            </ul>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>I'm guessing most of you don't fine-tune models for a living, so let me make this quick and painless. The model already speaks English, and it already knows syntax that looks a lot like logic. We're not teaching it something brand new. We're just nudging it toward our precise ATL conventions. It's a small adjustment, so there's no reason to move all the weights.</p>
+          <p>That's the idea behind LoRA. You freeze the big weight matrix, and you bolt on a small correction, two skinny matrices, B times A. Because they're low-rank, together they come to only a few million numbers, and those numbers are all we ever train. Picture a little patch stuck on top of a frozen base.</p>
+          <p>QLoRA goes one step further and stores that frozen base in 4-bit, so a 7-billion model fine-tunes on a single GPU. That's the difference between "book time on a cluster" and "run it in the lab this afternoon." And with just 765 training examples, that small capacity is actually a gift: it picks up our format without overfitting to the data.</p>
+        </aside>
+      </section>
+
+      <!-- 3.5 the models -->
+      <section>
+        <div class="kicker">The line-up</div>
+        <h2>Four open models we fine-tune, two APIs we prompt</h2>
+        <table style="font-size:.72em">
+          <tr><th class="l">Model</th><th>Size</th><th>Role</th></tr>
+          <tr><td class="l"><span class="chip open">qwen-3b</span> / <span class="chip open">phi3</span></td><td>3&ndash;3.8B</td><td>fine-tuned + baseline</td></tr>
+          <tr><td class="l"><span class="chip open">qwen-coder-7b</span> / <span class="chip open">mistral-7b</span></td><td>7B</td><td>fine-tuned + baseline (4-bit)</td></tr>
+          <tr><td class="l"><span class="chip api">gpt-4.1</span> / <span class="chip api">gpt-5.4</span></td><td>API</td><td>few-shot baselines</td></tr>
+        </table>
+        <p class="xsmall muted">A code model is in the mix because ATL syntax is code-like. Exact versions in backup.</p>
+        <aside class="notes">
+          <p>Our line-up: two models around 3 billion, two around 7. One of the 7B ones is a code model, picked on a hunch that ATL's code-like syntax would suit it. Spoiler — that hunch paid off. It ends up the strongest open model we have.</p>
+          <p>Then two frontier proprietary models as the measuring stick. And everything's pinned to an exact version, which lives in the backup slides if a reviewer in the room wants chapter and verse.</p>
+        </aside>
+      </section>
+
+      <!-- 3.6 integration -->
+      <section>
+        <div class="kicker">From formula to verification</div>
+        <h2>Wired into the VITAMIN model checker</h2>
+        <div class="cols mid">
+          <div class="col narrow"><img class="fig" src="genVITAMIN.png" alt="genVITAMIN: NL input translated to an ATL formula" style="width:100%"></div>
+          <div class="col small">
+            <ul>
+              <li>Translation as a small service; a light patch calls it.</li>
+              <li>Falls back to native generation if it's unavailable.</li>
+              <li>The checker's own parser rejects anything ill-formed.</li>
+            </ul>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Here's the whole loop, end to end. A user types the English requirement straight into the model checker, hits generate, and back comes our running example: System and Manager, eventually the goal is reached. The very one from the title slide.</p>
+          <p>The translator runs as its own separate service. That keeps it swappable, and it means it can never destabilise the checker. The patch is non-destructive, and if the service is down, the tool just falls back to its own generation as if nothing happened.</p>
+          <p>And here's the part that should reassure this room in particular. I don't need you to trust that the model always produces valid syntax. The checker's parser is the gatekeeper. Anything malformed gets thrown out before verification even begins. The worst case is "no formula" — never a formula that's silently broken.</p>
+          <p>Let me be honest about scope, though. This is a working integration, not a full user study. That one's on the future-work list.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 4 · EVALUATION ==================== -->
+      <section class="section-divider" data-background-color="#1e3a8a" data-background-gradient="linear-gradient(135deg,#1e3a8a,#1d4ed8)">
+        <div class="num" style="color:#bfdbfe">4</div>
+        <h2 style="color:#fff">Measuring "correct"</h2>
+        <aside class="notes"><p>So how do you actually score a translation? Sounds trivial. It really isn't — and if you get it wrong, every number in this talk is worthless.</p></aside>
+      </section>
+
+      <!-- 4.1 exact match too strict -->
+      <section>
+        <div class="kicker">The measurement problem</div>
+        <h2>Exact string match punishes correct answers</h2>
+        <div class="cols mid">
+          <div class="col">
+            <p class="xsmall muted" style="margin:0">gold</p>
+            <div class="formula block xsmall"><span class="coal">&lt;&lt;Doctor&gt;&gt;</span> <span class="temp">F</span> <span class="prop">discharged</span></div>
+            <p class="xsmall muted" style="margin:.4em 0 0">prediction</p>
+            <div class="formula block xsmall"><span class="coal">&lt;&lt;Doctor&gt;&gt;</span> <span class="temp">F</span> <span class="prop">patient_discharged</span></div>
+          </div>
+          <div class="col center">
+            <div class="stat"><span class="big" style="color:#dc2626">&ne;</span></div>
+            <p class="small">Same meaning. Different string.<br>Exact match says <strong style="color:#dc2626">wrong</strong>.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Look at these two. The model wrote "patient_discharged" where the gold says just "discharged." Same coalition, same operator, same meaning. Any human glances at it and says, yeah, that's the same thing. Exact string match says: wrong.</p>
+          <p>And this is not some rare edge case. It happens constantly. Propositions pulled from the sentence can be named a dozen equivalent ways, conjunctions come back in a different order, Booleans have equivalent forms. So exact match quietly, systematically undersells how good the models really are. And here's the spoiler: it undersells the proprietary models the most, because they paraphrase the most.</p>
+          <p>So we keep exact match, but only as a strict floor. We need something on top that actually reads for meaning. And remember this pair, "discharged" versus "patient_discharged." It walks right back on stage in the results.</p>
+        </aside>
+      </section>
+
+      <!-- 4.2 why not formal equivalence -->
+      <section>
+        <div class="kicker">Why not check equivalence formally?</div>
+        <h2>It doesn't fit this setting</h2>
+        <ul>
+          <li><strong>No shared model.</strong> Propositions &amp; agents are grounded in the sentence, not a fixed game structure — <span class="t-prop">discharged</span> and <span class="t-prop">patient_discharged</span> are different symbols to a checker.</li>
+          <li><strong>Cost.</strong> ATL* equivalence is expensive anyway.</li>
+        </ul>
+        <div class="take">We check the right thing: is the <strong>strategic-temporal intent</strong> preserved?</div>
+        <aside class="notes">
+          <p>Now, this room's instinct is going to fire immediately: "you people have tools for formula equivalence, just use those." I wish. It doesn't work here, and it's worth a minute on why.</p>
+          <p>Equivalence is only ever defined relative to a model. But our atoms and agent names come straight out of the English sentence, not some shared game structure. To a checker, "discharged" and "patient_discharged" are simply two different symbols, and nothing on earth tells it they point to the same thing, because that knowledge lives in the language, not the logic. There's no common model to check them over. And even if there were, ATL* equivalence is expensive.</p>
+          <p>So instead we aim at what we genuinely care about: did the translation keep the intent? The coalition, the modality and whether it's positive or negative, the operators, the scope. That is exactly what a human reviewer checks by eye, and it's something a language model can approximate. We're trading a formal guarantee for a validated estimate, and the next few slides are entirely about how far you can trust that estimate. The really deep complexity questions, I'm happy to punt on.</p>
+        </aside>
+      </section>
+
+      <!-- 4.3 LLM judge -->
+      <section>
+        <div class="kicker">The meaning-level check</div>
+        <h2>LLM-as-a-judge — only where exact match failed</h2>
+        <div class="flow" style="margin:.3em 0 .6em">
+          <span class="node">prediction</span><span class="a">&rarr;</span>
+          <span class="node">exact match?</span><span class="a">&rarr;</span>
+          <span class="node y">yes = correct</span>
+        </div>
+        <div class="flow" style="margin:0 0 .6em">
+          <span class="node" style="visibility:hidden">prediction</span><span class="a">&darr; no</span>
+          <span class="node n">judge: same intent?</span><span class="a">&rarr;</span>
+          <span class="node">correct / not</span>
+        </div>
+        <div class="take judge">accuracy = exact-match floor &nbsp;+&nbsp; judge-recovered</div>
+        <aside class="notes">
+          <p>Notice that the judge only ever sees the predictions that already failed exact match. A string match is accepted automatically. So the judge can only ever rescue things from below the floor. It can never overrule a match. That deliberately caps how much of the final number rests on soft judgement.</p>
+          <p>It works from a fixed rubric: coalition, modality and polarity, the temporal operators, the scope, and for the ambiguous items, are all the readings there. It hands back a verdict plus a one-line reason, so every call is auditable. And we always report the split — this much came from exact match, this much the judge rescued. We are not hiding anything behind that word "judge."</p>
+        </aside>
+      </section>
+
+      <!-- 4.4 validate the judge -->
+      <section>
+        <div class="kicker">Who judges the judge?</div>
+        <h2>Six judges, checked against human experts</h2>
+        <div class="cols mid">
+          <div class="col small">
+            <ul>
+              <li>Six independent LLM judges, one rubric.</li>
+              <li>Expert audit of <strong>599 predictions</strong>: two annotators, <strong>&kappa; = 0.99</strong>.</li>
+              <li>Headline uses the <strong>most human-aligned</strong> judge.</li>
+            </ul>
+          </div>
+          <div class="col center">
+            <p class="xsmall muted" style="margin:0 0 .3em">judges benchmarked</p>
+            <p class="xsmall"><span class="chip judge">DeepSeek</span> <span class="chip judge">GPT-4.1</span> <span class="chip judge">GPT-5.2</span> <span class="chip judge">GPT-5.4</span> <span class="chip judge">Gemma-27B</span> <span class="chip judge">Llama-70B</span></p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>An LLM grading other LLMs — I know, it sounds hopelessly circular. So our answer is not "trust us." Our answer is that we checked the judges against real humans, and we used six of them.</p>
+          <p>Here's the ground truth. Our experts audited around 600 predictions by hand, deliberately loading up on the cases where the judges disagreed with each other. Two annotators, agreeing 99.5% of the time, kappa of 0.99. They almost never disagree with one another, and that is exactly what makes their verdict solid bedrock.</p>
+          <p>Against that bedrock we rank all six judges by how closely they track the humans, and we report our headline numbers using the single best-aligned one. Nice bonus: that judge isn't one of the models we're grading, so it never marks its own homework. And which judge actually wins — that's the twist, and it's coming up in the results.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 5 · RESULTS ==================== -->
+      <section class="section-divider" data-background-color="#0f172a" data-background-gradient="linear-gradient(135deg,#0f172a,#312e81)">
+        <div class="num" style="color:#c7d2fe">5</div>
+        <h2 style="color:#fff">Results</h2>
+        <aside class="notes"><p>Alright — the two results I promised, now with the numbers behind them.</p></aside>
+      </section>
+
+      <!-- 5.1 headline table -->
+      <section>
+        <div class="kicker">Result 1</div>
+        <h2>Small fine-tuned open models match a frontier API</h2>
+        <table>
+          <tr><th class="l">Model</th><th colspan="2">baseline</th><th colspan="2">fine-tuned</th></tr>
+          <tr><th class="l"></th><th>ZS</th><th>FS</th><th>ZS</th><th>FS</th></tr>
+          <tr class="grp"><td colspan="5">proprietary API</td></tr>
+          <tr><td class="l"><span class="chip api">gpt-4.1</span></td><td>0.61</td><td>0.84</td><td>&ndash;</td><td>&ndash;</td></tr>
+          <tr><td class="l"><span class="chip api">gpt-5.4</span></td><td>0.69</td><td class="hi">0.86</td><td>&ndash;</td><td>&ndash;</td></tr>
+          <tr class="grp"><td colspan="5">open-weight (local)</td></tr>
+          <tr><td class="l"><span class="chip open">qwen-3b</span></td><td>0.15</td><td>0.37</td><td>0.78</td><td>0.80</td></tr>
+          <tr><td class="l"><span class="chip open">phi3</span></td><td>0.28</td><td>0.42</td><td>0.80</td><td>0.82</td></tr>
+          <tr><td class="l"><span class="chip open">qwen-coder-7b</span></td><td>0.30</td><td>0.46</td><td>0.84</td><td class="hi-open">0.84</td></tr>
+          <tr><td class="l"><span class="chip open">mistral-7b</span></td><td>0.24</td><td>0.35</td><td>0.76</td><td>0.77</td></tr>
+        </table>
+        <div class="take"><span class="chip api">gpt-5.4</span> 0.856 &nbsp;vs&nbsp; <span class="chip open">qwen-coder-7b</span> 0.844 — a statistical tie.</div>
+        <aside class="notes">
+          <p>This is semantic accuracy, scored by our best judge. Go straight to the top two numbers. The strongest proprietary model, few-shot, is 0.856. The best fine-tuned open model is 0.844. That's twelve thousandths between them, comfortably inside the noise. It's a tie, and I have a paired test to back that up.</p>
+          <p>Now trace one open-weight row across. Qwen-coder starts at 0.30 zero-shot, and fine-tuning drags it all the way up to 0.84. That is not an improvement, that's a transformation. Phi3 does the same thing, 0.42 to 0.82.</p>
+          <p>Let me be precise about the claim, because it's easy to overstate. I am not saying open beats proprietary. I'm saying a model you fine-tune on your own hardware reaches the same accuracy as a frontier model you can only rent by the call. Same accuracy — but private, and reproducible. And all of it out of 765 training examples. So yes: for a narrow domain, with LoRA, small data really is enough.</p>
+        </aside>
+      </section>
+
+      <!-- 5.2 decomposition figure -->
+      <section>
+        <div class="kicker">Why exact match alone misleads</div>
+        <h2>How much the judge recovers</h2>
+        <div class="cols mid">
+          <div class="col wide"><img class="fig" src="decomposition.png" alt="exact-match floor vs judge-recovered, per system" style="width:100%"></div>
+          <div class="col small">
+            <p><span style="color:#1f77b4">&#9632;</span> exact match &nbsp; <span style="color:#ff7f0e">&#9632;</span> judge</p>
+            <p>Proprietary lean on the judge <strong>most</strong> (up to 46%).</p>
+            <p class="xsmall muted">They paraphrase more — remember that.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>The blue bar is what a dumb string match would give you. The orange on top is what the meaning-level judge recovers. If we'd reported only exact match, we'd have thrown away somewhere between a quarter and a half of every system's real performance.</p>
+          <p>But look at the shape of it. The proprietary models have the biggest orange slices — over and over they write a perfectly faithful translation that just doesn't match the reference string letter for letter. The fine-tuned open models, drilled on our exact conventions, hit the literal reference far more often.</p>
+          <p>So sit with what that means. The proprietary scores lean on the judge being generous about paraphrases. Which raises a rather uncomfortable question: what happens if a judge isn't generous? Who pays the price? Hold that thought, because it's the whole next result.</p>
+        </aside>
+      </section>
+
+      <!-- 5.3 pareto -->
+      <section>
+        <div class="kicker">Deployment</div>
+        <h2>Accuracy vs latency</h2>
+        <div class="cols mid">
+          <div class="col wide"><img class="fig" src="accuracyvslatency.png" alt="accuracy vs latency, Pareto frontier" style="width:100%"></div>
+          <div class="col small">
+            <p>Two fastest fine-tuned open models are also near the top.</p>
+            <p class="xsmall muted"><span class="chip open">qwen-3b</span>, <span class="chip open">phi3</span> faster than both APIs; circles = open, diamonds = API.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>On this chart, up and to the left is where you want to be. And two of the fine-tuned open models sit right up there: high accuracy, low latency, both faster than the APIs while matching them on quality.</p>
+          <p>Now let me be careful and fair about the latency, because I don't want to oversell it. The API dots include a network round-trip on different hardware, so I am not going to stand here and claim local is universally faster. The honest version is this: in a controlled local setup, you match the APIs on accuracy, and the fastest open models are genuinely quick. The frontier ends up shared — the APIs own the very-high-accuracy corner, the open models own the low-latency corner. And once you add privacy to that picture, open-weight becomes a really strong choice for anything you run in-house.</p>
+        </aside>
+      </section>
+
+      <!-- 5.4 judge reliability -->
+      <section data-background-gradient="linear-gradient(135deg,#fff7ed,#ffffff)">
+        <div class="kicker" style="color:#c2410c;border-color:#c2410c">Result 2</div>
+        <h2>The most reliable judge was the open-weight one</h2>
+        <div class="cols mid">
+          <div class="col">
+            <table>
+              <tr><th class="l">judge vs human</th><th>agree</th><th>&kappa;</th></tr>
+              <tr class="hi-open"><td class="l"><span class="chip open">Llama-70B</span></td><td><strong>82%</strong></td><td><strong>0.59</strong></td></tr>
+              <tr><td class="l"><span class="chip judge">DeepSeek</span></td><td>74%</td><td>0.46</td></tr>
+              <tr><td class="l"><span class="chip judge">GPT-4.1</span></td><td>73%</td><td>0.44</td></tr>
+              <tr><td class="l"><span class="chip open">Gemma-27B</span></td><td>59%</td><td>0.25</td></tr>
+              <tr><td class="l"><span class="chip api">GPT-5.4</span></td><td>57%</td><td>0.24</td></tr>
+              <tr class="hi" style="background:#fee2e2!important"><td class="l"><span class="chip api">GPT-5.2</span></td><td>51%</td><td>0.16</td></tr>
+            </table>
+          </div>
+          <div class="col">
+            <div class="take api">The strongest, newest proprietary models were the <strong>worst</strong> judges.</div>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Before I show the numbers, place your bets. Six models. Which one grades formal-logic translations most like a human expert? Almost everyone picks the strongest, newest one, GPT-5.4. Hold that guess for a second.</p>
+          <p>Here's the table. Top of it, the open-weight Llama-70B. Kappa 0.59, agreeing with humans 82% of the time. Clearly the best of the bunch. And down at the bottom? GPT-5.2 at 0.16, GPT-5.4 at 0.24. The strongest, most capable models turn out to be the least reliable judges in the room. So much for the safe bet.</p>
+          <p>Read that once more, because it's the real finding: judge quality runs opposite to generator strength. GPT-5.4 is the best generator we have and one of the worst judges. That's precisely why our headline uses Llama — it tracks humans best, and it never grades its own output. And on the next slide I'll show you why this happens, because the reason is almost embarrassingly simple.</p>
+        </aside>
+      </section>
+
+      <!-- 5.5 why judges differ -->
+      <section>
+        <div class="kicker">Why — and it's simple</div>
+        <h2>The strong models are pedantic about paraphrases</h2>
+        <div class="center" style="margin:.2em 0 .5em">
+          <span class="formula xsmall"><span class="prop">discharged</span> <span class="cm"># gold</span> &nbsp;vs&nbsp; <span class="prop">patient_discharged</span> <span class="cm"># prediction &mdash; same structure</span></span>
+        </div>
+        <ul class="small">
+          <li>On <strong>1167</strong> items GPT-5.4 &amp; GPT-5.2 rejected what Llama accepted.</li>
+          <li>Humans sided with Llama <strong>160 to 26</strong>; zero the other way.</li>
+          <li>GPT-5.4 even marks down <strong>its own</strong> outputs (0.63 vs 0.86).</li>
+        </ul>
+        <aside class="notes">
+          <p>When you actually open up what the strong judges rejected, it's almost all one single thing: predicate aliasing. The prediction renames an atom to a paraphrase that's grounded right there in the sentence — "discharged" becomes "patient_discharged" — while every coalition, every operator, every connective stays identical. Our rubric says plainly: accept clear aliases like that. The strong models reject them anyway, insisting it's "not a clearly grounded alias." And the humans side with the lenient judge, overwhelmingly.</p>
+          <p>And I can put numbers on "overwhelmingly." On 1,167 items, the two strict proprietary judges rejected something Llama had accepted. On the slice our experts audited, the humans backed Llama 160 to 26 — and not once did it go the other way. So this isn't Llama being sloppy and waving things through. It's the strong models being over-strict.</p>
+          <p>One more, and this is the clincher, because you might suspect Llama is just flattering its own kind. It isn't. GPT-5.4, acting as judge, marks down GPT-5.4's own translations too, scoring them 0.63 where Llama gives 0.86. So the strict judges punish everybody, and they punish the paraphrase-heavy proprietary generators the hardest. Only a well-calibrated judge lets their true accuracy show. And the lesson travels far beyond this paper: if you ever use an LLM as a judge, do not assume the biggest model is the best judge. Check it against humans first.</p>
+        </aside>
+      </section>
+
+      <!-- 5.6 error analysis -->
+      <section>
+        <div class="kicker">Where everyone still struggles</div>
+        <h2>Ambiguity is the residual difficulty</h2>
+        <div class="cols mid">
+          <div class="col">
+            <table style="font-size:.72em">
+              <tr><th class="l">system</th><th>single</th><th>QSA</th></tr>
+              <tr><td class="l"><span class="chip api">gpt-5.4</span></td><td>0.88</td><td>0.68</td></tr>
+              <tr><td class="l"><span class="chip open">qwen-coder-7b</span></td><td>0.88</td><td>0.63</td></tr>
+              <tr><td class="l"><span class="chip open">phi3</span></td><td>0.87</td><td>0.49</td></tr>
+              <tr><td class="l"><span class="chip open">qwen-3b</span></td><td>0.88</td><td>0.33</td></tr>
+            </table>
+          </div>
+          <div class="col small">
+            <p>Single-reading: uniformly high (~0.87).</p>
+            <p>Quantifier scope: everyone drops — must emit <strong>both</strong> readings.</p>
+            <p class="xsmall muted">Only 31 QSA items, so read it as a trend, not a ranking.</p>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Once fine-tuning has cleaned up the gross mistakes — quantifiers borrowed from CTL, malformed coalitions — the single-reading cases basically saturate. Everyone lands around 0.87. Job done there.</p>
+          <p>Then look at the quantifier-scope column, and the floor drops out. Producing both readings at once, the distributive and the collective, is genuinely hard. Models give you one, or they blur the two together. This is that ambiguous rover sentence from the very start of the talk — now with a number on it.</p>
+          <p>Fair caveat: there are only 31 of these items, so the error bars are wide. Read it as a trend, not a leaderboard. Everybody drops on ambiguity, the smallest models drop the most. And honestly, that's the benchmark doing its job: the easy cases are maxed out, and the cases we designed to be hard still tell the models apart.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== ACT 6 · WRAP ==================== -->
+      <section class="section-divider" data-background-color="#0f172a" data-background-gradient="linear-gradient(135deg,#0f172a,#3730a3)">
+        <div class="num" style="color:#c7d2fe">6</div>
+        <h2 style="color:#fff">Wrap-up</h2>
+        <aside class="notes"><p>Home stretch. The limits, what we're giving away, and then I really want your questions.</p></aside>
+      </section>
+
+      <!-- 6.1 limitations -->
+      <section>
+        <div class="kicker">Honest limits</div>
+        <h2>What this doesn't do</h2>
+        <ul class="small">
+          <li>Curated, English-only dataset — not in-the-wild requirements.</li>
+          <li>The metric is a validated <strong>estimate</strong> (judge&ndash;human &kappa; is moderate).</li>
+          <li>Confidence intervals cover the seed, not test-set resampling (~&plusmn;0.06).</li>
+          <li>Scope is ATL/ATL* — not Strategy Logic or epistemic logics.</li>
+          <li>Equivalence by intent, not by formal model checking.</li>
+        </ul>
+        <aside class="notes">
+          <p>Let me not oversell any of this. Two limits matter most. The dataset is curated, so what you've seen is a controlled study, not a field deployment. And our metric is a validated estimate: judge-human agreement is only moderate, so treat these numbers as well-calibrated, not exact to the last decimal.</p>
+          <p>I'll be straight about the statistics too. Our confidence intervals vary the training seed at one fixed test split. But with 218 test items, resampling the test set itself adds around 0.06 of wobble that those intervals just don't capture. So any gap smaller than about 0.06 is genuinely not resolvable from this data — which is exactly why I keep saying "tie" and never "winner." The framework can run k-fold to measure that properly; we left the full sweep for future runs.</p>
+          <p>The scope question, and the equivalence-by-intent point, I'll hand to the co-authors if anyone wants to push on them.</p>
+        </aside>
+      </section>
+
+      <!-- 6.2 contributions + future -->
+      <section>
+        <div class="kicker">Contributions</div>
+        <h2>What we release, and what's next</h2>
+        <div class="cols">
+          <div class="col small">
+            <h3>Released (MIT)</h3>
+            <ul>
+              <li>The dataset <span class="muted xsmall">(co-authors)</span></li>
+              <li>Framework + fine-tuned models</li>
+              <li>Evaluation + judge protocol</li>
+              <li>Model-checker integration</li>
+            </ul>
+          </div>
+          <div class="col small">
+            <h3>Next</h3>
+            <ul>
+              <li>Grow the dataset with the community</li>
+              <li>Richer logics (Strategy Logic, epistemic)</li>
+              <li>Feed checker feedback into disambiguation</li>
+            </ul>
+          </div>
+        </div>
+        <aside class="notes">
+          <p>Four contributions, and every one is open-source. The dataset from my co-authors; the framework, the evaluation, and the tool integration from me. And that is the last time I'll draw that line today.</p>
+          <p>Where it goes next. We want to release the dataset and grow it into a community resource. We want to reach past ATL into richer strategic logics, reasoning about knowledge and belief, which is really where my co-authors are headed. And we want to close the loop, so the checker's own feedback drives the disambiguation — turning the model checker into a teacher.</p>
+        </aside>
+      </section>
+
+      <!-- 6.3 thank you -->
+      <section data-background-color="#0f172a" data-background-gradient="linear-gradient(135deg,#0f172a,#1e1b4b)">
+        <h2 style="color:#fff; font-size:1.9em">Thank you</h2>
+        <div class="cols" style="margin-top:.5em">
+          <div class="col">
+            <div class="take" style="background:#12203a; border-color:#34d399; color:#e2e8f0">
+              <span style="color:#6ee7b7; font-weight:700; font-size:.7em; text-transform:uppercase; letter-spacing:.08em">In one line</span><br>
+              A fine-tuned small open model <strong style="color:#a5b4fc">matches</strong> a frontier API, on-premises &mdash; and the best <em>judge</em> of the translations was the open-weight one.
+            </div>
+          </div>
+          <div class="col small" style="color:#cbd5e1">
+            <p style="margin:.2em 0"><strong style="color:#7dd3fc">Questions welcome.</strong></p>
+            <p class="xsmall">Code, dataset, prompts &mdash; open-source.<br>Backup slides follow for details.</p>
+          </div>
+        </div>
+        <p class="muted" style="color:#94a3b8; font-size:.62em; margin-top:.8em">Aruta &middot; Improta &middot; Malvone &middot; Murano &middot; Perli&cacute;</p>
+        <aside class="notes">
+          <p>So, two things to walk out of here with. A fine-tuned small open model matches a frontier API, on your own hardware. And the best judge of these translations turned out to be the open-weight one, not the biggest name. Then I'll open the floor — this is where most of the two hours should go.</p>
+          <p>Quiet reminder to myself: I'm on firm ground with the framework, the fine-tuning, the evaluation, the integration. If a question dives deep into ATL, Strategy Logic, or the linguistics, it's completely fine to say "that's my co-authors' territory — here's my understanding, and I'll put you in touch."</p>
+          <p>And the backup slides behind this one hold the hyperparameters, the exact versions, the audit counts, content filtering, the kappa scale, the judge rubric, related work. If a question needs a hard number, that's where I go.</p>
+        </aside>
+      </section>
+
+      <!-- ==================== BACKUP ==================== -->
+      <section class="section-divider" data-background-color="#111827">
+        <div class="num" style="color:#6b7280">+</div>
+        <h2 style="color:#e5e7eb">Backup</h2>
+        <p class="lead" style="color:#9ca3af">For questions.</p>
+        <aside class="notes"><p>I'll jump back here on demand. Each of these answers one question I can already see coming.</p></aside>
+      </section>
+
+      <!-- B hyperparams -->
+      <section>
+        <div class="kicker">Backup &middot; training</div>
+        <h2>Fine-tuning &amp; LoRA settings</h2>
+        <table style="font-size:.68em">
+          <tr><th class="l">Model</th><th>4-bit</th><th>r</th><th>&alpha;</th><th>batch&times;acc.</th></tr>
+          <tr><td class="l">mistral-7b</td><td>yes</td><td>32</td><td>64</td><td>2&times;16</td></tr>
+          <tr><td class="l">qwen-3b</td><td>no</td><td>64</td><td>128</td><td>8&times;4</td></tr>
+          <tr><td class="l">phi3</td><td>no</td><td>32</td><td>64</td><td>6&times;6</td></tr>
+          <tr><td class="l">qwen-coder-7b</td><td>yes</td><td>64</td><td>128</td><td>4&times;8</td></tr>
+        </table>
+        <p class="xsmall muted">8 epochs, paged 8-bit AdamW, cosine (0.1 warmup), lr 1e-4, wd 0.01, grad-clip 0.3, bf16, max seq 1536. Greedy decode, 3 seeds (42/43/44). LoRA on attention + MLP.</p>
+        <aside class="notes"><p>The 7B models run 4-bit QLoRA; the smaller two fit comfortably in 16-bit. Every value on this slide is pinned in the config we release.</p></aside>
+      </section>
+
+      <!-- B versions -->
+      <section>
+        <div class="kicker">Backup &middot; provenance</div>
+        <h2>Exact versions</h2>
+        <table style="font-size:.66em">
+          <tr><th class="l">Model</th><th class="l">Checkpoint / snapshot</th></tr>
+          <tr><td class="l">qwen-3b</td><td class="l">Qwen2.5-3B-Instruct @ aa8e7253</td></tr>
+          <tr><td class="l">phi3</td><td class="l">Phi-3.5-mini-instruct @ 2fe19245</td></tr>
+          <tr><td class="l">qwen-coder-7b</td><td class="l">Qwen2.5-Coder-7B-Instruct @ c03e6d35</td></tr>
+          <tr><td class="l">mistral-7b</td><td class="l">Mistral-7B-Instruct-v0.3 @ c170c708</td></tr>
+          <tr><td class="l">gpt-4.1 / gpt-5.4</td><td class="l">gpt-4.1-2025-04-14 / gpt-5.4-2026-03-05</td></tr>
+          <tr><td class="l">local judges</td><td class="l">Gemma-2-27B @ aaf20e6b &middot; Llama-3.3-70B @ 6f6073b4</td></tr>
+        </table>
+        <p class="xsmall muted">Azure API version 2024-08-01-preview, temperature 0.</p>
+        <aside class="notes"><p>The open checkpoints are pinned to a commit hash, the API snapshots are dated, and the two local judges run at 4-bit, same as the generators.</p></aside>
+      </section>
+
+      <!-- B split -->
+      <section>
+        <div class="kicker">Backup &middot; data split</div>
+        <h2>Where 218 test items comes from</h2>
+        <div class="flow" style="margin:.3em 0">
+          <span class="node">1100</span><span class="a">&minus;7 exemplars</span>
+          <span class="node">1093</span><span class="a">70/10/20</span>
+          <span class="node">765 / 110 / 218</span>
+        </div>
+        <ul class="xsmall">
+          <li>7 few-shot exemplars held out of every split (no leakage).</li>
+          <li>Stratified on single- vs multi-reading; train augmented 2&times; (paraphrase), val/test verbatim.</li>
+          <li>Test = 187 single + 31 QSA.</li>
+        </ul>
+        <aside class="notes"><p>Start from 1,100, hold out the 7 few-shot exemplars, then split what's left 70/10/20. Augmentation only ever touches training, so validation and test stay completely clean.</p></aside>
+      </section>
+
+      <!-- B kappa -->
+      <section>
+        <div class="kicker">Backup &middot; reading &kappa;</div>
+        <h2>Cohen's &kappa; scale (Landis&ndash;Koch)</h2>
+        <div class="cols mid">
+          <div class="col">
+            <table style="font-size:.7em">
+              <tr><th class="l">&kappa;</th><th class="l">agreement</th></tr>
+              <tr><td class="l">0.01&ndash;0.20</td><td class="l">slight</td></tr>
+              <tr><td class="l">0.21&ndash;0.40</td><td class="l">fair</td></tr>
+              <tr><td class="l">0.41&ndash;0.60</td><td class="l">moderate</td></tr>
+              <tr><td class="l">0.61&ndash;0.80</td><td class="l">substantial</td></tr>
+              <tr><td class="l">0.81&ndash;1.00</td><td class="l">almost perfect</td></tr>
+            </table>
+          </div>
+          <div class="col small">
+            <p>Best judge (Llama, 0.59) = moderate.<br>Humans with each other (0.99) = almost perfect.</p>
+            <p class="xsmall muted">Moderate judge&ndash;human &kappa; is why we call the numbers estimates.</p>
+          </div>
+        </div>
+        <aside class="notes"><p>Kappa just corrects raw agreement for chance. Our best judge sits at 0.59 — moderate, the best of the six, and I'll happily admit, still imperfect. Compare that with the humans against each other, which is near-perfect.</p></aside>
+      </section>
+
+      <!-- B judge rubric -->
+      <section>
+        <div class="kicker">Backup &middot; judge prompt</div>
+        <h2>What the judge is asked</h2>
+        <ul class="small">
+          <li>Same strategic-temporal intent? Check coalition, modality &amp; polarity, operators, scope.</li>
+          <li>For ambiguous inputs: all readings present.</li>
+          <li>Accept input-grounded aliases; reject real meaning changes.</li>
+          <li>Return a label + a short reason. Fixed prompt, all six judges, cached per judge.</li>
+        </ul>
+        <aside class="notes"><p>The rubric just walks the intent components one by one, and it says in black and white: accept clear aliases. That's the exact instruction the strong proprietary judges ignored. That one line is the whole of result two.</p></aside>
+      </section>
+
+      <!-- B six-judge -->
+      <section>
+        <div class="kicker">Backup &middot; robustness</div>
+        <h2>Under a six-judge mean</h2>
+        <table style="font-size:.72em">
+          <tr><th class="l">system (ft, FS)</th><th>six-judge mean</th></tr>
+          <tr><td class="l"><span class="chip open">qwen-coder-7b</span></td><td>0.731</td></tr>
+          <tr><td class="l"><span class="chip open">phi3</span></td><td>0.728</td></tr>
+          <tr><td class="l"><span class="chip api">gpt-5.4</span> (FS baseline)</td><td>0.681</td></tr>
+        </table>
+        <p class="xsmall muted">Averaging in the strict judges lowers everything and nudges open-weight ahead (&Delta;&asymp;0.05, p=0.03) &mdash; but that lead is the strict judges over-rejecting proprietary paraphrases. Under the human-aligned judge it's a tie. Honest reading: parity.</p>
+        <aside class="notes"><p>This is my answer if someone accuses me of cherry-picking Llama. Average all six judges instead, and the worst case for the proprietary models is still a tie — and the little open-weight lead you see here is just the over-strictness artifact creeping back in. If anything, the headline judge is the conservative choice for our own claim, not the flattering one.</p></aside>
+      </section>
+
+      <!-- B content filter -->
+      <section>
+        <div class="kicker">Backup &middot; transparency</div>
+        <h2>Provider content-filter events</h2>
+        <ul class="small">
+          <li>The Azure filter blocked <strong>two</strong> inputs (a Shakespeare quote + one other).</li>
+          <li>Counted as incorrect (conservative); listed explicitly.</li>
+          <li>Ranking recomputed without them: <strong>no change</strong>.</li>
+        </ul>
+        <aside class="notes"><p>Two harmless inputs, both scored as failures, and none of our conclusions move if you drop them. It only ever touched the proprietary API path.</p></aside>
+      </section>
+
+      <!-- B related work -->
+      <section>
+        <div class="kicker">Backup &middot; context</div>
+        <h2>Related NL &rarr; logic work</h2>
+        <ul class="small">
+          <li><strong>LTL:</strong> nl2spec, nl2ltl &mdash; often keep NL close to the syntax.</li>
+          <li><strong>STL / CTL:</strong> He et al.; Zrelli et al.</li>
+          <li><strong>Strategic (ATL/ATL*):</strong> no prior peer-reviewed work or dataset &mdash; our gap.</li>
+        </ul>
+        <aside class="notes"><p>Temporal logic is well-trodden ground. The strategic, coalitional side was simply untouched — and on top of that, our language is deliberately less template-like than what came before.</p></aside>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- reveal.js core + plugins (vendored locally — works offline) -->
+  <script src="vendor/reveal/dist/reveal.js"></script>
+  <script src="vendor/reveal/plugin/notes/notes.js"></script>
+  <script src="vendor/reveal/plugin/highlight/highlight.js"></script>
+  <script>
+    Reveal.initialize({
+      width: 1280,
+      height: 720,
+      margin: 0.05,
+      minScale: 0.2,
+      maxScale: 2.0,
+      hash: true,
+      slideNumber: 'c/t',
+      transition: 'slide',
+      transitionSpeed: 'fast',
+      plugins: [ RevealNotes, RevealHighlight ]
+    });
+  </script>
+</body>
+</html>
