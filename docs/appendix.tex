@@ -1,0 +1,995 @@
+
+\documentclass[letterpaper]{article}
+\usepackage[submission]{aaai2027}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\graphicspath{{images/}{Figures/}}
+\urlstyle{rm}
+\def\UrlFont{\rm}
+\usepackage{natbib}
+\usepackage{caption}
+\frenchspacing
+
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{comment}
+\usepackage{xcolor}
+\usepackage{adjustbox}
+\usepackage[most]{tcolorbox}
+\tcbuselibrary{skins,breakable}
+\usepackage[edges]{forest}
+\usepackage{microtype}
+\usepackage{newfloat}
+
+\pdfinfo{/TemplateVersion (2027.1)}
+\setcounter{secnumdepth}{0}
+
+% Compact, readable appendix examples.
+\newtcolorbox{example}[1][]{
+  enhanced, colback=black!2, colframe=black!35,
+  boxrule=0.5pt, arc=2pt, left=4pt, right=4pt, top=4pt, bottom=4pt,
+  title={#1}, fonttitle=\bfseries\small
+}
+
+% ATL shorthand used in the appendix.
+\newcommand{\atl}[1]{\ensuremath{\langle\!\langle #1 \rangle\!\rangle}}
+\newcommand{\Tr}[1]{\ensuremath{t_{#1}}}
+
+% Colors and highlighting macros for syntactic trees.
+\definecolor{QP1c}{RGB}{24,103,192}
+\definecolor{QP2c}{RGB}{188,76,36}
+\definecolor{BG1}{RGB}{232,242,255}
+\definecolor{BG2}{RGB}{255,238,228}
+\definecolor{BG3}{RGB}{232,248,235}
+\definecolor{BG4}{RGB}{255,246,220}
+\definecolor{BG5}{RGB}{242,235,255}
+\definecolor{RDc}{RGB}{37,128,72}
+\definecolor{LDc}{RGB}{180,123,0}
+\definecolor{RNRc}{RGB}{104,71,177}
+\definecolor{Ellc}{RGB}{108,80,55}
+\definecolor{Hdc}{RGB}{90,90,90}
+\newcommand{\QPA}[1]{\textcolor{QP1c}{\bfseries #1}}
+\newcommand{\QPB}[1]{\textcolor{QP2c}{\bfseries #1}}
+\newcommand{\RDA}[1]{\textcolor{RDc}{\bfseries #1}}
+\newcommand{\LDA}[1]{\textcolor{LDc}{\bfseries #1}}
+\newcommand{\RNRA}[1]{\textcolor{RNRc}{\bfseries #1}}
+
+\forestset{
+  xt/.style={
+    for tree={
+      parent anchor=south,
+      child anchor=north,
+      align=center,
+      font=\scriptsize,
+      inner sep=1.6pt,
+      outer sep=0pt,
+      l sep=9pt,
+      s sep=3pt,
+      edge={thin, black}
+    }
+  },
+  ft/.style={
+    for tree={
+      parent anchor=south,
+      child anchor=north,
+      align=center,
+      font=\small,
+      inner sep=2pt,
+      outer sep=0pt,
+      l sep=12pt,
+      s sep=10pt,
+      edge={thin, black}
+    }
+  }
+}
+
+\sloppy
+\setlength{\emergencystretch}{3em}
+
+\begin{document}
+
+\title{Technical Appendix: Translating Natural Language to Strategic Temporal Specifications via LLMs}
+\author{Anonymous AAAI-27 Supplementary Material}
+\affiliations{}
+\maketitle
+
+\appendix
+\section{Technical Appendix}
+
+The syntactic trees in this appendix employ X-bar theoretic structures to map natural language sentences to ATL/ATL$^\ast$ formulas. Some trees use representational conventions that prioritize transparent scope and argument structure for translation purposes, rather than strictly derivational syntactic analyses. Therefore, we explicitly flag them as interpretive devices for the syntax-semantics interface. These conventions do not affect the empirical coverage of the test suite, which is designed to probe whether models correctly recover logical form from surface form.
+
+
+% ==========================================================
+\section{Annotation Guidelines for NL-to-ATL/ATL$^\ast$ Translation}
+\label{sec:annotation-guidelines}
+
+This section makes explicit the annotation policy used to validate the gold dataset. The dataset is intended to evaluate whether a model can recover the strategic-temporal intent expressed by a natural-language requirement, not whether it can repair the requirement into a different specification that would be preferable from an engineering point of view. The gold formulas therefore follow the linguistic content of the input sentence, while using a fixed set of conventions for temporal scope, coalition attribution, and structurally ambiguous constructions.
+
+\subsection{General Translation Target}
+
+Each example maps a natural-language requirement to one or more ATL/ATL$^\ast$ formulas. The strategic modality $\atl{A}$ is used when the sentence attributes an enforceable ability or guarantee to agent or coalition $A$. Atomic propositions are written as lower-case, underscore-separated predicates that preserve the content words of the requirement. Agent names are written as coalition members inside the strategic operator and are separated by commas when several agents form one coalition. Boolean connectives preserve the intended propositional structure of the input: \emph{and} is translated as $\wedge$ or as coalition membership depending on its syntactic role, \emph{or} is translated as inclusive disjunction, \emph{if ... then ...} and related conditional constructions are translated with implication, and negation is attached to the proposition or event that is negated in the natural-language sentence.
+
+When the input is genuinely compatible with multiple intended readings, the dataset may provide multiple gold formulas. In those cases the outputs are not ranked paraphrases: they are the accepted readings for that item. Downstream exact-match and judge-based evaluation should therefore treat multi-output examples as multi-reading items and should check whether the system recovers all required readings, unless an experiment explicitly redefines the task as single-reading generation.
+
+\subsection{Temporal Operators and Scope}
+
+The temporal operators follow their standard ATL/ATL$^\ast$ interpretation. Phrases such as \emph{at the next step}, \emph{immediately after}, or \emph{at the following state} license $X$. Phrases such as \emph{sooner or later}, \emph{eventually}, \emph{in the future}, or \emph{will ultimately} license $F$. Phrases such as \emph{always}, \emph{every time}, \emph{whenever}, \emph{never}, \emph{remain}, and \emph{will not ever} license $G$, with \emph{never} contributing both temporal persistence and Boolean negation when it modifies an event or state. Phrases such as \emph{until}, \emph{as long as ... before ...}, \emph{keep ... until ...}, and \emph{remain ... until ...} license $U$.
+
+The default annotation policy is surface-driven. If a requirement states that an agent can guarantee an eventuality, the eventuality is translated locally under the strategic operator, for example $\atl{A}F p$. If the requirement states that an agent can always guarantee a conditional, or uses a habitual universal cue such as \emph{every time} or \emph{whenever}, the conditional is placed under a dominating $G$, for example $\atl{A}G(p \rightarrow F q)$ or $\atl{A}G(p \rightarrow X q)$. If the sentence contains a conditional but no explicit habitual or universal cue, the local reading $\atl{A}(p \rightarrow F q)$ or $\atl{A}(p \rightarrow X q)$ is allowed as the gold reading unless the item was explicitly adjudicated as persistent by the reviewers.
+
+The annotation also avoids adding redundant temporal operators merely because they are pragmatically plausible. For example, an $U$-construction already encodes temporal progression from the current state, so a dominating $G$ is not inserted unless the input contains an explicit global cue. Conversely, when the consequent itself is persistent, as in \emph{then it will never start drilling}, the $G$ operator is placed in the consequent, yielding formulas of the form $\atl{A}(p \rightarrow G\neg q)$ or, with an explicit habitual cue, $\atl{A}G(p \rightarrow G\neg q)$. This policy separates the scope of the rule from the scope of the persistent consequent.
+
+Temporal sequencing expressions are annotated according to the event structure expressed in the input. \emph{After $p$, eventually $q$} is represented as a state or event condition followed by an eventuality, often using $p \wedge X F q$ when the sentence expresses that the relevant postcondition starts after the triggering event. \emph{Before $q$} is represented through an until-style condition when the sentence describes a state that holds up to the occurrence of $q$. These conventions are meant to keep the mapping linguistically transparent rather than to infer a stronger engineering invariant.
+
+\subsection{Coalition Attribution}
+
+Coalition membership is determined by the grammatical subject of the strategic predicate and by explicit coordination markers. If the input says that \emph{the robot can guarantee ...}, the coalition is $\atl{Robot}$. If it says that \emph{the robot and the operator together can guarantee ...}, the coalition is $\atl{Robot,Operator}$. Lexical cues such as \emph{together}, \emph{jointly}, \emph{as a coalition}, and coordinated subjects before the strategic verb license a multi-agent coalition.
+
+Agents mentioned inside antecedents, temporal clauses, or embedded propositions are not automatically inserted into the strategic coalition. For instance, in a requirement of the form \emph{If the user presses cancel, the machine can guarantee that eventually a refund is issued}, the user action is treated as an atomic proposition in the environment, and the strategic ability belongs to the machine: $user\_cancel \rightarrow \atl{Machine}F\,refund$. The same principle applies when a human confirmation, external event, failure, or environmental condition appears as a trigger. Such entities enter the coalition only when the sentence explicitly attributes the guarantee to them.
+
+The annotation distinguishes coordination inside the coalition from Boolean conjunction in the objective. In \emph{the user and the machine together can guarantee that the system never enters an error state}, \emph{and} links two coalition members. In \emph{the user can guarantee that eventually the ticket is printed and eventually the gate opens}, \emph{and} links two strategic-temporal objectives. The first case yields one coalition modality with several members; the second yields a conjunction of formulas or a conjunction inside the objective, depending on the intended scope.
+
+When an input is pragmatically cooperative but lacks explicit coalition-forming language, the conservative annotation keeps only the agent that grammatically bears the strategic predicate. This prevents the dataset from rewarding models for adding unstated agents to the coalition. The benchmark is a translation task from informal requirements to formal specifications, not a commonsense specification-repair task.
+
+\subsection{Ambiguity Families}
+
+The dataset contains examples designed to test whether models recover logical form from non-canonical surface syntax. For VP ellipsis, omitted material is reconstructed from the antecedent clause before translation. Thus, in a sentence such as \emph{the arm can always guarantee ..., and the mobile robot can too}, the second conjunct inherits the full strategic-temporal objective of the first conjunct, with the coalition member replaced by the second subject where appropriate.
+
+For right dislocation, left dislocation, and resumptive-pronoun constructions, the displaced noun phrase is interpreted as the semantic argument associated with the pronoun or gap. The translation is therefore based on the resolved argument structure, not on the surface position of the noun phrase. These examples test whether a model can identify the agent or proposition despite non-canonical word order.
+
+For Right Node Raising, the shared constituent is distributed over all coordinated clauses that license it. If one conjunct is negated, the negation is preserved only for that conjunct. The resulting formula therefore reflects the full reconstructed content of each coordinate clause, rather than translating the shared phrase only once.
+
+For quantifier-scope ambiguity, the dataset records the intended readings as separate gold formulas when both readings are part of the example. Surface-scope readings allow each quantified agent to have its own corresponding object or outcome, while inverse-scope readings represent a shared object or outcome across agents. Multi-reading QSA examples therefore intentionally contain more than one output formula, and evaluation scripts should preserve this multi-output structure.
+
+\subsection{Gold Validation Procedure}
+
+The gold dataset was validated through expert discussion. Disagreements were resolved by adopting the most conservative translation that follows the explicit linguistic evidence in the input, unless the example was specifically designed to encode multiple readings. Reviewer comments in the informal dataset PDF document rejected alternatives, accepted alternatives, and scope decisions, but the canonical JSON file is the authoritative machine-readable gold dataset. The reviewer PDF is retained as an audit trail and should be checked for ID-level alignment with the JSON, while the JSON should be used for training, evaluation, and reproducibility checks.
+
+% ==========================================================
+\subsection{Example 1: Quantifier Scope Ambiguity Surface Structure}
+
+\begin{example}[Surface structure]
+Consider the sentence:
+\begin{quote}
+Every rover can guarantee that it will never enter a hazardous area.
+\end{quote}
+The sentence contains two quantificational expressions: the universal DP \emph{every rover} and the indefinite DP \emph{a hazardous area}. This gives rise to two possible semantic readings, (i) a surface-scope reading and (ii) an inverse-scope reading.
+\end{example}
+
+% [Syntactic-tree figure moved to the collected figure section.]
+
+% ==========================================================
+\subsection{Example 2: Surface-Scope Interpretation}
+
+\begin{example}[Surface-scope interpretation: $\forall > \exists$]
+Under the surface-scope interpretation, the universal quantifier takes wider scope than the existential quantifier. Informally, the reading is: "for every rover, there is a possibly different hazardous area such that the rover can guarantee that it will never enter it".
+\end{example}
+
+% [Syntactic-tree figure moved to the collected figure section.]
+
+% ==========================================================
+\subsection{Example 3: Inverse-Scope Interpretation}
+
+\begin{example}[Inverse-scope interpretation: $\exists > \forall$]
+Under the inverse-scope interpretation, the indefinite DP receives wider semantic scope than the universal DP. Informally, the reading is: "there is a hazardous area such that every rover can guarantee that it will never enter that same area".
+\end{example}
+
+% [Syntactic-tree figure moved to the collected figure section.]
+
+The tree in Figure~\ref{fig:qsa-inverse-scope} employs a scope-marking convention rather than a syntactic derivation. The indefinite DP "a hazardous area" is shown TP-adjoined to indicate its wide-scope existential interpretation, not to assert a literal movement operation. This representation is compatible with analyses in which indefinites receive exceptional scope via choice functions \cite{reinhart1997quantifier} or referentiality \cite{fodor1982referential}, without violating island constraints on QR. It should not be interpreted as a claim about syntactic derivation.
+
+% ==========================================================
+\subsection{Example 4: VP-Ellipsis under Sentential Coordination}
+
+\begin{example}[VP-ellipsis]
+Consider the sentence:
+\begin{quote}
+The captain can guarantee that at the next step possession will be recovered, and the midfielder can too.
+\end{quote}
+The second conjunct contains an elliptical VP. The phrase \emph{can too} must be interpreted by recovering the full VP from the first conjunct. Consequently, the ATL/ATL$^\ast$ translation must duplicate the strategic-temporal objective for the second agent.
+\end{example}
+
+% [Syntactic-tree figure moved to the collected figure section.]
+
+The corresponding translation reconstructs the elided material before formalization:
+\[
+\begin{aligned}
+&\atl{Captain}X\,possession\_recovered \\
+&\quad \wedge\; \atl{Midfielder}X\,possession\_recovered.
+\end{aligned}
+\]
+Thus, the example tests whether a model can recover omitted material and duplicate the full strategic-temporal objective, rather than translating only the overt surface string.
+
+% ==========================================================
+\begin{comment}
+
+\subsection{Example 5: Formula-Tree Representation}
+
+\begin{example}[Formula tree]
+For the ATL specification
+\[
+\atl{Machine}G(paid \rightarrow ticket\_printed),
+\]
+the formula tree separates the strategic modality, the temporal operator, the Boolean connective, and the atomic propositions.
+
+\vspace{0.8em}
+
+\begin{center}
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=Hdc!5,
+  colframe=Hdc,
+  title={\bfseries Formula-Tree Representation},
+  fonttitle=\normalsize,
+  width=0.72\linewidth
+]
+\centering
+\begin{forest} ft
+[$\atl{Machine}$
+  [$G$
+    [$\rightarrow$
+      [$paid$]
+      [$ticket\_printed$]
+    ]
+  ]
+]
+\end{forest}
+\end{tcolorbox}
+\end{center}
+
+\captionof{figure}{Formula tree for $\atl{Machine}G(paid \rightarrow ticket\_printed)$. The strategic operator and the temporal operator are represented as distinct nodes.}
+\label{fig:formula-tree}
+
+\end{example}
+ \end{comment}
+\subsection{Example 6: Right Dislocation}
+ 
+\begin{example}[Right dislocation]
+Consider the sentence:
+\begin{quote}
+  They can eventually ensure the game ends, the players.
+\end{quote}
+The NP \emph{the players} appears at the right periphery of the matrix clause,
+outside its canonical argument position.
+In conformity with X-bar theory's binary-branching requirement,
+the dislocated element is represented as a right-adjunct:
+the outer TP has exactly two daughters, the inner TP (the base clause)
+and the right-adjoined $\mathrm{DP}_i$, so that no node carries more
+than two immediate children.
+The subject pronoun \emph{they} occupies the base-generated subject position
+and is coreferential with the dislocated NP (co-indexed as $\mathrm{DP}_i$).
+The adverb \emph{eventually} adjoins to VP, itself producing a binary VP-over-VP
+adjunction structure.
+\end{example}
+ 
+% [Syntactic-tree figure moved to the collected figure section.]
+ 
+% ----------------------------------------------------------
+\subsection{Example 7: Left Dislocation}
+ 
+\begin{example}[Left dislocation]
+Consider the sentence:
+\begin{quote}
+  The vending machine, Mary can ensure it will work.
+\end{quote}
+The DP \emph{the vending machine} is displaced to the left periphery of the clause,
+occupying Spec,TopP in the cartographic analysis of the left periphery
+\cite{rizzi1997fine}. A resumptive pronoun \emph{it} fills the canonical argument
+position within the embedded complement of \emph{ensure}, co-indexed
+with the topic $\mathrm{DP}_i$. Binary branching is satisfied throughout:
+TopP branches into Spec and Top$'$; Top$'$ branches into Top$^\circ$ and TP;
+and so on down every projection.
+\end{example}
+ 
+% [Syntactic-tree figure moved to the collected figure section.]
+ 
+% ----------------------------------------------------------
+\subsection{Example 8: Right Node Raising}
+ 
+\begin{example}[Right Node Raising]
+Consider the sentence:
+\begin{quote}
+  Bob has, but Albert has not, a strategy to ensure that the vending machine
+  is always operative.
+\end{quote}
+The DP \emph{a strategy to ensure that the vending machine is always operative}
+is shared between two coordinated TPs.
+In conformity with X-bar theory's binary-branching requirement,
+the shared element is represented as a right-adjunct to CoordP:
+the outer CoordP has exactly two daughters, the inner CoordP
+(the coordinate structure proper) and the right-adjoined $\mathrm{DP}_j$,
+so that no node carries more than two immediate children.
+Each conjunct contains a gap in object position, marked by trace $t_j$.
+To reflect the formal syntax of the second conjunct where the verb precedes negation (\emph{has not}), the verb \emph{has} is raised to T in both conjuncts, leaving a trace $t_v$ heading the VP. 
+The negation \emph{not} heads a NegP below T$'$.
+The internal structure of the complex shared DP is omitted for readability.
+\end{example}
+ 
+% [Syntactic-tree figure moved to the collected figure section.]
+
+\section{Syntactic Tree Figures}
+The following full-width figures visualize the syntactic structures and interpretive conventions discussed above. They are placed together to keep the two-column text readable while preserving AAAI formatting.
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=yellow!12,
+  colframe=orange!70!black,
+  title={\bfseries Quantifier Scope Ambiguity --- Surface Structure},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[CP
+  [C$'$
+    [C [$\varnothing$]]
+    [TP
+      [\QPA{DP$_i$}
+        [D$'$ [D [every]] [NP [N [rover]]]]
+      ]
+      [T$'$
+        [T [can]]
+        [VP
+          [V$'$
+            [V [guarantee]]
+            [CP
+              [C$'$
+                [C [that]]
+                [TP
+                  [DP [it]]
+                  [T$'$
+                    [T [will]]
+                    [NegP
+                      [Neg$'$
+                        [Neg [never]]
+                        [VP
+                          [V$'$
+                            [V [enter]]
+                            [\QPB{DP$_j$}
+                              [D$'$ [D [a]] [NP [AP [hazardous]] [N [area]]]]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Surface structure for a quantifier scope ambiguity involving a universal DP and an indefinite DP.}
+\label{fig:qsa-surface}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=BG1!70,
+  colframe=QP1c,
+  title={\bfseries Quantifier Scope Interpretation 1: $\forall > \exists$ --- Surface Scope},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[CP
+  [C$'$
+    [C [$\varnothing$]]
+    [TP
+      [\QPA{DP$_i$} [every rover]]
+      [TP
+        [DP [\Tr{i}]]
+        [T$'$
+          [T [can]]
+          [VP
+            [V$'$
+              [V [guarantee]]
+              [CP
+                [C$'$
+                  [C [that]]
+                  [TP
+                    [DP [it]]
+                    [T$'$
+                      [T [will]]
+                      [NegP
+                        [Neg$'$
+                          [Neg [never]]
+                          [VP
+                            [\QPB{DP$_j$} [a hazardous area]]
+                            [VP
+                              [V$'$ [V [enter]] [DP [\Tr{j}]]]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Surface-scope interpretation, where the universal DP outscopes the indefinite DP.}
+\label{fig:qsa-surface-scope}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=BG2!70,
+  colframe=QP2c,
+  title={\bfseries Quantifier Scope Interpretation 2: $\exists > \forall$ --- Inverse Scope},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[CP
+  [C$'$
+    [C [$\varnothing$]]
+    [TP
+      [\QPB{DP$_j$} [a hazardous area]]
+      [TP
+        [\QPA{DP$_i$} [every rover]]
+        [TP
+          [DP [\Tr{i}]]
+          [T$'$
+            [T [can]]
+            [VP
+              [V$'$
+                [V [guarantee]]
+                [CP
+                  [C$'$
+                    [C [that]]
+                    [TP
+                      [DP [it]]
+                      [T$'$
+                        [T [will]]
+                        [NegP
+                          [Neg$'$
+                            [Neg [never]]
+                            [VP
+                              [V$'$ [V [enter]] [DP [\Tr{j}]]]
+                            ]
+                          ]
+                        ]
+                      ]
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Inverse-scope interpretation, where the indefinite DP receives wider semantic scope than the universal DP.}
+\label{fig:qsa-inverse-scope}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=Hdc!5,
+  colframe=Ellc,
+  title={\bfseries VP-Ellipsis},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[CoordP
+  [TP$_1$
+    [DP [The captain]]
+    [T$'$
+      [T [can]]
+      [VP$_i$
+        [V$'$
+          [V [guarantee]]
+          [CP
+            [C$'$
+              [C [that]]
+              [TP
+                [PP [at the next step]]
+                [TP
+                  [DP [possession]]
+                  [T$'$ [T [will]] [VP [be recovered]]]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+  [Coord$'$
+    [Coord [and]]
+    [TP$_2$
+      [DP [the midfielder]]
+      [T$'$
+        [T [can]]
+        [VP [$e_i$]]
+        ]
+    ]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{VP-ellipsis under sentential coordination. The elided VP in the second conjunct is represented as an indexed empty category $e_i$, co-indexed with the antecedent VP$_i$ in the first conjunct. This notation indicates identity of interpretation without commitment to the theoretical mechanism (deletion vs. pro-form).}
+\label{fig:vp-ellipsis}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=BG3!70,
+  colframe=RDc,
+  title={\bfseries Right Dislocation},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[TP
+  [TP
+    [\RDA{DP$_i$} [they]]
+    [T$'$
+      [T [can]]
+      [VP
+        [AdvP [Adv [eventually]]]
+        [VP
+          [V$'$
+            [V [ensure]]
+            [CP
+              [C$'$
+                [C [$\varnothing$]]
+                [TP
+                  [DP [D$'$ [D [the]] [NP [N [game]]]]]
+                  [T$'$ 
+                    [T [$\varnothing$]] 
+                    [VP [V$'$ [V [ends]]]]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+  [\RDA{DP$_i$}\\{\scriptsize[right-adjoined]}
+    [D$'$ [D [the]] [NP [N [players]]]]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Right dislocation via right-adjunction.
+The outer TP has exactly two daughters: the inner TP (the base clause)
+and the right-adjoined $\mathrm{DP}_i$ \emph{the players} (in \textcolor{RDc}{\bfseries green}).
+The resumptive subject \emph{they} and the dislocated NP share index $i$.
+The adverb \emph{eventually} adjoins to VP, yielding a VP-over-VP binary structure.}
+\label{fig:right-dislocation}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=BG4!70,
+  colframe=LDc,
+  title={\bfseries Left Dislocation},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[TopP
+  [\LDA{DP$_i$}
+    [D$'$ [D [the]] [NP [N [vending\\machine]]]]
+  ]
+  [Top$'$
+    [Top [$\varnothing$]]
+    [TP
+      [DP [Mary]]
+      [T$'$
+        [T [can]]
+        [VP
+          [V$'$
+            [V [ensure]]
+            [CP
+              [C$'$
+                [C [$\varnothing$]]
+                [TP
+                  [\LDA{DP$_i$} [it]]
+                  [T$'$
+                    [T [will]]
+                    [VP [V$'$ [V [work]]]]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Left dislocation: \emph{the vending machine} ($\mathrm{DP}_i$,
+in \textcolor{LDc}{\bfseries amber}) occupies Spec,TopP in the left periphery.
+The resumptive pronoun \emph{it} ($\mathrm{DP}_i$) within the embedded clause
+is co-indexed with the topic. Top$^\circ$ is phonologically null ($\varnothing$).
+All nodes branch at most binary.}
+\label{fig:left-dislocation}
+\end{figure*}
+
+
+
+\begin{figure*}[t]
+\centering
+\begin{tcolorbox}[
+  enhanced,
+  arc=4pt,
+  boxrule=1pt,
+  colback=BG5!70,
+  colframe=RNRc,
+  title={\bfseries Right Node Raising},
+  fonttitle=\normalsize
+]
+\centering
+\begin{adjustbox}{max width=\linewidth}
+\begin{forest} xt
+[CoordP
+  [CoordP
+    [TP$_1$
+      [DP [Bob]]
+      [T$'$
+        [T [has]]
+        [VP [V$'$ [V [$t_v$]] [DP [\Tr{j}]]]]
+      ]
+    ]
+    [Coord$'$
+      [Coord [but]]
+      [TP$_2$
+        [DP [Albert]]
+        [T$'$
+          [T [has]]
+          [NegP
+            [Neg$'$
+              [Neg [not]]
+              [VP [V$'$ [V [$t_v$]] [DP [\Tr{j}]]]]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+  [\RNRA{DP$_j$}\\{\scriptsize[right-adjoined / shared]}
+    [D$'$ [D [a]] [NP [N [strategy\\to ensure $\ldots$]]]]
+  ]
+]
+\end{forest}
+\end{adjustbox}
+\end{tcolorbox}
+\caption{Right Node Raising via right-adjunction. The shared DP is represented as right-adjoined to CoordP to maintain binary branching while ensuring the ATL translation associates the objective with both conjuncts. This is a representational convention for the syntax-semantics interface, not a syntactic derivation. The traces $t_j$ in object position mark interpretive gaps; no movement operation is claimed.}
+\label{fig:rnr}
+\end{figure*}
+
+
+\clearpage
+
+\section{Model-Checker Integration Interface}
+
+To make the end-to-end workflow concrete, Figure~\ref{fig:vitamin} shows the natural-language-to-ATL$^\ast$ translation surfaced directly inside the \textsc{VITAMIN} model checker. A user enters a strategic requirement in natural language; the translation service returns a well-formed ATL/ATL$^\ast$ formula that is parsed by the same front-end used for verification, so that only syntactically valid specifications enter the model-checking phase.
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=\linewidth]{genVITAMIN.png}
+    \caption{Natural-language to ATL$^\star$ translation surfaced inside the \textsc{genVITAMIN} interface.}
+    \label{fig:vitamin}
+\end{figure}
+
+\section{Relevance to the Dataset}
+
+These examples illustrate why ambiguity-aware NL-to-ATL/ATL$^\ast$ translation cannot be reduced to direct keyword substitution. Quantifier scope ambiguity may require multiple admissible formal outputs, while VP-ellipsis requires reconstruction of omitted material before translation. Similar considerations apply to right dislocation, left dislocation, and Right Node Raising. In all cases, the resulting formula must preserve the intended scope relations among strategic modalities, temporal operators, Boolean connectives, and atomic propositions.
+
+\section{Translation-and-Evaluation Algorithm}
+\label{app:algorithm}
+
+Algorithm~\ref{alg:pipeline} details the end-to-end translation-and-evaluation loop that the \texttt{nl2atl} architecture (Figure~1 in the main text) realizes: it draws a fixed stratified split, fine-tunes each open-weight model on the training split (skipped for the API baselines), generates a prediction for every test requirement under greedy decoding, and scores each prediction with the two-tier exact-match-then-judge protocol before aggregating the per-prediction verdicts over seeds.
+
+\begin{algorithm}[t]
+\caption{Translation and Evaluation}
+\label{alg:pipeline}
+\begin{algorithmic}[1]
+\REQUIRE Dataset $\mathcal{D}$, model config $M$, training seeds $S$
+\ENSURE Raw predictions $\mathcal{P}$, per-prediction verdicts $\mathcal{V}$, and aggregated accuracy
+\STATE $(\mathcal{D}_{\mathrm{tr}}, \mathcal{D}_{\mathrm{te}}) \gets \textsc{StratifiedSplit}(\mathcal{D})$ \COMMENT{fixed canonical split; few-shot exemplars held out}
+\STATE Instantiate the inference backend for $M$ via the Model Abstraction Layer
+\STATE $\mathcal{P} \gets \emptyset$;\quad $\mathcal{V} \gets \emptyset$ \COMMENT{raw predictions; per-prediction verdicts}
+\FORALL{training seed $s \in S$}
+    \STATE $M_s \gets \textsc{FineTune}(M, \mathcal{D}_{\mathrm{tr}}, s)$ with LoRA \COMMENT{skipped for API baselines}
+    \FORALL{$r \in \mathcal{D}_{\mathrm{te}}$}
+        \STATE $P \gets \textsc{BuildPrompt}(r, M)$ \COMMENT{system prompt $+$ optional few-shot}
+        \STATE $\hat{\phi} \gets \textsc{Infer}(P, M_s)$ \COMMENT{greedy decoding; local or API backend}
+        \STATE $\mathcal{P} \gets \mathcal{P} \cup \{(r, \hat{\phi}, s, \text{metadata})\}$
+    \ENDFOR
+\ENDFOR
+\FORALL{$(r, \hat{\phi}, s) \in \mathcal{P}$ with gold set $\Phi_{\mathrm{ref}}$}
+    \IF{$\textsc{ExactMatch}(\hat{\phi}, \Phi_{\mathrm{ref}})$}
+        \STATE $\mathit{correct} \gets \TRUE$
+    \ELSE
+        \STATE $\mathit{correct} \gets \textsc{LLMJudge}(\hat{\phi}, \Phi_{\mathrm{ref}})$
+    \ENDIF
+    \STATE $\mathcal{V} \gets \mathcal{V} \cup \{(r, s, \mathit{correct})\}$ \COMMENT{store verdict for aggregation}
+\ENDFOR
+\STATE $\mathit{accuracy} \gets \textsc{Aggregate}(\mathcal{V}, S)$ \COMMENT{mean over seeds with dispersion}
+\RETURN $\mathcal{P}$, $\mathcal{V}$, and $\mathit{accuracy}$
+\end{algorithmic}
+\end{algorithm}
+
+\section{Experimental Configuration}
+\label{app:config}
+
+\subsection{Computing Infrastructure and Software}
+All local fine-tuning and inference were run on Linux compute nodes equipped with NVIDIA A100 GPUs, dispatched as independent jobs through a SLURM-managed cluster. The proprietary baselines and the LLM judges were accessed through the Azure OpenAI service. The framework is implemented in Python ($\geq 3.10$) and released under the MIT license. The experiments build, among others, on PyTorch~2.10, Hugging Face Transformers~5.0, PEFT~0.18 (low-rank adaptation), \texttt{bitsandbytes}~0.49 ($4$-bit quantization), TRL~0.27 (supervised fine-tuning), Accelerate~1.12, Datasets~4.5, and scikit-learn~1.7. The released repository pins an exact version for every dependency, and the per-node CPU and memory specifications are recorded in the accompanying environment manifest.
+
+\subsection{Model Versions and Endpoints}
+{\sloppy\setlength{\emergencystretch}{3em}
+Every open-weight base checkpoint is pinned to an exact Hugging Face commit revision (Table~\ref{tab:modelversions}), and the released configuration records these revisions so that fine-tuning and inference reproduce the same weights. The proprietary baselines and four of the six LLM judges are Azure OpenAI deployments, queried with API version \texttt{2024-08-01-preview} at temperature~$0$ during June~2026. The generator deployments resolved to the dated snapshots \texttt{gpt-4.1-2025-04-14} and \texttt{gpt-5.4-2026-03-05}, and these two models also serve as judges; the other two Azure judges resolved to \texttt{gpt-5.2-2025-12-11} (\textsc{GPT-5.2}) and the deployed model version \texttt{DeepSeek-V3.2}. The remaining two judges are open-weight and run locally at $4$-bit precision like the open-weight generators: \textsc{Gemma-2-27B} (\texttt{google/gemma-2-27b-it}, revision \texttt{aaf20e6b}) and \textsc{Llama-3.3-70B} (\texttt{meta-llama/Llama-3.3-70B-Instruct}, revision \texttt{6f6073b4}).\par}
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Model} & \textbf{Hugging Face checkpoint} & \textbf{Revision} \\
+\midrule
+qwen-3b       & Qwen/Qwen2.5-3B-Instruct           & \texttt{aa8e7253} \\
+phi3          & microsoft/Phi-3.5-mini-instruct    & \texttt{2fe19245} \\
+qwen-coder-7b & Qwen/Qwen2.5-Coder-7B-Instruct     & \texttt{c03e6d35} \\
+mistral-7b    & mistralai/Mistral-7B-Instruct-v0.3 & \texttt{c170c708} \\
+\bottomrule
+\end{tabular}
+\caption{Pinned open-weight base checkpoints and their exact Hugging Face commit revisions (short hashes). The proprietary generators (\textsc{gpt-4.1}, \textsc{gpt-5.4}) (which also serve as two of the six LLM judges) and the additional Azure judges (\textsc{DeepSeek-V3.2}, \textsc{GPT-5.2}) are Azure OpenAI deployments queried at API version \texttt{2024-08-01-preview}; these resolved to snapshots \texttt{gpt-4.1-2025-04-14}, \texttt{gpt-5.4-2026-03-05}, and \texttt{gpt-5.2-2025-12-11}, while \textsc{DeepSeek-V3.2} is identified by its model version. The other two judges, the open-weight \textsc{Gemma-2-27B} (\texttt{google/gemma-2-27b-it}) and \textsc{Llama-3.3-70B} (\texttt{meta-llama/Llama-3.3-70B-Instruct}), are run locally like the open-weight generators above.}
+\label{tab:modelversions}
+\end{table*}
+
+\subsection{Data Splits and Seeds}
+The gold dataset is partitioned into stratified training/validation/test sets in a $70/10/20$ ratio, stratified on formula structure (single- versus multi-reading items). The split seed is decoupled from the training seed and fixed at $42$ for the canonical split used for all headline numbers; each fine-tuned configuration is then repeated over three training seeds ($42$, $43$, $44$), and accuracy is reported as the seed mean with a $95\%$ confidence interval. These intervals quantify sensitivity to the training seed at the \emph{fixed} canonical test split and therefore do not capture test-set sampling variance; for a binomial proportion at the observed accuracies, that component is on the order of $\pm0.06$ over the $218$ test items, so the seed intervals understate total uncertainty. The orchestrator additionally supports stratified $k$-fold cross-validation with shared folds, which estimates split-induced variance directly; we report the canonical single-split numbers as the headline and leave a full $k$-fold sweep across all configurations (which multiplies fine-tuning cost by the number of folds) to future runs. The curated few-shot exemplars are held out of every split so that no prompting example can leak into evaluation. Decoding is deterministic (greedy, with sampling disabled) and emits up to $256$ new tokens for local models; Azure calls are issued at temperature~$0$. Only the training split is augmented: each training instance is duplicated once with a templated paraphrase of its natural-language input - a single synonym substitution drawn from a fixed list of temporal and strategic phrasings (for example, ``sooner or later''\,$\rightarrow$\,``eventually'' or ``can guarantee that''\,$\rightarrow$\,``can ensure that'') - while its gold formula is left unchanged. With an augmentation factor of two this doubles the training data (the original instance plus one paraphrase); the validation and test splits are used verbatim, so augmentation cannot introduce train/test leakage.
+
+\subsection{Training and LoRA Hyperparameters}
+All open-weight models are fine-tuned with low-rank adapters (LoRA) for $8$ epochs using the paged $8$-bit AdamW optimizer, a cosine schedule with a $0.1$ warmup ratio, peak learning rate $1\times10^{-4}$, weight decay $0.01$, gradient clipping at $0.3$, \texttt{bf16} precision, and gradient checkpointing; the maximum sequence length is $1536$ tokens. Table~\ref{tab:hparams} lists the per-model adapter and batching settings. LoRA adapters are applied to the attention projections and the MLP projections of each architecture, and every base checkpoint is pinned to an exact revision in the released configuration. The proprietary baselines (\textsc{gpt-4.1}, \textsc{gpt-5.4}) are API-only and are not fine-tuned: their weights are closed, and the modest in-domain data available is insufficient to fine-tune models at their scale reliably, so they are evaluated zero- and few-shot.
+
+\begin{table*}[t]
+\centering
+\small
+\begin{tabular}{@{}lccccc@{}}
+\toprule
+\textbf{Model} & \textbf{4-bit} & \textbf{LoRA }$r$ & \textbf{LoRA }$\alpha$ & \textbf{Dropout} & \textbf{Batch}$\,\times\,$\textbf{Acc.} \\
+\midrule
+mistral-7b     & yes & 32 & 64  & 0.05 & $2\times16$ \\
+qwen-3b        & no  & 64 & 128 & 0.05 & $8\times4$  \\
+phi3           & no  & 32 & 64  & 0.05 & $6\times6$  \\
+qwen-coder-7b  & yes & 64 & 128 & 0.05 & $4\times8$  \\
+\bottomrule
+\end{tabular}
+\caption{Per-model fine-tuning configuration. All models share the training schedule described in the text and a maximum sequence length of $1536$ tokens. ``Batch\,$\times$\,Acc.'' denotes the per-device batch size times the gradient-accumulation steps.}
+\label{tab:hparams}
+\end{table*}
+
+\section{Additional Quantitative Results}
+\label{app:results}
+
+This section reports the robustness check and fine-grained breakdowns referenced from the experiments in the main paper: the conservative six-judge accuracy (Table~\ref{tab:accuracy_sixjudge}), the decomposition of judged accuracy into its exact-match floor and judge-recovered fraction (Figure~\ref{fig:decomposition}), accuracy split by ambiguity type (Table~\ref{tab:qsa}), and the accuracy--latency trade-off (Figure~\ref{fig:accuracy_cost_tradeoff}).
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+& & \multicolumn{2}{c}{\textbf{Baseline}} & \multicolumn{2}{c}{\textbf{Fine-tuned}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+\textbf{Model} & \textbf{Size} & ZS & FS & ZS & FS \\
+\midrule
+\multicolumn{6}{@{}l}{\texttt{Proprietary (Azure API)}}\\
+gpt-4.1        & API  & 0.438 & 0.623 & --    & --    \\
+gpt-5.4        & API  & \textbf{0.445} & \textbf{0.681} & --    & --    \\
+\midrule
+\multicolumn{6}{@{}l}{\texttt{Open-weight (local)}}\\
+mistral-7b     & 7B   & 0.115 & 0.223 & 0.629\,{\scriptsize$\pm$.04} & 0.665\,{\scriptsize$\pm$.05} \\
+qwen-3b        & 3B   & 0.070 & 0.265 & 0.667\,{\scriptsize$\pm$.04} & 0.692\,{\scriptsize$\pm$.02} \\
+phi3           & 3.8B & 0.147 & 0.293 & 0.707\,{\scriptsize$\pm$.02} & 0.728\,{\scriptsize$\pm$.02} \\
+qwen-coder-7b  & 7B   & 0.184 & 0.356 & \textbf{0.716}\,{\scriptsize$\pm$.02} & \textbf{0.731}\,{\scriptsize$\pm$.02} \\
+\bottomrule
+\end{tabular}
+\caption{\textbf{Robustness check (six-judge mean).} Semantic accuracy averaged over all \emph{six} LLM judges and over seeds, a complement to the human-aligned primary results in the main paper (Table~1). Folding the stricter judges into the mean (down to GPT-5.2 at Cohen's $\kappa=0.16$ against humans) lowers every score and slightly reorders the top: the fine-tuned \textsc{qwen-coder-7b} ($0.731$) and \textsc{phi3} ($0.728$) edge above the strongest few-shot proprietary baseline (\textsc{gpt-5.4}, $0.681$) by a small margin that is significant on shared items (\textsc{qwen-coder-7b} $\Delta=0.052$, paired bootstrap $95\%$ CI $[0.004,0.102]$, randomization $p=0.03$). Under the single most human-aligned judge of Table~1 (which is also the most lenient) this margin vanishes to a tie ($\Delta=-0.009$, $p=0.71$); it reflects the strict judges' documented over-rejection of the proprietary baselines' faithful input-grounded paraphrases, not a true quality gap, so the honest reading is parity. Fine-tuned cells show the $95\%$ confidence interval over three training seeds; the local baselines are single greedy runs (deterministic, hence exactly reproducible), whereas the proprietary API baselines, though queried at temperature~$0$, are not bit-for-bit deterministic, so their single-run point estimates carry a run-to-run variance that we do not quantify. ZS/FS denote zero-/few-shot prompting; best per column in bold.}
+\label{tab:accuracy_sixjudge}
+\end{table}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{decomposition.png}
+    \caption{\textbf{Accuracy decomposition (Llama-3.3-70B judge).} Semantic accuracy under the headline judge split into the deterministic exact-match floor (blue) and the additional fraction recovered by the LLM judge (orange), for each headline system (proprietary few-shot baselines; open-weight fine-tuned few-shot). The judge-recovered share (annotated) is largest for the proprietary baselines (up to $46\%$ for \textsc{gpt-4.1} few-shot) and smaller for the fine-tuned open-weight systems ($23$--$29\%$), whose outputs more often match the reference surface form. Exact match alone would substantially understate the quality of every system.}
+    \label{fig:decomposition}
+\end{figure}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{System} & \textbf{Single-reading} & \textbf{QSA} \\
+ & ($n{=}187$) & ($n{=}31$) \\
+\midrule
+\textsc{gpt-4.1} (fs)          & 0.88 & 0.58 \\
+\textsc{gpt-5.4} (fs)          & 0.88 & 0.68 \\
+\midrule
+\textsc{mistral-7b} (ft+fs)    & 0.85 & 0.27 \\
+\textsc{qwen-3b} (ft+fs)       & 0.88 & 0.33 \\
+\textsc{phi3} (ft+fs)          & 0.87 & 0.49 \\
+\textsc{qwen-coder-7b} (ft+fs) & 0.88 & 0.63 \\
+\bottomrule
+\end{tabular}
+\caption{Accuracy on the $187$ single-reading versus the $31$ multi-reading (quantifier-scope ambiguity, QSA) test items, under the headline Llama-3.3-70B judge, for the headline systems (proprietary few-shot baselines; fine-tuned few-shot open-weight models; ft+fs\,=\,fine-tuned\,+\,few-shot). Multi-reading items are the rare, hardest cases that require emitting both the distributive and the collective reading. Single-reading accuracy is uniformly high ($0.85$--$0.88$), but every system drops sharply on the QSA slice, where no model class dominates: the strongest few-shot proprietary baseline (\textsc{gpt-5.4}, $0.68$) and the best fine-tuned open-weight model (\textsc{qwen-coder-7b}, $0.63$) handle it comparably, while the smaller fine-tuned models lag ($0.27$--$0.33$). The QSA slice has only $31$ items (a binomial $95\%$ confidence interval is $\approx\pm0.17$), so it supports this qualitative contrast but not a fine ranking. Under the strictest judges the proprietary baselines instead score near zero on this slice; that collapse is an artifact of those judges rejecting their input-grounded predicate paraphrases (our judge-reliability analysis in the main paper), not a failure to emit both readings. This breakdown reuses the existing judged verdicts; no additional labeling was performed.}
+\label{tab:qsa}
+\end{table}
+
+\begin{figure}[t]
+    \centering
+    \includegraphics[width=1\linewidth]{accuracyvslatency.png}
+    \caption{Semantic accuracy (under the headline Llama-3.3-70B judge) versus mean inference latency. Open-weight models are circles, proprietary API baselines diamonds; the dashed line is the Pareto frontier, which under the human-aligned judge is \emph{shared}: the few-shot proprietary baselines (\textsc{gpt-5.4}, \textsc{gpt-4.1}) occupy the high-accuracy end and the fast fine-tuned open-weight systems (\textsc{phi3}, \textsc{qwen-3b}) the low-latency end, while the most accurate open-weight system (\textsc{qwen-coder-7b}) sits just off the frontier, dominated by \textsc{gpt-5.4}. API latency is network-timed and only indicative across the API/local boundary; accuracy is comparable throughout.}
+    \label{fig:accuracy_cost_tradeoff}
+\end{figure}
+
+\section{Prompting and Few-Shot Exemplars}
+
+All systems share a fixed prompting setup, identical across models and prompting conditions; the verbatim templates ship with the released code. We summarize their content here.
+
+\subsection{Translation Prompt}
+The system prompt casts the model as an ATL/ATL$^\ast$ expert and requires it to return \emph{only} formula text. It fixes:
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item \textbf{Syntax.} The coalition modality \texttt{<<A>>} or \texttt{<<A,B>>}; the temporal operators \texttt{X}, \texttt{F}, \texttt{G} (unary) and \texttt{U} (binary, written \texttt{p U q}); the Boolean operators \texttt{!}, \texttt{\&\&}, \texttt{||}, \texttt{->}; \textsc{PascalCase} agent and coalition names; and \texttt{snake\_case} atomic propositions.
+  \item \textbf{Scope.} The strategic operator scopes over the whole formula that follows it and is kept separate from the temporal operator it governs, e.g.\ \texttt{<<Machine>>G(paid -> ticket\_printed)}, not \texttt{<<Machine>>(G paid -> ticket\_printed)}. Inability is expressed by negating the strategic operator (\texttt{!<<Y>>F goal}), not the objective.
+  \item \textbf{Targeted ambiguities.} VP ellipsis: repeat the recovered formula for the second agent. Right Node Raising: attach the shared right-peripheral objective to both conjuncts. Quantifier-scope ambiguity: output \emph{all} admissible readings, one per line, never fusing two readings into one formula; a distributive reading ascribes the ability to each agent separately and a collective reading to the coalition jointly.
+  \item \textbf{Output discipline.} Emit only the formula(s), one per line, with no explanations, Markdown, labels, or trailing prose.
+\end{itemize}
+
+\subsection{Few-Shot Exemplars}
+In the few-shot condition a fixed pool of seven curated exemplars is prepended to the prompt; these inputs are held out of every train/validation/test split, so they never leak into evaluation. Each exemplar targets a distinct phenomenon:
+{\small\sloppy
+\begin{itemize}[leftmargin=1.2em,itemsep=3pt]
+  \item \textbf{Collective ability (right dislocation).} ``They can guarantee that at the next step the alarm will be sent, the surveillance system and the operator.''\\ $\Rightarrow$ \texttt{<<System,Operator>>X alarm\_sent}
+  \item \textbf{Left dislocation.} ``The gate, the machine can guarantee that it will open at the next step.''\\ $\Rightarrow$ \texttt{<<Machine>>X gate\_open}
+  \item \textbf{VP ellipsis.} ``Robot number 1 has a strategy to ensure that eventually position 3 holds, and robot number 2 does too.''\\ $\Rightarrow$ \texttt{<<Robot1>>F pos3 \&\& <<Robot2>>F pos3}
+  \item \textbf{Quantifier-scope ambiguity (two required readings).} ``Every robot can guarantee that it will eventually reach a safe spot.''\\ $\Rightarrow$ \texttt{<<Robot1>>F at\_safe\_spot\_1 \&\& <<Robot2>>F at\_safe\_spot\_2 \&\& <<Robot3>>F at\_safe\_spot\_3}\\ and \texttt{<<Robot1,Robot2,Robot3>>F at\_safe\_spot}
+  \item \textbf{Ability asymmetry.} ``The diplomatic cable system can, but the encryption gateway cannot, guarantee that classified cables will never be routed publicly.''\\ $\Rightarrow$ \texttt{<<DiplomaticCableSystem>>G !classified\_cables\_routed\_publicly \&\& !<<EncryptionGateway>>G !classified\_cables\_routed\_publicly}
+  \item \textbf{Simple eventuality.} ``The user can guarantee that sooner or later the ticket will be printed.''\\ $\Rightarrow$ \texttt{<<User>>F ticket\_printed}
+  \item \textbf{Nested, literary input.} ``If we do not wish to fight, we can prevent the enemy from engaging us\ldots'' (adapted from Sun Tzu).\\ $\Rightarrow$ \texttt{<<We>>(!wish\_to\_fight -> F (throw\_something\_odd\_in\_his\_way \&\& G !enemy\_engages\_us))}
+\end{itemize}
+}
+With the count left unset, every exemplar is shown in a fixed order; a smaller count selects a reproducible random subset and is used only for ablations.
+
+\subsection{LLM-Judge Prompt}
+All six judges (DeepSeek-V3.2, GPT-4.1, GPT-5.2, GPT-5.4, Gemma-2-27B, and Llama-3.3-70B) use a single fixed prompt (version~v1.4) that casts the model as an adjudicator of ATL/ATL$^\ast$ \emph{faithfulness} beyond exact string matching. It restates the syntax conventions above and applies an explicit rubric.
+\begin{itemize}[leftmargin=1.2em,itemsep=2pt]
+  \item \textbf{Accept:} harmless whitespace and redundant parentheses; commutative reordering of \texttt{\&\&} or \texttt{||} when the same operands stay under the same strategic, temporal, and Boolean scope; and renamed predicates or agents only when they are clear aliases grounded in the input.
+  \item \textbf{Reject:} algebraic rewrites (e.g., \texttt{p -> q} as \texttt{!p || q}), contraposition, De Morgan, double-negation, idempotence, distributivity, or biconditional rewrites; any change in a temporal operator or its replacement by a temporal-logic equivalent (e.g.\ \texttt{F p} as \texttt{true U p}, \texttt{G p} as \texttt{!F !p}); any change of coalition, including distributive versus collective ability; any change of temporal or strategic scope, implication direction, or polarity; turning a conjunction into a disjunction or vice versa; and any omitted or extraneous condition. For ambiguous items it rejects predictions that return only one of the jointly required readings or that collapse them into a single conjunction.
+  \item \textbf{Output and robustness.} The judge returns a single machine-parseable JSON object, \texttt{\{"correct": "yes" | "no", "reasoning": "..."\}}, and is calibrated with eight worked accept/reject examples (covering parenthesization, commutativity, operator rewrites, QSA multiplicity, and temporal-operator and coalition errors). To resist prompt injection, it is instructed to treat the input, gold output(s), and prediction as data and to ignore any instructions embedded inside them.
+\end{itemize}
+Verdicts are cached per judge identity, so a judge is never queried twice on an identical (input, gold, prediction) triple, while the judges remain independent.
+
+\section{Human-Annotation Disagreements and Their Adjudication}
+\label{appx:disagreements}
+
+Of the $599$ audited predictions, the two expert annotators initially diverged on three. In all three the stricter annotator judged the prediction incorrect while the second judged it correct. The annotators then deliberated and reached agreement on two of the three (D2 and D3 below), folding those labels back into the reference set; the third (D1) resisted consensus and is retained here as a genuine unresolved disagreement rather than forced to a label. Both reconciled cases were settled in favour of the \emph{permissive} reading (the annotators agreed the prediction \emph{was} faithful) even though the automated judges had almost all called these two predictions incorrect (unanimously across the six judges for D2, and four-of-six for D3, where \textsc{gpt-4.1} and the human-aligned \textsc{Llama-3.3-70B} had sided with the permissive annotator). On these borderline items the human audit therefore overturns an over-strict tendency the judges share, rather than merely confirming them; even the most human-aligned judge, \textsc{Llama-3.3-70B}, shared this over-strict reading on D2, though it had already sided with the experts on D3. The case left open, D1, is by contrast the item on which all six judges agree the prediction is incorrect, yet the annotators could not settle whether an unresolved pronominal coalition and a predicate that absorbs the agent name still count as a faithful rendering. Each entry below gives the natural-language input, the gold formula, the model prediction, the verdicts (with any annotator note), and the adjudication outcome. With the two reconciled labels added and the single open case excluded, the human-as-reference comparison rests on $598$ consensus labels.
+
+{\small\sloppy\setlength{\emergencystretch}{3em}
+\begin{itemize}[leftmargin=1.3em,itemsep=7pt]
+  \item \textbf{D1. Pronominal coalition vs.\ bundled predicate} (\textsc{gpt-5.4}, zero-shot baseline; item \texttt{ex677}).\\
+  \emph{Input:} ``It can guarantee that invalid badges will never open the staff entrance, the badge reader.''\\
+\emph{Gold:}\\
+{\texttt{<<BadgeReader>>G \\!invalid\_badges\_open\_staff\_entrance}}\\
+\emph{Prediction:}\\
+{\texttt{<<It>>G (!invalid\_badges\_opens)}}\\
+  \emph{Annotator~1} (incorrect): ``prediction uses \texttt{<<It>>} instead of \texttt{<<BadgeReader>>} and bundles \texttt{badge\_reader} into the predicate.''\\
+  \emph{Annotator~2}: correct (no note).\quad\emph{All six judges}: incorrect.\\
+  The dispute is whether an unresolved pronoun coalition and a proposition that swallows the agent name still count as a faithful rendering. \emph{Adjudication}: \textbf{unresolved} - the annotators could not converge after discussion, so this item is kept as a genuine disagreement and excluded from the human-as-reference set.
+  \item \textbf{D2. Reversed \emph{until} operands} (\textsc{qwen-coder-7b}, fine-tuned, zero-shot; item \texttt{ex992}).\\
+  \emph{Input:} ``The help desk can guarantee that \ldots the request will remain pending until the missing detail is supplied, the account will remain limited until identity is checked, and the case will remain open until the resolution is confirmed.''\\
+  The prediction shares the gold's prefix \texttt{<<HelpDesk>>(X user\_notified \&\& G ticket\_traceable \&\& \ldots)} and differs only in the three \texttt{U} (until) clauses:\\
+  \emph{Gold:} \texttt{(request\_pending U missing\_detail\_supplied) \&\& (account\_limited U identity\_checked) \&\& (case\_open U resolution\_confirmed)}\\
+  \emph{Prediction:} \texttt{(missing\_detail\_supplied U request\_resolved) \&\& (identity\_checked U account\_limited) \&\& (resolution\_confirmed U case\_open)}\\
+  \emph{Annotator~1} (incorrect): ``scoping error: \texttt{U} operands are wrong.''\quad\emph{Annotator~2}: correct (no note).\quad\emph{All six judges}: incorrect.\\
+  Every \texttt{U} has its two operands transposed (and one predicate altered), which annotator~1 read as inverting the temporal commitment; the dispute is how strictly operand order must be enforced. \emph{Adjudication}: after discussion the annotators \textbf{agreed the prediction is faithful} (\emph{correct}), overturning the stricter initial label and the six judges' unanimous incorrect verdict.
+  \item \textbf{D3. Predicate abbreviation and line-separated conjuncts} (\textsc{mistral-7b}, few-shot baseline; item \texttt{ex462}).\\
+  \emph{Input:} ``The pharmacy interface can guarantee that the dispense request remains deferred until the interaction screen is cleared, and the medication safety service can too.''\\
+  \emph{Gold:} \texttt{<<PharmacyInterface>> \\(dispense\_request\_deferred U \\interaction\_screen\_cleared)}\\
+  \hphantom{\emph{Gold:} }\texttt{\&\& <<MedicationSafetyService>> \\(dispense\_request\_deferred U\\ interaction\_screen\_cleared)}\\
+  \emph{Prediction:} the same two coalitions with \texttt{dispense\_request\_deferred} abbreviated to \texttt{request\_deferred} and emitted on two separate lines rather than joined by \texttt{\&\&}.\\
+  \emph{Annotator~1}: incorrect (no note).\quad\emph{Annotator~2}: correct (no note).\quad\emph{Judges}: incorrect, except \textsc{gpt-4.1} and the human-aligned \textsc{Llama-3.3-70B} (correct).\\
+  The dispute is whether an abbreviated proposition and an implicit (line-break) conjunction preserve the intended meaning. \emph{Adjudication}: after discussion the annotators \textbf{agreed the prediction is faithful} (\emph{correct}); the abbreviation and line-break conjunction were accepted as meaning-preserving, a call that, among the judges, only \textsc{gpt-4.1} and the human-aligned \textsc{Llama-3.3-70B} had made.
+\end{itemize}
+}
+
+\noindent These cases show that the ``correctness'' of a strategic--temporal translation is not always single-valued at the margins: predicate aliasing, implicit coreference, operand order, and the syntactic marking of conjunction all sit on a boundary where expert judgment legitimately differs. Deliberation resolved two of the three, but in both the experts ultimately accepted a prediction that the LLM judges had rejected, and one case remains genuinely open. This is precisely what motivates our two-tier protocol (reporting the deterministic exact-match floor separately, using six independent judges, and validating them against a human audit) rather than treating any single verdict as ground truth.
+
+\begin{thebibliography}{3}
+\bibitem[Fodor and Sag(1982)]{fodor1982referential}
+Fodor, J. D.; and Sag, I. A. 1982. Referential and Quantificational Indefinites. \emph{Linguistics and Philosophy}, 5(3): 355--398.
+
+\bibitem[Reinhart(1997)]{reinhart1997quantifier}
+Reinhart, T. 1997. Quantifier Scope: How Labor Is Divided between QR and Choice Functions. \emph{Linguistics and Philosophy}, 20(4): 335--397.
+
+\bibitem[Rizzi(1997)]{rizzi1997fine}
+Rizzi, L. 1997. The Fine Structure of the Left Periphery. In Haegeman, L., ed., \emph{Elements of Grammar}, 281--337. Dordrecht: Kluwer.
+\end{thebibliography}
+\end{document}
+
+
+
+
+
+
+

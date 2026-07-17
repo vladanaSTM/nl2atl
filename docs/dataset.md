@@ -38,6 +38,19 @@ Rows may have multiple correct formulas. Each entry in `outputs` is an object wi
 
 This row has quantifier-scope ambiguity: it admits a distributive reading (each agent acts alone) and a collective reading (the agents act together). Both formulas are required, not interchangeable.
 
+
+## Canonical Release and Validation
+
+The canonical machine-readable gold dataset is `data/dataset_gold.json`. The informal reviewer-discussion PDF is stored as `docs/dataset_NL2ATL_review.pdf` and should be treated as an audit trail, not as the source consumed by training or evaluation code. The two artifacts are aligned at the ID level: both contain 1100 unique examples, and the former problematic `ex334` VP-ellipsis item is present in both with the filled gold formula.
+
+The repository includes a dependency-free validator:
+
+```bash
+python validate_dataset.py data/dataset_gold.json --review-pdf docs/dataset_NL2ATL_review.pdf --write-report dataset_validation_report.json
+```
+
+The validator checks the JSON schema, unique and sequential IDs, non-empty `outputs[].formula`, duplicate normalized inputs, a lightweight ATL/ATL* syntax grammar, dataset SHA-256, optional PDF ID alignment via `pdftotext`, and a regression check for `ex334`. The current canonical JSON has SHA-256 `04bf2e99aa5c4d526a22db6d3c93b0bf4a982357a75f935f4401bcdd9929e573`.
+
 ## Loading
 
 ```python
