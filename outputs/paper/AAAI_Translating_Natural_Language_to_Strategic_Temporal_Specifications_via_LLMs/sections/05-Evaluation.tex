@@ -1,0 +1,97 @@
+\section{Evaluation Protocol}
+\label{sec:evaluation}
+We use a layered protocol: normalized exact match, LLM-based semantic evaluation for nonmatches, human validation of the judges, and latency analysis. Fine-tuned configurations are repeated over training seeds on a fixed canonical split; accuracy is reported as a seed mean with a $95\%$ confidence interval.
+
+\subsection{Exact Match and Meaning}
+Exact match normalizes whitespace, letter case, logical operators, and coalition spelling while retaining atomic propositions. For requirements with jointly required readings, a prediction must reproduce the complete gold set. This deterministic check is the syntactic-precision baseline.
+
+\paragraph{LLM-as-a-judge.} A prediction that is \emph{not} an exact match is forwarded to an LLM-as-a-judge, which decides strategic and temporal equivalence to the reference and returns a structured verdict (a \texttt{correct} label and a free-text rationale). To avoid depending on any single model, we benchmark \emph{six} independent LLM judges (DeepSeek-V3.2, GPT-4.1, GPT-5.2, GPT-5.4, and the open-weight Gemma-2-27B and Llama-3.3-70B) under one fixed prompt (version~v1.4), whose adjudication rubric and calibration examples are reproduced in the technical appendix, and validate each against the expert audit below. Headline accuracy is reported under the single most human-aligned judge (the open-weight Llama-3.3-70B), which is moreover \emph{not} among the evaluated systems and so never grades its own outputs. Judge decisions are cached per judge identity, so no judge is queried twice on an identical triple, and the judges remain independent. Reported accuracy is therefore the exact-match rate plus the judge-recovered fraction, a decomposition we state explicitly.
+
+\paragraph{Why an LLM judge rather than formal equivalence.} Formal equivalence is not directly applicable because formulas use input-grounded propositions and coalitions without a shared game structure. The judge therefore assesses strategic-temporal intent, including coalition attribution, polarity, temporal operators, scope, and all required readings; we validate its estimates against human judgment.
+
+\subsection{Reliability of the Evaluation}
+To quantify how trustworthy the automatic verdicts are, we compute pairwise Cohen's $\kappa$ and Fleiss' $\kappa$ across judges. Agreement is measured \emph{only} over items that actually reach the judges: deterministic verdicts, exact matches, and empty or unmatched predictions scored as incorrect without an LLM call, are excluded, since including them would trivially inflate agreement.
+
+\paragraph{Human validation.} A stratified expert audit, excluding generation-time safety-filtered predictions without judge outputs, independently labels $599$ predictions ($99.5\%$ agreement; Cohen's $\kappa=0.99$). Discussion resolved two of three initial disagreements; the remaining case is excluded, leaving $598$ consensus labels. Both reconciled cases accepted predictions that the judges had rejected, confirming an over-strict tendency. We therefore report headline accuracy under the most human-aligned judge and use the six-judge mean as a conservative cross-check. Detailed adjudications in the appendix.
+
+%APPENDIX
+\subsection{Efficiency, Significance and Transparency}
+We report mean per-example latency alongside accuracy and identify the Pareto frontier. Cloud latency is measured end-to-end and is therefore only indicative across the API/local boundary. We compare leading systems on shared items with paired bootstrap confidence intervals and randomization tests. Safety-filtered inputs count as incorrect; excluding them leaves the ranking unchanged.
+
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}llcccc@{}}
+\toprule
+& & \multicolumn{2}{c}{\textbf{Baseline}} & \multicolumn{2}{c}{\textbf{Fine-tuned}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+\textbf{Model} & \textbf{Size} & ZS & FS & ZS & FS \\
+\midrule
+\multicolumn{6}{@{}l}{\textit{Proprietary (Azure API)}}\\
+gpt-4.1        & API  & 0.611 & 0.843 & --    & --    \\
+gpt-5.4        & API  & \textbf{0.694} & \textbf{0.856} & --    & --    \\
+\midrule
+\multicolumn{6}{@{}l}{\textit{Open-weight (local)}}\\
+mistral-7b     & 7B   & 0.239 & 0.349 & 0.762 & 0.766 \\
+qwen-3b        & 3B   & 0.151 & 0.367 & 0.778 & 0.801 \\
+phi3           & 3.8B & 0.275 & 0.417 & 0.800 & 0.818 \\
+qwen-coder-7b  & 7B   & 0.298 & 0.463 & \textbf{0.839} & \textbf{0.844} \\
+\bottomrule
+\end{tabular}
+\caption{Semantic accuracy.} %under the most human-aligned judge.}
+\label{tab:accuracy}
+\end{table}
+
+We evaluate six models in $20$ model-condition systems; only the four open-weight models are fine-tuned. The proprietary Azure models are evaluated zero- and few-shot because their closed weights preclude comparable in-domain adaptation. All systems use the same prompts, seven held-out few-shot exemplars, greedy decoding, and output parser, without chain-of-thought, self-consistency, or repair scaffolding. Of $1100$ instances, the remaining $1093$ are stratified into $765$ training, $110$ validation, and $218$ test examples. Fine-tuned configurations use three training seeds; every prediction receives six LLM verdicts, and a stratified subsample receives expert review. Full model and training configurations are in the appendix.
+
+\paragraph{Fine-tuning versus few-shot baselines.}
+Table~\ref{tab:accuracy} reports accuracy under the most human-aligned judge, \textsc{Llama-3.3-70B} ($\kappa=0.59$). The top few-shot proprietary baseline, \textsc{gpt-5.4} ($0.856$), and the best fine-tuned open-weight system, \textsc{qwen-coder-7b} ($0.844$), differ by $0.012$, within the sampling uncertainty of the $218$-item test set. Fine-tuning is the dominant factor for open-weight models: for example, it raises \textsc{phi3} few-shot accuracy from $0.417$ to $0.818$. Thus, modest in-domain supervision enables small $3$--$7$B models to match much larger few-shot proprietary systems. The appendix reports training details and the six-judge robustness results; seed intervals quantify only training-seed variation at the fixed split, not the approximately $\pm0.06$ test-set sampling uncertainty.
+
+\paragraph{Exact match versus meaning.}
+We decompose accuracy under the most human-aligned judge into a deterministic exact-match floor and the fraction the LLM judge recovers (the appendix gives the full breakdown for the headline systems under the same judge). The gap between syntactic and meaning-level scoring is large and uneven, and widest for the proprietary baselines. For \textsc{gpt-5.4} zero-shot, exact match yields only $0.213$ of the $0.694$ accuracy: roughly $69\%$ of correct answers are syntactically distinct from the reference yet strategically equivalent; for \textsc{gpt-4.1} few-shot the judge-recovered share is $46\%$. It is smaller for the strongest fine-tuned systems ($23$ - $29\%$), whose outputs more often match the reference surface form, but never negligible. Purely syntactic metrics therefore systematically understate translation quality, especially on underspecified requirements.
+
+\paragraph{Statistical significance.}
+A paired analysis on shared items confirms a tight top cluster and shows that the comparison with the proprietary baselines is itself judge-dependent, in the direction our judge-reliability analysis predicts. The fine-tuned \textsc{phi3} and \textsc{qwen-coder-7b} systems (few- and zero-shot) are mutually indistinguishable (pairwise differences $\le 0.024$ under the six-judge mean, within the $n{=}218$ sampling noise) and far above the untuned open-weight baselines. Against \textsc{gpt-5.4} few-shot the paired difference changes sign with the judge: under the most human-aligned judge of Table~\ref{tab:accuracy} the two are statistically level (\textsc{qwen-coder-7b} few-shot $\Delta=-0.009$, randomization $p=0.71$), whereas under the six-judge mean the open-weight systems edge ahead by a small margin (\textsc{qwen-coder-7b} $\Delta=0.052$, paired bootstrap $95\%$ CI $[0.004,0.102]$, $p=0.03$; \textsc{phi3} $\Delta=0.048$, $p=0.03$). That swing is precisely the artifact documented above (the stricter judges penalise the proprietary baselines' faithful input-grounded paraphrases more heavily, while the most human-aligned judge credits them), so we read the generation comparison as \emph{parity}: the fine-tuned open-weight systems are statistically level with the few-shot proprietary baselines under the most reliable judge, and the small lead that appears under stricter scoring reflects judge over-strictness rather than a true quality gap.
+
+\paragraph{Judge reliability.}
+{\sloppy\setlength{\emergencystretch}{3em}
+Table~\ref{tab:judge_reliability} reports each judge's agreement with the consensus expert labels on the $598$ audited predictions that received a human consensus label; one additional audited prediction without expert consensus is excluded and discussed in the technical appendix. ``Agr.'' denotes exact label-match rate, and $\kappa$ interpretations follow Landis--Koch. The table carries our most striking result: \emph{judge quality runs opposite to generator strength}. The six LLM judges agree only moderately with one another, with mean pairwise Cohen's $\kappa=0.49$ and a range of $0.19$--$0.62$ ($65$--$91\%$ raw agreement); adding the human consensus as a seventh rater gives Fleiss' $\kappa=0.42$. The strongest, most recent proprietary models are the \emph{worst} judges. More specifically, \textsc{gpt-5.4}, the top few-shot \emph{generator} in Table~\ref{tab:accuracy}, reaches only $\kappa=0.24$ against humans, and \textsc{gpt-5.2} performs worse still ($\kappa=0.16$). The best judge by a wide margin is the open-weight \textsc{Llama-3.3-70B} ($\kappa=0.59$, $81.8\%$ agreement), ahead of \textsc{DeepSeek-V3.2} ($0.46$) and \textsc{gpt-4.1} ($0.44$). This motivates using \textsc{Llama-3.3-70B} as the headline judge. The main cause is systematic over-strictness on predicate \emph{aliasing}. Across $1167$ items, both strict proprietary judges, \textsc{gpt-5.4} and \textsc{gpt-5.2}, rejected a prediction that \textsc{Llama-3.3-70B} accepted; on the audited subset, human experts sided with \textsc{Llama} over them $160$ to $26$. Conversely, there is \emph{not a single} item where \textsc{Llama} rejected a prediction that both strict proprietary judges accepted. Almost all such cases merely rename an atomic proposition to an input-grounded paraphrase, e.g., \texttt{discharged}\,$\to$\,\texttt{patient\_discharged} or \texttt{error}\,$\to$\,\texttt{error\_state}, while preserving every coalition, temporal operator, and connective. The rubric instructs judges to accept such cases, but \textsc{gpt-5.4}/\textsc{gpt-5.2} reject them as ``not a clearly grounded alias''. This strictness is not self-serving: \textsc{gpt-5.4} as a judge marks down proprietary generations too, scoring its own few-shot output at $0.634$ where \textsc{Llama} gives $0.856$. Thus, the strongest proprietary models penalize even their own family, while the open-weight judge recovers their true accuracy. We therefore report headline accuracy under \textsc{Llama-3.3-70B}, the most human-aligned judge and itself external to the evaluated systems. The choice is robust: under the conservative six-judge mean, the fine-tuned open-weight systems even \emph{lead} the proprietary baselines; when human labels override judges wherever an item was audited, the top cluster is unchanged. Only the \emph{size} of the open-weight margin moves with the judge, shrinking to a tie under the human-aligned \textsc{Llama}.
+\par}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Judge vs.\ human} & $n$ & \textbf{Agr.} & \textbf{Cohen's} $\kappa$ \\
+\midrule
+\textbf{Llama-3.3-70B} & $598$ & $\mathbf{81.8\%}$ & $\mathbf{0.59}$~(mod.) \\
+DeepSeek-V3.2 & $598$ & $73.7\%$ & $0.46$~(mod.) \\
+GPT-4.1       & $598$ & $72.7\%$ & $0.44$~(mod.) \\
+Gemma-2-27B   & $598$ & $59.4\%$ & $0.25$~(fair) \\
+GPT-5.4       & $598$ & $56.9\%$ & $0.24$~(fair) \\
+GPT-5.2       & $598$ & $50.7\%$ & $0.16$~(slight) \\
+\bottomrule
+\end{tabular}
+\caption{Judge reliability against the human audit.}
+\label{tab:judge_reliability}
+\end{table}
+
+\paragraph{Efficiency.}
+The accuracy-latency frontier is shared by proprietary baselines at the high-accuracy end and fast fine-tuned open-weight models at the low-latency end. The most accurate open-weight system sits just off this frontier, while the fastest local systems are faster than the API baselines in the observed end-to-end measurements. The complete trade-off plot and latency values are in the technical appendix; API latency includes network overhead.
+
+\paragraph{Error analysis by ambiguity type.}
+Untuned open-weight models primarily make syntactic errors, including path quantifiers, foreign first-order variables, and malformed coalitions. Fine-tuning largely removes these errors. Residual failures concern ambiguity resolution: models omit one required reading, fail to reconstruct shared material under ellipsis or Right Node Raising, or misattribute a coalition under dislocation. Multi-reading QSA remains the hardest slice for every system. The quantitative breakdown is in the appendix.
+
+\paragraph{Discussion and limitations.}
+The benchmark is expert-validated but curated rather than drawn from deployed industrial requirements, and it is English-only. Semantic accuracy remains an estimate: even the best-aligned judge is imperfect, although multiple judges and human validation mitigate this limitation. Reported intervals capture training-seed variation on one canonical split, not the approximately $\pm0.06$ test-set sampling uncertainty; shared-fold cross-validation is left to future work. The evaluation concerns strategic-temporal intent rather than model checking, and API/local latency comparisons remain indicative across the deployment boundary.
+
+
+
+
